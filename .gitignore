@@ -7,3 +7,10 @@ backend/.env
 
 # Node
 frontend/node_modules/
+
+# Generated app data and artifacts
+backend/data/logs/
+backend/data/exports/
+backend/data/runs/
+backend/data/*.sqlite3
+backend/data/*.db
