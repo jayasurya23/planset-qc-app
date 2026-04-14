@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find d:codeQAQCplanset-qc-app -type f -name package.json -o -name requirements.txt -o -name docker-compose.yml -o -name Dockerfile -o -name README* -o -name .env*)",
+      "Bash(find d:codeQAQCplanset-qc-app -maxdepth 3 -type d ! -path */node_modules/* ! -path */.venv/* ! -path */__pycache__/* ! -path */.claude/*)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python -c \"from app.gemini_client import get_client, analyze_page_image, analyze_multiple_images, analyze_text; print\\(''gemini_client: OK''\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app.gemini_analyzer import run_gemini_checks; print\\(''gemini_analyzer: OK''\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app.checklist import CHECK_RULES, CATEGORY_ORDER; print\\(f''checklist: {len\\(CHECK_RULES\\)} rules, {len\\(CATEGORY_ORDER\\)} categories''\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app.main import app; print\\(''main.py: OK''\\)\")",
+      "Bash(timeout 5 .venv/Scripts/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000)",
+      "Bash(curl -s http://127.0.0.1:8000/api/health)",
+      "Bash(npm run:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5173)",
+      "Bash(npx tsc:*)",
+      "Bash(.venv/Scripts/python -c \"from app.analyzer import analyze_pdf; print\\(''OK''\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app.analyzer import analyze_pdf; from app.gemini_analyzer import run_gemini_checks; print\\(''All OK''\\)\")",
+      "Bash(rm -rf d:/code/QAQC/planset-qc-app/backend/data/runs/*)",
+      "Bash(rm -rf d:/code/QAQC/planset-qc-app/backend/data/exports/*)",
+      "Bash(curl -s http://127.0.0.1:8000/api/runs)",
+      "Bash(.venv/Scripts/python -c \"from app.db import init_db; init_db\\(\\); print\\(''DB recreated''\\)\")",
+      "Bash(find d:codeQAQCplanset-qc-app -type f -name *QC* -o -name *CHECKLIST*)",
+      "Bash(find d:codeQAQC -type f \\\\\\(-name *spec* -o -name *requirements* -o -name *QC* \\\\\\))",
+      "Read(//d/code/QAQC/**)",
+      "Read(//d/code/**)"
+    ]
+  }
+}

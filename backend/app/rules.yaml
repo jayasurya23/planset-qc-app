@@ -1,0 +1,2246 @@
+# ============================================================================
+# Castillo Engineering – Planset QC Rule Registry
+# ============================================================================
+# Each rule has:
+#   key          – unique identifier (matches issue item_key)
+#   category     – display grouping
+#   title        – short human-readable name
+#   description  – longer explanation
+#   severity     – default severity: low | medium | high
+#   check_type   – how the rule is evaluated:
+#                    sheet_existence | keyword | regex | drawing_index |
+#                    title_block | gemini_vision | electrical_calc | manual
+#   nec_ref      – NEC article references (if applicable)
+#   handbook_ref – Checker's Handbook section reference
+#   confidence   – default confidence (0.0–1.0)
+#
+# For keyword checks:
+#   keywords       – list of keywords to search for
+#   min_matches    – minimum keyword matches for Pass
+#   search_scope   – where to search: cover | page_title | sld | dc | tld |
+#                     relay | electrical | grounding | site_plan | pole_lineup
+#
+# For sheet_existence checks:
+#   title_keywords – title patterns to match against sheet titles
+#
+# For electrical_calc checks:
+#   calc_function  – name of the function in electrical_calcs.py
+#   inputs         – list of required project_details fields
+# ============================================================================
+
+category_order:
+  - Drawing Index
+  - Title Block
+  - Cover Sheet
+  - System Information Table
+  - General Notes
+  - Site Plan
+  - Pole Line Up
+  - Engineered Equipment List
+  - AC Single Line Diagram
+  - DC Line Diagram
+  - Three Line Diagram
+  - Relay and Inverter Settings
+  - AUX SLD
+  - Communication Diagram
+  - Feeder Plan
+  - Communication Feeder Plan
+  - Equipment Area Feeder Plan
+  - Electrical Sheet
+  - Inverter Zone Map
+  - Elevation Details
+  - Trenching Details
+  - Overall Site Grounding Plan
+  - Grounding Diagram
+  - CAB or Cable Hanger Details
+  - PAD / Slab Details
+  - Pole Details
+  - Labels
+  - PVSyst Analysis Summary
+  - Cross-Sheet Consistency
+
+rules:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Drawing Index
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: drawing_index_page_exists
+    category: Drawing Index
+    title: Drawing index exists
+    description: Cover sheet should include a drawing index.
+    severity: high
+    check_type: drawing_index
+    confidence: 0.98
+
+  - key: drawing_index_sheet_match
+    category: Drawing Index
+    title: All indexed sheets are present
+    description: Every sheet listed in the drawing index should be present in the PDF.
+    severity: high
+    check_type: drawing_index
+    confidence: 0.97
+
+  - key: drawing_index_no_extras
+    category: Drawing Index
+    title: No extra sheets outside the drawing index
+    description: PDF should not include extra sheets that are not listed in the drawing index.
+    severity: medium
+    check_type: drawing_index
+    confidence: 0.90
+
+  - key: drawing_index_order
+    category: Drawing Index
+    title: Sheet order matches drawing index
+    description: Actual sheet order should follow the drawing index order.
+    severity: medium
+    check_type: drawing_index
+    confidence: 0.93
+
+  - key: drawing_index_spelling
+    category: Drawing Index
+    title: Sheet names spelled correctly
+    description: Check each page for plotting issues and misspelled page names/numbers.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Title Block
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: title_block_sheet_number
+    category: Title Block
+    title: Each page has a sheet number
+    description: Every sheet should show a valid sheet number in the title block.
+    severity: medium
+    check_type: title_block
+    confidence: 0.96
+
+  - key: title_block_sheet_name
+    category: Title Block
+    title: Each page has a sheet title
+    description: Every sheet should show a readable sheet title in the title block.
+    severity: medium
+    check_type: title_block
+    confidence: 0.89
+
+  # SOV rule disabled — not all plansets use this field
+  # - key: title_block_sov_date_designer
+  #   category: Title Block
+  #   title: SOV, Date, Designer, Engineer, Revision
+  #   description: Title block should show SOV, Date, Designer, Engineer, and Revision Number.
+  #   severity: medium
+  #   check_type: gemini_vision
+  #   confidence: 0.85
+
+  - key: title_block_logos
+    category: Title Block
+    title: EPC Logo and Owner Logo present
+    description: Title block should display EPC and Owner logos.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: title_block_project_id
+    category: Title Block
+    title: Castillo Project ID shown
+    description: Title block should include the Castillo Project ID.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: title_block_eor_seal
+    category: Title Block
+    title: Correct EOR Seal
+    description: Title block should have the correct Engineer of Record seal.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: title_block_project_name
+    category: Title Block
+    title: Project Name shown
+    description: Project name should appear in the title block.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: title_block_project_address
+    category: Title Block
+    title: Project Address shown
+    description: Project address should appear in the title block.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: title_block_coordinates
+    category: Title Block
+    title: Site Coordinates shown
+    description: Site coordinates (lat/long) should appear in the title block.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: title_block_der_number
+    category: Title Block
+    title: DER Number (if Ameren)
+    description: DER number should appear in the title block if the utility is Ameren.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Cover Sheet
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: cover_sheet_project_info
+    category: Cover Sheet
+    title: Project Name, Address, Coordinates
+    description: Cover sheet should show project name, address, and site coordinates.
+    severity: high
+    check_type: keyword
+    search_scope: cover
+    keywords:
+      - ["PROJECT NAME", "PROJECT TITLE", "PROJECT:"]
+      - ["SITE LOCATION", "SITE ADDRESS", "ADDRESS", "LOCATION"]
+    min_matches: 2
+    confidence: 0.95
+
+  - key: cover_sheet_building_codes
+    category: Cover Sheet
+    title: Building Codes referenced
+    description: "Building codes should be listed: State/County/City adopted, or Castillo preference noted."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: cover_sheet_owner_info
+    category: Cover Sheet
+    title: Owner Name, Address, Telephone
+    description: Owner information including name, address, and telephone number.
+    severity: medium
+    check_type: keyword
+    search_scope: cover
+    keywords: ["OWNER", "PROPERTY OWNER", "CLIENT"]
+    min_matches: 1
+    confidence: 0.85
+
+  - key: cover_sheet_epc_info
+    category: Cover Sheet
+    title: EPC Name, Address, Telephone
+    description: EPC contractor information including name, address, and telephone number.
+    severity: medium
+    check_type: keyword
+    search_scope: cover
+    keywords: ["ENGINEERING", "EPC", "CONTRACTOR", "CASTILLO"]
+    min_matches: 1
+    confidence: 0.85
+
+  - key: cover_sheet_castillo_info
+    category: Cover Sheet
+    title: EOR Name, License, Checker, Designer
+    description: Castillo EOR name, license number, state, and checker/designer names.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: cover_sheet_county_map
+    category: Cover Sheet
+    title: County/State Map present
+    description: "County map with state map shown; county name not blocked by arrow."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: cover_sheet_array_view
+    category: Cover Sheet
+    title: Array View with North Arrow
+    description: Array view image showing modules, fence, road, with north arrow.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: cover_sheet_vicinity_map
+    category: Cover Sheet
+    title: Vicinity Map present
+    description: Vicinity map showing nearest city and roads to site.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: cover_sheet_drawing_index
+    category: Cover Sheet
+    title: Drawing Index consistency
+    description: Drawing index on cover sheet is consistent with actual sheets in the planset.
+    severity: high
+    check_type: drawing_index
+    confidence: 0.90
+
+  - key: cover_sheet_system_info
+    category: Cover Sheet
+    title: System information table populated
+    description: Cover sheet should contain core module, inverter, DC size, AC size, and racking info.
+    severity: high
+    check_type: keyword
+    search_scope: cover
+    keywords: ["MODULE", "INVERTER", "TOTAL AC SIZE", "TOTAL DC SIZE", "RACKING", "DC/AC RATIO"]
+    min_matches: 3
+    confidence: 0.94
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # System Information Table
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: sysinfo_module_specs
+    category: System Information Table
+    title: PV Module Make, Model, STC Rating
+    description: Module make, model, and STC wattage rating should be shown.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: sysinfo_string_config
+    category: System Information Table
+    title: String Size and Quantity
+    description: String size (modules per string) and total string quantity.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: sysinfo_dc_size
+    category: System Information Table
+    title: Total DC Size
+    description: Total DC system size in kWp or MWp.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: sysinfo_inverter_specs
+    category: System Information Table
+    title: Inverter Make, Model, kVA/kW, Quantity
+    description: "Inverter make, model, kVA rating, kW rating, derated rating (if applicable), and quantity."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: sysinfo_ac_size
+    category: System Information Table
+    title: Total AC Size
+    description: Total AC system size in kVA or MVA.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: sysinfo_racking
+    category: System Information Table
+    title: Racking Make, Model, Size
+    description: Racking system make, model, and size.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: sysinfo_ratios_spacing
+    category: System Information Table
+    title: DC/AC Ratio, Pitch, Interrow, GCR, Tilt, Azimuth
+    description: "DC/AC ratio, pitch, interrow spacing, GCR, tilt/tracker angle, and azimuth."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # General Notes
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: general_notes_page_exists
+    category: General Notes
+    title: General notes sheet exists
+    description: A general notes sheet should be present.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["GENERAL NOTE", "GENERAL ELECTRICAL NOTE"]
+
+  - key: general_notes_latest_version
+    category: General Notes
+    title: Latest version of general notes
+    description: General notes should be the latest version. Check for most recent NEC year and code references.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Site Plan
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: site_plan_split_pages
+    category: Site Plan
+    title: Split pages per discretion
+    description: Large sites should have the site plan split across multiple pages for readability.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: site_plan_north_arrow_scale
+    category: Site Plan
+    title: North Arrow and Scale
+    description: Site plan should have a north arrow and scale bar/notation.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: site_plan_core_items
+    category: Site Plan
+    title: Site plan contains key callouts
+    description: Check for scale, property line, fence, access, weather station.
+    severity: medium
+    check_type: keyword
+    search_scope: site_plan
+    title_match: ["SITE PLAN", "OVERALL SITE", "SITE LAYOUT"]
+    keywords: ["SCALE:", "PROPERTY LINE", "FENCE", "ACCESS", "WEATHER STATION"]
+    min_matches: 2
+    confidence: 0.84
+
+  - key: site_plan_mv_cab_lines
+    category: Site Plan
+    title: MV Run and CAB Lines shown
+    description: MV cable run and CAB lines should be visible on the site plan.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: site_plan_background_faded
+    category: Site Plan
+    title: Background image properly faded
+    description: Background aerial image should be properly faded for visibility.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: site_plan_notes
+    category: Site Plan
+    title: Site Plan Notes (DCB topology, weather sensor, fence grounding)
+    description: "Notes for DCB/inverter topology, weather sensor references, sheet references, and fence grounding."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: site_plan_section_view
+    category: Site Plan
+    title: Racking Section View (pitch, spacing, height)
+    description: "Section view showing fixed vs tracker, pitch, interrow spacing, and racking height."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: site_plan_dimensions
+    category: Site Plan
+    title: Dimensions (property line, setbacks, road, fence)
+    description: "Dimensions from property line, all four corners, setbacks, road width/turnaround, fence setback."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: site_plan_topo_lines
+    category: Site Plan
+    title: Topographic lines with elevation
+    description: Topo lines with elevation data should be shown.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: site_plan_callouts
+    category: Site Plan
+    title: Callouts (access, fence, pad, gate, racking, parcel, setbacks)
+    description: "Callouts for site access, fence, pad location, gate size, road, racking size/qty, property/lease line, parcel ID, setbacks, civil elements."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: site_plan_text_consistent
+    category: Site Plan
+    title: Text size is consistent
+    description: All text on the site plan should be a consistent readable size.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: site_plan_greying
+    category: Site Plan
+    title: Proper greying for visibility
+    description: Background features should be properly greyed out for visibility of active plan elements.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: site_plan_inverter_dcb_note
+    category: Site Plan
+    title: Inverter or DCB typical note shown
+    description: An inverter or DCB typical note should be visible on the site plan.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: site_plan_civil_elements
+    category: Site Plan
+    title: Civil elements (vegetative buffer, landscape, concrete washout)
+    description: "Civil elements like vegetative buffer, landscape buffer, and concrete washout should be called out."
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Pole Line Up
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: pole_lineup_north_arrow_scale
+    category: Pole Line Up
+    title: North Arrow and Scale
+    description: Pole line up should have north arrow and scale.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: pole_lineup_core_items
+    category: Pole Line Up
+    title: Pole line up contains key items
+    description: "Check for scale, POI references, and MV callouts."
+    severity: medium
+    check_type: keyword
+    search_scope: pole_lineup
+    title_match: ["POLE LINE", "POLE LINEUP", "INTERCONNECTION"]
+    keywords: ["SCALE:", "POI", "UNDERGROUND", "LEGEND", "MV"]
+    min_matches: 2
+    confidence: 0.83
+
+  - key: pole_lineup_assumed_note
+    category: Pole Line Up
+    title: Assumed pole lineup noted
+    description: "If the pole lineup is assumed, a note should state that."
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: pole_lineup_consistency
+    category: Pole Line Up
+    title: Pole names/numbers consistent with SLD, 3LD, Pole Elevation
+    description: "Pole name and number should be consistent across SLD, 3LD, and Pole Elevation sheets."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: pole_lineup_poi_details
+    category: Pole Line Up
+    title: POI Details (utility, voltage, feeder, fault current)
+    description: "POI should show utility name, voltage, feeder grounding, pole/feeder number, fault current, and be labeled as Point of Interconnection."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: pole_lineup_dimensions
+    category: Pole Line Up
+    title: Dimensions between poles and from road/fence
+    description: "Distances between poles and from access road, fence, gate should be shown."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: pole_lineup_mv_overhead
+    category: Pole Line Up
+    title: Underground MV run and overhead line distinction
+    description: "Underground MV run from equipment area shown; new vs existing overhead lines distinguished."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: pole_lineup_delineation
+    category: Pole Line Up
+    title: Delineation line (client vs utility scope)
+    description: Delineation line for client vs utility scope should be shown.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: pole_lineup_legend_table
+    category: Pole Line Up
+    title: Correct legend table
+    description: Pole line up should have the correct legend table showing pole types and symbols.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: pole_lineup_compare_impact_study
+    category: Pole Line Up
+    title: Compare poles with impact study or client CAD
+    description: Pole locations should be compared with the impact study or client-provided CAD drawings.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: pole_lineup_grey_adjacent
+    category: Pole Line Up
+    title: Grey out adjacent interconnection
+    description: Adjacent interconnection equipment should be greyed out for clarity.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Engineered Equipment List
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: equipment_list_exists
+    category: Engineered Equipment List
+    title: Equipment list sheet exists
+    description: Engineered equipment list should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["EQUIPMENT LIST", "EQUIPMENT SCHEDULE", "BOM", "BILL OF MATERIAL"]
+
+  - key: equipment_list_completeness
+    category: Engineered Equipment List
+    title: "All equipment: name, qty, manufacturer, model, rating"
+    description: "Each equipment item should have name, quantity, manufacturer, model, and rating."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: equipment_list_consistency
+    category: Engineered Equipment List
+    title: "Consistent with SLD, 3LD, and overall design"
+    description: "Equipment list should be consistent with SLD, 3LD, and overall design."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: equipment_list_submittal_status
+    category: Engineered Equipment List
+    title: Review submittal status
+    description: Equipment submittal status should be reviewed and noted.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: equipment_list_naming_format
+    category: Engineered Equipment List
+    title: Equipment naming format per Joe's table
+    description: Equipment naming should follow the standard naming format from Joe's table.
+    severity: medium
+    check_type: gemini_vision
+    handbook_ref: "Part 1 – Equipment Naming Table"
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AC Single Line Diagram
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: sld_pages_exist
+    category: AC Single Line Diagram
+    title: Single line diagram sheets exist
+    description: Single line diagram sheets should be included in the set.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["SINGLE LINE", "SINGLE-LINE", "SLD", "AC ONE LINE", "ONE-LINE"]
+
+  - key: sld_stringing
+    category: AC Single Line Diagram
+    title: "Stringing validation (V, I, P, MPPT, inputs, temperature)"
+    description: "Verify stringing: voltage, current, power, MPPT range, number of inputs, and temperature limits."
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_stringing
+    nec_ref: "NEC 690.7"
+    confidence: 0.90
+
+  - key: sld_transformer_content
+    category: AC Single Line Diagram
+    title: Transformer details shown (kVA, windings, BIL)
+    description: "SLD should show transformer kVA, winding config (Delta/Wye), voltage, BIL, impedance Z%."
+    severity: high
+    check_type: keyword
+    search_scope: sld
+    title_match: ["SINGLE LINE", "SINGLE-LINE", "SLD", "AC ONE LINE", "ONE-LINE"]
+    exclude_title: ["DC", "AUX"]
+    keywords: ["TRANSFORMER", "XFMR", "KVA", "WINDING", "DELTA", "WYE"]
+    min_matches: 2
+    confidence: 0.80
+
+  - key: sld_equipment_ratings
+    category: AC Single Line Diagram
+    title: Equipment ratings and quantities
+    description: "All equipment should show name, make/model, current, voltage notation, phase, SCCR, NEMA, I/O cables, OCPD, disconnects."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: sld_breakers
+    category: AC Single Line Diagram
+    title: "Breakers (phase, count, dial settings, cable limits)"
+    description: "Breakers should show phase, count, dial settings, and cable limits (size, sets, material)."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: sld_six_disconnect_rule
+    category: AC Single Line Diagram
+    title: Six disconnect rule for switchboard
+    description: Verify compliance with the six disconnect rule for switchboard.
+    severity: high
+    check_type: gemini_vision
+    nec_ref: "NEC 408.36"
+    confidence: 0.80
+
+  - key: sld_transformer
+    category: AC Single Line Diagram
+    title: "Transformer (kVA, windings, BIL, cooling, Z%, X/R)"
+    description: "Transformer: kVA >= total inverter kVA, primary/secondary winding config, voltage, BIL, cooling type, Z%, X/R, internal fuse/switch."
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_transformer
+    confidence: 0.85
+
+  - key: sld_mv_equipment
+    category: AC Single Line Diagram
+    title: "MV Equipment (arrestor, meter CT/VT, recloser, GOAB)"
+    description: "MV equipment: surge arrestor MCOV, meter CT/VT ratio and accuracy, recloser power/comms, aux transformer, GOAB as main disconnect."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: sld_cable_sizing_content
+    category: AC Single Line Diagram
+    title: Cable and conduit sizing (DC, LV, MV)
+    description: "Cable sizing: MV direct buried check, insulation, below vs above 800A, terminal rating, cable sets < 10."
+    severity: medium
+    check_type: keyword
+    search_scope: sld
+    title_match: ["SINGLE LINE", "SINGLE-LINE", "SLD", "AC ONE LINE", "ONE-LINE"]
+    exclude_title: ["DC", "AUX"]
+    keywords: ["AWG", "KCMIL", "XHHW", "THWN", "PV WIRE", "CONDUIT", "90°C", "75°C"]
+    min_matches: 2
+    confidence: 0.82
+
+  - key: sld_mv_equipment_content
+    category: AC Single Line Diagram
+    title: MV equipment shown (recloser, GOAB, arrestor, meter CT/VT)
+    description: "SLD should show recloser, GOAB disconnect, surge arrestor MCOV, meter CT/VT ratios."
+    severity: medium
+    check_type: keyword
+    search_scope: sld
+    title_match: ["SINGLE LINE", "SINGLE-LINE", "SLD", "AC ONE LINE", "ONE-LINE"]
+    exclude_title: ["DC", "AUX"]
+    keywords: ["RECLOSER", "GOAB", "SURGE ARRESTOR", "MCOV", "METER", "CT RATIO", "VT RATIO", "DISCONNECT"]
+    min_matches: 2
+    confidence: 0.80
+
+  - key: sld_inverter_content
+    category: AC Single Line Diagram
+    title: Inverter details shown (make, kVA/kW, FLA, OCPD)
+    description: "SLD should show inverter make/model, kVA/kW rating, FLA, and OCPD sizing."
+    severity: medium
+    check_type: keyword
+    search_scope: sld
+    title_match: ["SINGLE LINE", "SINGLE-LINE", "SLD", "AC ONE LINE", "ONE-LINE"]
+    exclude_title: ["DC", "AUX"]
+    keywords: ["INVERTER", "KW", "KVA", "MPPT", "FLA", "OCPD"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: sld_notes_content
+    category: AC Single Line Diagram
+    title: SLD notes present (feeder grounding, assumptions)
+    description: SLD should have feeder grounding note and documented assumptions.
+    severity: medium
+    check_type: keyword
+    search_scope: sld
+    title_match: ["SINGLE LINE", "SINGLE-LINE", "SLD", "AC ONE LINE", "ONE-LINE"]
+    exclude_title: ["DC", "AUX"]
+    keywords: ["GROUNDING NOTE", "FEEDER GROUNDING", "ASSUMPTION", "NOTE:"]
+    min_matches: 1
+    confidence: 0.70
+
+  - key: sld_poles
+    category: AC Single Line Diagram
+    title: "Poles (names, ratings, quantity, delineation)"
+    description: "Poles should show consistent names/ratings with site plan, delineation line, GOAB labeled as main service disconnect."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: sld_consistent_names_ratings
+    category: AC Single Line Diagram
+    title: "Consistent names and ratings across site plan, pole lineup, SLD, 3LD, pole elevation"
+    description: "All equipment names and ratings must be consistent across Site Plan, Pole Line Up, SLD, 3LD, and Pole Elevation sheets."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: sld_string_distribution
+    category: AC Single Line Diagram
+    title: Strings distribution in DCB vs inverter
+    description: String distribution between DCBs and inverters should be shown and validated.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: sld_dcb_string_fuse
+    category: AC Single Line Diagram
+    title: DCB and string fuse sizing
+    description: DCB fuse and string fuse sizes should be shown and properly sized per Isc x 1.56.
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_fuse_sizing
+    nec_ref: "NEC 690.9"
+    confidence: 0.90
+
+  - key: sld_grounding_xfmr_match_cesir
+    category: AC Single Line Diagram
+    title: Grounding XFMR matches CESIR
+    description: Grounding transformer configuration should match the CESIR (interconnection agreement) requirements.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # DC Line Diagram
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: dc_line_exists
+    category: DC Line Diagram
+    title: DC line diagram sheet exists
+    description: DC line diagram should be present.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["DC LINE", "DC DIAGRAM", "DC SINGLE LINE", "DC WIRING", "STRING DIAGRAM"]
+
+  - key: dc_line_inverter_topology
+    category: DC Line Diagram
+    title: Correct inverter topology from manual
+    description: DC diagram should show the correct inverter input topology per manufacturer manual.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: dc_string_config_content
+    category: DC Line Diagram
+    title: String configuration shown (modules, Voc, Isc, MPPT)
+    description: "DC diagram should show string size, module Voc/Isc, MPPT inputs, and temperature limits."
+    severity: medium
+    check_type: keyword
+    search_scope: dc
+    title_match: ["DC LINE", "DC DIAGRAM", "DC SINGLE LINE", "DC WIRING", "STRING DIAGRAM"]
+    keywords: ["STRING", "MPPT", "MODULE", "VOC", "ISC", "VMP"]
+    min_matches: 2
+    confidence: 0.80
+
+  - key: dc_line_ocpd_fuses
+    category: DC Line Diagram
+    title: "OCPD, disconnect, string/DCB fuse ratings"
+    description: "Inverter OCPD and disconnect type/rating, string fuse and DCB fuse sizes."
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_fuse_sizing
+    nec_ref: "NEC 690.9"
+    confidence: 0.90
+
+  - key: dc_fuse_disconnect_content
+    category: DC Line Diagram
+    title: DC fuses and disconnects shown (string fuse, DCB fuse, disconnect)
+    description: DC diagram should show string fuse rating, DCB fuse, and DC disconnect with voltage rating.
+    severity: medium
+    check_type: keyword
+    search_scope: dc
+    title_match: ["DC LINE", "DC DIAGRAM", "DC SINGLE LINE", "DC WIRING", "STRING DIAGRAM"]
+    keywords: ["FUSE", "DISCONNECT", "OCPD", "DCB", "COMBINER"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: dc_cable_sizing_content
+    category: DC Line Diagram
+    title: DC cable sizing shown (PV wire, AWG, insulation rating)
+    description: "DC diagram should show PV wire size, material (CU), and 90°C insulation rating."
+    severity: medium
+    check_type: keyword
+    search_scope: dc
+    title_match: ["DC LINE", "DC DIAGRAM", "DC SINGLE LINE", "DC WIRING", "STRING DIAGRAM"]
+    keywords: ["PV WIRE", "#10", "#8", "AWG", "90°C", "CONDUIT"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: dc_line_schedules
+    category: DC Line Diagram
+    title: "Schedules (MPPT, Harness, DCB/Inverter)"
+    description: "Applicable schedules should be shown: MPPT, harness, DCB/inverter schedules."
+    severity: medium
+    check_type: keyword
+    search_scope: dc
+    title_match: ["DC LINE", "DC DIAGRAM", "DC SINGLE LINE", "DC WIRING", "STRING DIAGRAM"]
+    keywords: ["SCHEDULE", "MPPT SCHEDULE", "HARNESS SCHEDULE", "DCB SCHEDULE", "INVERTER SCHEDULE"]
+    min_matches: 1
+    confidence: 0.72
+
+  - key: dc_grounding_content
+    category: DC Line Diagram
+    title: Grounding callouts (module, rack-CAB, CAB-inverter)
+    description: "Grounding callouts: PV module grounding note, rack to CAB, CAB to DCB/inverter."
+    severity: medium
+    check_type: keyword
+    search_scope: dc
+    title_match: ["DC LINE", "DC DIAGRAM", "DC SINGLE LINE", "DC WIRING", "STRING DIAGRAM"]
+    keywords: ["GROUNDING", "GND", "EGC", "EQUIPMENT GROUND", "BONDING"]
+    min_matches: 1
+    confidence: 0.72
+
+  - key: dc_line_notes
+    category: DC Line Diagram
+    title: Notes (PV wire stranding, module connectors)
+    description: PV wire stranding note and module connectors note should be shown.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: dc_line_aux_cabinet
+    category: DC Line Diagram
+    title: Aux cabinet for central inverter
+    description: "If central inverter, aux cabinet should be shown on the DC line diagram."
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: dc_line_transformer_callout
+    category: DC Line Diagram
+    title: Transformer callout and configuration for central inverter
+    description: Transformer callout and configuration should be shown for central inverter systems.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Three Line Diagram
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: three_line_exists
+    category: Three Line Diagram
+    title: Three line diagram sheet exists
+    description: Three line diagram should be present.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["THREE LINE", "THREE-LINE", "3-LINE", "3LD", "3 LINE"]
+
+  - key: three_line_equipment_content
+    category: Three Line Diagram
+    title: Equipment labels with ratings (no cable sizes)
+    description: 3LD should show equipment labels with ratings but NOT cable sizes or FLA.
+    severity: medium
+    check_type: keyword
+    search_scope: tld
+    title_match: ["THREE LINE", "THREE-LINE", "3-LINE", "3LD", "3 LINE"]
+    keywords: ["INVERTER", "TRANSFORMER", "SWITCHBOARD", "BREAKER", "RECLOSER", "GOAB"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: three_line_ct_vt_content
+    category: Three Line Diagram
+    title: CT/VT arrangement for metering
+    description: CTs and VTs should be shown for metering with correct ratios.
+    severity: medium
+    check_type: keyword
+    search_scope: tld
+    title_match: ["THREE LINE", "THREE-LINE", "3-LINE", "3LD", "3 LINE"]
+    keywords: ["CT", "VT", "RATIO", "METERING", "METER"]
+    min_matches: 2
+    confidence: 0.75
+
+  - key: three_line_breaker_phase
+    category: Three Line Diagram
+    title: Breaker phase correct (3P vs 2P vs 1P)
+    description: "Phase of each breaker should be correct: 3P, 2P, or 1P."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: three_line_xfmr_content
+    category: Three Line Diagram
+    title: "Transformer windings, fuse/switch, grounding"
+    description: "LV and HV winding shown, internal fuse/switch, grounding connections."
+    severity: medium
+    check_type: keyword
+    search_scope: tld
+    title_match: ["THREE LINE", "THREE-LINE", "3-LINE", "3LD", "3 LINE"]
+    keywords: ["DELTA", "WYE", "PRIMARY", "SECONDARY", "WINDING", "GROUNDING"]
+    min_matches: 2
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Relay and Inverter Settings
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: relay_settings_exist
+    category: Relay and Inverter Settings
+    title: Relay and inverter settings sheet exists
+    description: Relay settings and IEEE 1547 inverter settings should be documented.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["RELAY SETTING", "INVERTER SETTING", "PROTECTION SETTING", "IEEE 1547"]
+
+  - key: relay_ieee_trip_content
+    category: Relay and Inverter Settings
+    title: IEEE 1547 trip functions shown (OV/UV/OF/UF)
+    description: All 8 IEEE 1547 voltage/frequency trip functions should be documented with settings and clearing times.
+    severity: medium
+    check_type: keyword
+    search_scope: relay
+    title_match: ["RELAY SETTING", "INVERTER SETTING", "PROTECTION SETTING", "IEEE 1547"]
+    keywords: ["IEEE 1547", "OV2", "OV1", "UV1", "UV2", "OF1", "OF2", "UF1", "UF2", "59-2", "27-1", "81O"]
+    min_matches: 3
+    nec_ref: "IEEE 1547-2018"
+    confidence: 0.82
+
+  - key: relay_ct_vt_ratios
+    category: Relay and Inverter Settings
+    title: CT and VT ratios match submittal
+    description: "CT ratio should match recloser submittal (default 300:1). VT ratio default 234.5 for Tavrida."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.78
+
+  - key: relay_ct_vt_content
+    category: Relay and Inverter Settings
+    title: CT and VT ratios documented
+    description: CT ratio (default 300:1) and VT ratio (default 234.5 for Tavrida) should be shown.
+    severity: medium
+    check_type: keyword
+    search_scope: relay
+    title_match: ["RELAY SETTING", "INVERTER SETTING", "PROTECTION SETTING", "IEEE 1547"]
+    keywords: ["CT RATIO", "VT RATIO", "300:1", "234.5", "RATIO"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: relay_voltage_match
+    category: Relay and Inverter Settings
+    title: Line-to-Line voltage matches SLD POI
+    description: Line-to-line voltage should match the SLD POI voltage.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: relay_ac_size_fla
+    category: Relay and Inverter Settings
+    title: AC system size and FLA match SLD
+    description: AC system size and FLA should match SLD after XFMR.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: relay_ieee_category
+    category: Relay and Inverter Settings
+    title: IEEE 1547 category and inverter table
+    description: Correct IEEE 1547 category used (default Category I). NGrid-specific table if applicable.
+    severity: high
+    check_type: gemini_vision
+    nec_ref: "IEEE 1547-2018"
+    confidence: 0.80
+
+  - key: relay_inverter_voltage
+    category: Relay and Inverter Settings
+    title: AC output L-L matches inverter voltage
+    description: AC output line-to-line voltage should match the inverter voltage rating.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: relay_system_values_content
+    category: Relay and Inverter Settings
+    title: System values shown (voltage, FLA, AC size, power factor)
+    description: "Line-to-line voltage, FLA, AC system size, and power factor should be documented."
+    severity: medium
+    check_type: keyword
+    search_scope: relay
+    title_match: ["RELAY SETTING", "INVERTER SETTING", "PROTECTION SETTING", "IEEE 1547"]
+    keywords: ["LINE-TO-LINE", "L-L", "L-N", "FLA", "AC MW", "AC MVA", "POWER FACTOR"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: relay_inverter_table_content
+    category: Relay and Inverter Settings
+    title: Inverter settings table shown with voltage and clearing times
+    description: Inverter trip settings should be shown with per-unit voltage values and clearing times.
+    severity: medium
+    check_type: keyword
+    search_scope: relay
+    title_match: ["RELAY SETTING", "INVERTER SETTING", "PROTECTION SETTING", "IEEE 1547"]
+    keywords: ["INVERTER SETTING", "INVERTER AC OUTPUT", "NOMINAL VOLTAGE", "CLEARING TIME"]
+    min_matches: 2
+    confidence: 0.75
+
+  - key: relay_electrical_studies
+    category: Relay and Inverter Settings
+    title: Electrical studies conducted (coordination curves)
+    description: "If electrical studies have been conducted, NON-IEEE functions should be populated with coordination curves. If not, this section should be hidden."
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: relay_ngrid_table
+    category: Relay and Inverter Settings
+    title: Correct inverter table for NGrid
+    description: "If utility is NGrid, a specific inverter table should be used. IEEE Category I, II, III tables should be shown for completeness."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: relay_return_to_service
+    category: Relay and Inverter Settings
+    title: Return to service settings
+    description: "Min/Max voltage, Min/Max frequency, and reconnect time return-to-service settings should be shown."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AUX SLD
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: aux_sld_exists
+    category: AUX SLD
+    title: Auxiliary SLD sheet exists
+    description: Auxiliary power single line diagram should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["AUX", "AUXILIARY", "STATION SERVICE", "HOUSE POWER"]
+
+  - key: aux_sld_transformer
+    category: AUX SLD
+    title: Aux transformer (phase, winding config)
+    description: "If single phase transformer, NO WYE/DELTA. Aux power 3P vs 1P verified."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: aux_sld_loads
+    category: AUX SLD
+    title: "All aux loads listed (DAS, tracker, outlet, UPS)"
+    description: "All loads listed: DAS, data controller, tracker controller, outlet, UPS with voltage/phase."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: aux_sld_motor_requirements
+    category: AUX SLD
+    title: Motor power and current requirements
+    description: "Motor power requirements, current requirements, and daisy chain configuration."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: aux_sld_ratings_topology
+    category: AUX SLD
+    title: "Equipment ratings (panel, transformer, breakers, cables)"
+    description: "Aux panel, aux transformer, breakers, cable/conduit size ratings. CAB insulation sunlight resistant."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: aux_sld_feeder_plan_match
+    category: AUX SLD
+    title: Breaker/circuit grouping matches Feeder Plan
+    description: Breaker and circuit grouping should match the Feeder Plan.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: aux_sld_consistent_das
+    category: AUX SLD
+    title: Consistent with DAS vendor drawings
+    description: Auxiliary SLD should be consistent with DAS vendor drawings for equipment connections.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: aux_sld_cable_size_electrical
+    category: AUX SLD
+    title: Cable size consistent with electrical sheet
+    description: Cable sizes shown on aux SLD must be consistent with the electrical calculation sheet.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: aux_sld_cab_insulation_sunlight
+    category: AUX SLD
+    title: CAB motor wire insulation sunlight resistant
+    description: "For cables in CAB, motor wire insulation should be sunlight resistant."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.70
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Communication Diagram
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: comm_diagram_exists
+    category: Communication Diagram
+    title: Communication diagram sheet exists
+    description: Communication / DAS diagram should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["COMMUNICATION DIAGRAM", "COMM DIAGRAM", "DAS DIAGRAM", "SCADA DIAGRAM", "COMMUNICATION SLD", "COMM SLD"]
+
+  - key: comm_diagram_daisy_chains
+    category: Communication Diagram
+    title: Daisy chains consistent with feeder plan
+    description: Daisy chains of inverters should be consistent with feeder plan.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: comm_diagram_equipment_count
+    category: Communication Diagram
+    title: Equipment count matches pad count
+    description: Amount of equipment should match the number of pads.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: comm_diagram_sensors_ups
+    category: Communication Diagram
+    title: Weather sensors and UPS for DAS
+    description: All weather sensors accounted for. UPS for DAS present.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: comm_diagram_connectivity
+    category: Communication Diagram
+    title: "DAS-POI fiber, POI-recloser ethernet"
+    description: "DAS connects to POI through fiber; POI connects to recloser through ethernet."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: comm_diagram_line_types
+    category: Communication Diagram
+    title: "Line types correct (fiber, ethernet, RS485)"
+    description: "Different line types should be used to distinguish fiber, ethernet, RS485, and other communication protocols."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: comm_diagram_also_energy
+    category: Communication Diagram
+    title: Also Energy report submittal status
+    description: "Check if Also Energy report has been submitted. If yes, submittal should be approved and replace default drawing. If no, use default drawing."
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Feeder Plan
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: feeder_plan_exists
+    category: Feeder Plan
+    title: Feeder plan sheets exist
+    description: Overall or equipment area feeder plan sheets should be present.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["FEEDER PLAN", "AC FEEDER", "DC FEEDER", "CABLE PLAN", "WIRING PLAN"]
+
+  - key: feeder_plan_scale_north
+    category: Feeder Plan
+    title: Scale and North Arrow
+    description: Feeder plan should have a scale bar and north arrow.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: feeder_plan_fade_pv
+    category: Feeder Plan
+    title: PV racks faded for visibility
+    description: PV racks should be faded/greyed so cable routing is clearly visible.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: feeder_plan_visibility_clarity
+    category: Feeder Plan
+    title: Visibility and clarity of plot
+    description: Check for overall visibility and clarity of the feeder plan plot.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: feeder_plan_legend_circuits
+    category: Feeder Plan
+    title: "Legend matches cables, circuit arrows shown"
+    description: Legend matches cables used. Arrows for circuit count shown.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: feeder_plan_trench_cab_ref
+    category: Feeder Plan
+    title: Trench and CAB fill references
+    description: Trench detail reference shown. Worst-case CAB fill identified.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: feeder_plan_callouts
+    category: Feeder Plan
+    title: "Callouts (fence, road, pad, DCB/inverter labels)"
+    description: "Fence, access road, equipment pad, DCB/inverter number callouts."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: feeder_plan_sheet_notes_arrows
+    category: Feeder Plan
+    title: Sheet notes for circuit arrows
+    description: Sheet notes explaining circuit arrow conventions should be present.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: feeder_plan_follow_circuits
+    category: Feeder Plan
+    title: Follow each circuit and verify correctness
+    description: Trace each circuit on the feeder plan to verify it is correctly routed.
+    severity: high
+    check_type: manual
+    confidence: 0.50
+
+  - key: feeder_plan_tracker_motor
+    category: Feeder Plan
+    title: Tracker motor cables shown
+    description: Cables for tracker motors shown (if applicable).
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Communication Feeder Plan
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: comm_plan_exists
+    category: Communication Feeder Plan
+    title: Communication feeder plan sheets exist
+    description: Communication feeder plan sheets should be present.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["COMMUNICATION FEEDER", "COMM FEEDER", "COMMUNICATION PLAN", "DAS FEEDER", "FIBER PLAN"]
+
+  - key: comm_plan_sensor_names
+    category: Communication Feeder Plan
+    title: Individual sensor names and locations from DAS
+    description: Individual sensor names and locations should be listed from DAS.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: comm_plan_legend
+    category: Communication Feeder Plan
+    title: Legend matches cables used
+    description: Legend should match the communication cables used.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: comm_plan_freeze_strings
+    category: Communication Feeder Plan
+    title: Freeze string wires and callouts
+    description: String wires and callouts should be frozen/faded on the comm feeder plan.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: comm_plan_fade_pv
+    category: Communication Feeder Plan
+    title: Fade PV racks
+    description: PV racks should be faded on the communication feeder plan for clarity.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: comm_plan_scale_north
+    category: Communication Feeder Plan
+    title: Scale and North Arrow
+    description: Communication feeder plan should have scale and north arrow.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.85
+
+  - key: comm_plan_visibility
+    category: Communication Feeder Plan
+    title: Visibility and clarity of plot
+    description: Check for overall visibility and clarity of the communication feeder plan.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Equipment Area Feeder Plan
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: equip_area_feeder_exists
+    category: Equipment Area Feeder Plan
+    title: Equipment area feeder plan exists
+    description: Equipment area feeder plan should be present.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["EQUIPMENT AREA FEEDER", "EQUIPMENT FEEDER", "INVERTER PAD FEEDER"]
+
+  - key: equip_area_wiring
+    category: Equipment Area Feeder Plan
+    title: "AC, DC, MV, Comms wiring shown"
+    description: "All wiring types (AC, DC, MV, Comms) should be shown in equipment area."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: equip_area_clearances
+    category: Equipment Area Feeder Plan
+    title: NEC and equipment clearances
+    description: NEC clearances and equipment-specific clearances verified.
+    severity: high
+    check_type: gemini_vision
+    nec_ref: "NEC 110.26"
+    confidence: 0.80
+
+  - key: equip_area_pile_pad
+    category: Equipment Area Feeder Plan
+    title: Pile specs and pad type
+    description: "Inverter/aux rack pile count, spacing, type, depth. Individual vs combined pad."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: equip_area_fade_equipment
+    category: Equipment Area Feeder Plan
+    title: Equipment properly faded
+    description: Equipment should be properly faded to show wiring clearly.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: equip_area_aux_rack_das
+    category: Equipment Area Feeder Plan
+    title: AUX rack consistent with DAS vendor
+    description: AUX rack layout should be consistent with DAS vendor drawings.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: equip_area_aux_power
+    category: Equipment Area Feeder Plan
+    title: Aux power routing shown
+    description: Auxiliary power routing should be shown in the equipment area.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: equip_area_gravel_material
+    category: Equipment Area Feeder Plan
+    title: Gravel/material specified for pad
+    description: Is the pad individual or combined? Is gravel or surface material specified?
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: equip_area_min_clearance_inverter
+    category: Equipment Area Feeder Plan
+    title: "Min clearance from side, front, back for inverter"
+    description: "Minimum working clearances from side, front, and back of inverter should be shown."
+    severity: high
+    check_type: gemini_vision
+    nec_ref: "NEC 110.26"
+    confidence: 0.80
+
+  - key: equip_area_nec_clearance_table
+    category: Equipment Area Feeder Plan
+    title: Check NEC Table for clearance
+    description: Verify clearance values against NEC tables for working space around equipment.
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_nec_clearances
+    nec_ref: "NEC 110.26, Table 110.26(A)(1)"
+    confidence: 0.85
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Electrical Sheet
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: electrical_schedules_exist
+    category: Electrical Sheet
+    title: Circuit schedules exist
+    description: DC and AC circuit schedules should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE"]
+
+  - key: electrical_pv_parameters
+    category: Electrical Sheet
+    title: "PV system parameters (module, inverter, stringing)"
+    description: "Module/inverter values, all stringing cases, SAM bifacial check, total system match summary table."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.82
+
+  - key: elec_pv_params_content
+    category: Electrical Sheet
+    title: PV module parameters shown (Voc, Vmp, Isc, Imp, Pmax, temp coefficients)
+    description: Electrical sheet should show all PV module electrical parameters and temperature coefficients.
+    severity: medium
+    check_type: keyword
+    search_scope: electrical
+    title_match: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE", "E-300", "CALC"]
+    keywords: ["VOC", "VMP", "ISC", "IMP", "PMAX", "TEMPERATURE COEFFICIENT", "STC"]
+    min_matches: 3
+    confidence: 0.82
+
+  - key: electrical_strings_per_raceway
+    category: Electrical Sheet
+    title: Strings per raceway calculations
+    description: "SAM Isc, 1.25 derate factor, temp/fill derates, free air and conduit tables, max strings per conduit, 10ft rule."
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_dc_ampacity
+    nec_ref: "NEC 310.15, 690.8"
+    confidence: 0.88
+
+  - key: elec_ampacity_content
+    category: Electrical Sheet
+    title: Ampacity and derate calculations shown
+    description: Strings per raceway calculations with 1.25 factor, temperature correction, and conduit fill derate.
+    severity: medium
+    check_type: keyword
+    search_scope: electrical
+    title_match: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE", "E-300", "CALC"]
+    keywords: ["AMPACITY", "DERATE", "FILL FACTOR", "TEMPERATURE CORRECTION", "STRINGS PER", "FREE AIR", "1.25", "NEC 310"]
+    min_matches: 2
+    confidence: 0.80
+
+  - key: electrical_dc_schedule
+    category: Electrical Sheet
+    title: "String/Harness/DCB schedule (distances, cable sizing, OCPD)"
+    description: "Spot check distances, SAM Isc, termination rating, equivalent OCPD for DCB, cable sizing (sets, size, material, insulation, GND)."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: elec_dc_schedule_content
+    category: Electrical Sheet
+    title: DC circuit schedule present with cable sizing
+    description: "DC circuit schedule should show string/harness distances, cable sizes, and conduit sizing."
+    severity: medium
+    check_type: keyword
+    search_scope: electrical
+    title_match: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE", "E-300", "CALC"]
+    keywords: ["DC CIRCUIT", "DC SCHEDULE", "STRING", "HARNESS", "PV WIRE", "#10"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: electrical_ac_schedule
+    category: Electrical Sheet
+    title: "AC circuit schedule (voltage, FLA, OCPD, cables, conduit)"
+    description: "Voltage, FLA, OCPD below/above 800A, cable sizing (sets, wires/set, 75C, insulation, terminal, GND upsize, derate), conduit fill < 40%."
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_ac_ampacity
+    nec_ref: "NEC 310.16, 215.2"
+    confidence: 0.88
+
+  - key: elec_ac_schedule_content
+    category: Electrical Sheet
+    title: "AC circuit schedule present with FLA, OCPD, cable sizing"
+    description: "AC circuit schedule should show voltage, FLA, OCPD, cable sizing at 75C, and conduit fill."
+    severity: medium
+    check_type: keyword
+    search_scope: electrical
+    title_match: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE", "E-300", "CALC"]
+    keywords: ["AC CIRCUIT", "AC SCHEDULE", "FLA", "OCPD", "XHHW", "THWN", "BREAKER", "75°C", "75 C", "TERMINAL"]
+    min_matches: 2
+    confidence: 0.80
+
+  - key: electrical_aux_schedule
+    category: Electrical Sheet
+    title: "Aux circuit schedule (loads, motor VD)"
+    description: "Aux loads tally with SLD and DAS vendor, motor power requirements, voltage drop < allowable."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: electrical_mv_schedule
+    category: Electrical Sheet
+    title: "MV circuit schedule (termination, 1.25xFLA, GND)"
+    description: "Termination rating, 1.25xFLA < wire rating per Joe's handbook, GND wire (no concentric neutral for EGC), conduit fill."
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_mv_ampacity
+    nec_ref: "NEC 310.60"
+    handbook_ref: "Part 1 – MV Cable Ampacity Table"
+    confidence: 0.85
+
+  - key: elec_mv_schedule_content
+    category: Electrical Sheet
+    title: MV circuit schedule present
+    description: "MV circuit schedule should show termination rating, 1.25xFLA < wire rating, and conduit fill."
+    severity: medium
+    check_type: keyword
+    search_scope: electrical
+    title_match: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE", "E-300", "CALC"]
+    keywords: ["MV CIRCUIT", "MV SCHEDULE", "MEDIUM VOLTAGE", "15KV", "25KV", "35KV", "TR-XLPE", "DIRECT BURIED"]
+    min_matches: 1
+    confidence: 0.75
+
+  - key: electrical_voltage_drop
+    category: Electrical Sheet
+    title: Voltage drop summary populated
+    description: Voltage drop summary for DC, LV-AC, and MV should be populated (not blank).
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_voltage_drop
+    nec_ref: "NEC 210.19(A) Informational Note No. 4, 215.2(A)(4) Informational Note No. 2"
+    confidence: 0.85
+
+  - key: elec_voltage_drop_content
+    category: Electrical Sheet
+    title: Voltage drop summary present (DC, AC, MV)
+    description: "Voltage drop summary for DC, LV-AC, and MV should be populated. Total should be within 3%."
+    severity: high
+    check_type: keyword
+    search_scope: electrical
+    title_match: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE", "E-300", "CALC"]
+    keywords: ["VOLTAGE DROP", "VD", "VD SUMMARY", "AC-DC VD", "CLIENT CRITERIA"]
+    min_matches: 2
+    confidence: 0.78
+
+  - key: electrical_headers_make_sense
+    category: Electrical Sheet
+    title: Check all headers make sense
+    description: All column and section headers in the electrical schedule should be logical and labeled correctly.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: electrical_mix_circuits_10ft
+    category: Electrical Sheet
+    title: Mix circuits conduit and free air - 10ft rule
+    description: "For mixed circuits in conduit and free air, check the 10ft rule for transition between conduit and free air ratings."
+    severity: medium
+    check_type: gemini_vision
+    nec_ref: "NEC 310.15(A)(2)"
+    confidence: 0.75
+
+  - key: electrical_dc_gnd_no_upsize
+    category: Electrical Sheet
+    title: DC GND wire - no upsize
+    description: Ground wire for DC circuits should NOT be upsized beyond NEC 250.122 minimum.
+    severity: medium
+    check_type: electrical_calc
+    calc_function: validate_egc_sizing
+    nec_ref: "NEC 250.122"
+    confidence: 0.85
+
+  - key: electrical_ac_gnd_upsize_parallel
+    category: Electrical Sheet
+    title: AC GND wire upsized for parallel conductors
+    description: "If AC phase conductors are run in parallel sets, the EGC must be upsized proportionally per NEC 250.122."
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_egc_sizing
+    nec_ref: "NEC 250.122"
+    confidence: 0.85
+
+  - key: electrical_cable_insulation_gt_voltage
+    category: Electrical Sheet
+    title: Cable insulation > circuit voltage
+    description: Cable insulation voltage rating must exceed the circuit voltage for each cable run.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: electrical_conduit_fill_40pct
+    category: Electrical Sheet
+    title: Conduit fill < 40%
+    description: Conduit fill percentage should be below 40% per NEC Chapter 9 Table 1.
+    severity: medium
+    check_type: electrical_calc
+    calc_function: validate_conduit_fill
+    nec_ref: "NEC Chapter 9 Table 1"
+    confidence: 0.85
+
+  - key: elec_conduit_fill_content
+    category: Electrical Sheet
+    title: Conduit fill percentages shown (must be < 40%)
+    description: Conduit fill percentage should be calculated and shown to be below 40% per NEC Chapter 9.
+    severity: medium
+    check_type: keyword
+    search_scope: electrical
+    title_match: ["CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE", "AMPACITY", "CIRCUIT SIZING", "WIRE SCHEDULE", "E-300", "CALC"]
+    keywords: ["CONDUIT FILL", "FILL %", "40%", "CONDUIT SIZE"]
+    min_matches: 1
+    confidence: 0.72
+
+  - key: electrical_vd_client_criteria
+    category: Electrical Sheet
+    title: Total voltage drop within client criteria
+    description: Total AC+DC voltage drop should be within client criteria (typically 3% max).
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_voltage_drop
+    nec_ref: "NEC 210.19(A) Informational Note No. 4"
+    confidence: 0.85
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Inverter Zone Map
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: inverter_zone_map_exists
+    category: Inverter Zone Map
+    title: Inverter zone map sheet exists
+    description: Inverter zone map should be present.
+    severity: low
+    check_type: sheet_existence
+    title_keywords: ["INVERTER ZONE", "ZONE MAP", "INVERTER MAP", "BLOCK MAP"]
+
+  - key: inverter_zone_map_callouts
+    category: Inverter Zone Map
+    title: "Scale, fading, zone labels, callouts"
+    description: "Scale and north arrow, modules/equipment faded, fence/road/pad/zone labels shown."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Elevation Details
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: elevation_details_exist
+    category: Elevation Details
+    title: Elevation detail sheets exist
+    description: Elevation detail sheets should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["ELEVATION", "EQUIPMENT DETAIL", "PAD DETAIL", "EQUIPMENT ELEVATION"]
+
+  - key: elevation_pile_specs
+    category: Elevation Details
+    title: "Pile spacing, type, count, depth"
+    description: "Pile spacing, type, count, and minimum embedment depth shown."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: elevation_clearances
+    category: Elevation Details
+    title: "Clearances (grade, inverter, NEC table)"
+    description: "Clearance from grade, min clearance from side/front/back for inverter, NEC clearance table reference."
+    severity: high
+    check_type: gemini_vision
+    nec_ref: "NEC 110.26"
+    confidence: 0.80
+
+  - key: elevation_sweep_bends
+    category: Elevation Details
+    title: "Sweep/bend distances, CAB details"
+    description: "Conduit sweep/bend distances, CAB spacing/sag/clearance from grade."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: elevation_weather_sensors
+    category: Elevation Details
+    title: Weather sensors match DAS and Comms SLD
+    description: Weather sensor mounting locations should match DAS vendor drawings and comms SLD.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: elevation_structural_complete
+    category: Elevation Details
+    title: Confirm structural is complete
+    description: Verify that the structural portion of elevation details is complete.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: elevation_match_sld
+    category: Elevation Details
+    title: Match with SLD
+    description: Elevation details should match equipment shown on the SLD.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: elevation_check_callouts
+    category: Elevation Details
+    title: Check callouts
+    description: All callouts on elevation details should be accurate and complete.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Trenching Details
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: trenching_details_exist
+    category: Trenching Details
+    title: Trenching detail sheet exists
+    description: Conduit trenching detail sheet should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["TRENCH", "TRENCHING", "CONDUIT DETAIL", "DUCT BANK", "BURIAL"]
+
+  - key: trenching_depth_voltage
+    category: Trenching Details
+    title: Trench depth vs circuit voltage
+    description: Trench depth should be appropriate for the circuit voltage per NEC.
+    severity: high
+    check_type: gemini_vision
+    nec_ref: "NEC Table 300.5"
+    confidence: 0.80
+
+  - key: trenching_conduit_spacing
+    category: Trenching Details
+    title: Conduit spacing/count matches feeder plan
+    description: Conduit spacing vs count should match the feeder plan.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: trenching_worst_case
+    category: Trenching Details
+    title: "Worst case captured, trench headers match"
+    description: "Worst case trench captured (not easy drafting). Trench headers match feeder plan. GND wire shown in conduit."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: trenching_ampacity_tally
+    category: Trenching Details
+    title: Tally with ampacity study
+    description: Trenching details should tally with the ampacity study/calculations.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: trenching_check_notes
+    category: Trenching Details
+    title: Check notes
+    description: Verify trench detail notes are correct and reference appropriate standards.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: trenching_sheet_ref_feeder
+    category: Trenching Details
+    title: Sheet reference to feeder plan
+    description: Trench details should reference the corresponding feeder plan sheets.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: trenching_callouts_correct
+    category: Trenching Details
+    title: Callouts in correct places
+    description: Trench callouts should be placed correctly and clearly identify conduit types.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: trenching_headers_match_feeder
+    category: Trenching Details
+    title: Trench headers match feeder plan
+    description: Trench section headers should match the feeder plan references exactly.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: trenching_comms_cable
+    category: Trenching Details
+    title: Check comms cable in trench
+    description: Communication cables should be shown in trench details where applicable.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: trenching_gnd_wire_conduit
+    category: Trenching Details
+    title: Show GND wire in conduit
+    description: Ground wire should be shown in the conduit within trench details.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Overall Site Grounding Plan
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: grounding_sheets_exist
+    category: Overall Site Grounding Plan
+    title: Grounding sheets exist
+    description: Grounding plan sheets should be present.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["GROUNDING", "GROUND PLAN", "GND", "EARTHING"]
+
+  - key: grounding_consistency
+    category: Overall Site Grounding Plan
+    title: Consistent with grounding SLD
+    description: Site grounding plan should be consistent with the grounding SLD.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: grounding_plan_fade_pv
+    category: Overall Site Grounding Plan
+    title: Fade PV racks
+    description: PV racks should be faded on the grounding plan for clarity.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: grounding_plan_latest_template
+    category: Overall Site Grounding Plan
+    title: Use latest template
+    description: Grounding plan should use the latest standard template.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Grounding Diagram
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: grounding_diagram_circuit_trace
+    category: Grounding Diagram
+    title: GND circuit traced rack to POI
+    description: Full grounding circuit traceable from PV rack to POI.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: grounding_diagram_xfmr
+    category: Grounding Diagram
+    title: Transformer primary/secondary connections
+    description: XFMR primary and secondary grounding connections shown.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: grounding_diagram_bonding_gec
+    category: Grounding Diagram
+    title: Bonding jumper and GEC sized
+    description: Main bonding jumper shown and sized. GEC shown and sized per NEC 250.66.
+    severity: high
+    check_type: electrical_calc
+    calc_function: validate_gec_sizing
+    nec_ref: "NEC 250.66"
+    confidence: 0.85
+
+  - key: grounding_diagram_ring
+    category: Grounding Diagram
+    title: Grounding ring consistent with PAD layout
+    description: Grounding ring configuration consistent with PAD layout.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: grounding_diagram_e300_note
+    category: Grounding Diagram
+    title: Note for E-300 sheet reference
+    description: Grounding diagram should reference the E-300 electrical calculation sheet.
+    severity: low
+    check_type: gemini_vision
+    confidence: 0.70
+
+  - key: grounding_diagram_dc_equipment
+    category: Grounding Diagram
+    title: DC part reflects equipment configuration
+    description: The DC grounding section should reflect the actual equipment configuration shown in the DC SLD.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: grounding_diagram_code_callouts
+    category: Grounding Diagram
+    title: Relevant notes and code callouts
+    description: "NEC article references (250.66, 250.122, 250.102) should be shown."
+    severity: medium
+    check_type: gemini_vision
+    nec_ref: "NEC 250.66, 250.122, 250.102"
+    confidence: 0.75
+
+  - key: gnd_egc_content
+    category: Grounding Diagram
+    title: Equipment grounding conductor (EGC) sized per NEC 250.122
+    description: EGC should be shown and sized per NEC 250.122 based on OCPD rating.
+    severity: high
+    check_type: keyword
+    search_scope: grounding
+    title_match: ["GROUNDING", "GROUND", "GND", "EARTHING"]
+    keywords: ["EGC", "EQUIPMENT GROUNDING", "NEC 250.122", "250.122"]
+    min_matches: 1
+    nec_ref: "NEC 250.122"
+    confidence: 0.78
+
+  - key: gnd_gec_content
+    category: Grounding Diagram
+    title: Grounding electrode conductor (GEC) sized per NEC 250.66
+    description: GEC should be shown and sized per NEC 250.66 based on largest ungrounded supply conductor.
+    severity: high
+    check_type: keyword
+    search_scope: grounding
+    title_match: ["GROUNDING", "GROUND", "GND", "EARTHING"]
+    keywords: ["GEC", "GROUNDING ELECTRODE", "NEC 250.66", "250.66"]
+    min_matches: 1
+    nec_ref: "NEC 250.66"
+    confidence: 0.78
+
+  - key: gnd_bonding_content
+    category: Grounding Diagram
+    title: Main bonding jumper shown and sized per NEC 250.102
+    description: "Main bonding jumper should be shown and sized per NEC 250.102(C)(1)."
+    severity: high
+    check_type: keyword
+    search_scope: grounding
+    title_match: ["GROUNDING", "GROUND", "GND", "EARTHING"]
+    keywords: ["BONDING JUMPER", "MAIN BONDING", "NEC 250.102", "250.102"]
+    min_matches: 1
+    nec_ref: "NEC 250.102"
+    confidence: 0.75
+
+  - key: gnd_ring_rods_content
+    category: Grounding Diagram
+    title: Ground ring and ground rods shown
+    description: Grounding ring around equipment pad and ground rod locations should be shown.
+    severity: medium
+    check_type: keyword
+    search_scope: grounding
+    title_match: ["GROUNDING", "GROUND", "GND", "EARTHING"]
+    keywords: ["GROUND RING", "GROUND ROD", "GROUNDING RING", "ELECTRODE"]
+    min_matches: 1
+    confidence: 0.75
+
+  - key: gnd_xfmr_content
+    category: Grounding Diagram
+    title: Transformer grounding connections shown (primary/secondary)
+    description: Transformer primary and secondary grounding connections should be shown.
+    severity: high
+    check_type: keyword
+    search_scope: grounding
+    title_match: ["GROUNDING", "GROUND", "GND", "EARTHING"]
+    keywords: ["TRANSFORMER", "XFMR", "PRIMARY", "SECONDARY", "NEUTRAL"]
+    min_matches: 2
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CAB or Cable Hanger Details
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: cab_details_exist
+    category: CAB or Cable Hanger Details
+    title: CAB hanger detail sheet exists
+    description: CAB or cable hanger detail sheet should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["CABLE TRAY", "CAB DETAIL", "CABLE HANGER", "MESSENGER WIRE", "AERIAL CABLE", "CABLE BRIDGE"]
+
+  - key: cab_weight_sag_fill
+    category: CAB or Cable Hanger Details
+    title: "CAB section weight, SAG, fill"
+    description: "CAB section weight calculated, SAG checked, section fill verified."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: cab_conductor_grouping
+    category: CAB or Cable Hanger Details
+    title: "Conductor grouping (voltage, DC/AC, comms)"
+    description: "Conductor grouping by voltage vs DC/AC vs comms. CAB arrangement logical."
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: cab_pile_depth
+    category: CAB or Cable Hanger Details
+    title: CAB pile depth and standard details
+    description: CAB pile depth shown. Standard details checked.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PAD / Slab Details
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: pad_slab_details_exist
+    category: PAD / Slab Details
+    title: Pad or slab detail sheet exists
+    description: Equipment pad or slab detail should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["PAD DETAIL", "SLAB DETAIL", "CONCRETE PAD", "EQUIPMENT PAD", "FOUNDATION DETAIL"]
+
+  - key: pad_slab_rebar
+    category: PAD / Slab Details
+    title: Rebar schedule shown
+    description: Rebar schedule should be shown in pad/slab details.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Pole Details
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: pole_details_exist
+    category: Pole Details
+    title: Pole detail sheets exist
+    description: Pole detail elevation sheets should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["POLE DETAIL", "POLE ELEVATION", "RISER POLE", "POLE FRAMING"]
+
+  - key: pole_details_consistency
+    category: Pole Details
+    title: Consistent names and configuration
+    description: Pole names consistent with other sheets. Configuration matches. Unnecessary details removed.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: pole_details_latest_template
+    category: Pole Details
+    title: Use latest template
+    description: Pole details should use the latest standard template.
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Labels
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: labels_sheet_exists
+    category: Labels
+    title: Labels sheet exists
+    description: Labels sheet should be included.
+    severity: medium
+    check_type: sheet_existence
+    title_keywords: ["LABEL", "PLACARD", "SIGNAGE", "WARNING SIGN"]
+
+  - key: labels_nec_reference
+    category: Labels
+    title: NEC references correct
+    description: NEC references on labels should be correct.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  - key: labels_voltage_current
+    category: Labels
+    title: Voltage and current match calc sheet
+    description: Voltage and current values on labels should match the electrical calculation sheet.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: labels_goab_disconnect
+    category: Labels
+    title: GOAB labeled as Main Service Disconnect
+    description: GOAB switch should be labeled as Main Service Disconnect.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: labels_client_info
+    category: Labels
+    title: Client name and phone number
+    description: Client's name and phone number shown on labels.
+    severity: medium
+    check_type: gemini_vision
+    confidence: 0.75
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PVSyst Analysis Summary
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: pvsyst_project_info
+    category: PVSyst Analysis Summary
+    title: "Project info (location, type, DC/AC size)"
+    description: "PVSyst: location, system type (fixed/tracker), DC & AC capacities."
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: pvsyst_equipment
+    category: PVSyst Analysis Summary
+    title: Equipment (module/inverter type and count)
+    description: "PVSyst: module type and correct count, inverter type and correct count."
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: pvsyst_losses
+    category: PVSyst Analysis Summary
+    title: "Losses (soiling, thermal, wiring, albedo)"
+    description: "PVSyst: soiling 3%, thermal Uc=25/Uv=1.2, wiring ~1.5%, albedo, rack height, LID/quality/mismatch."
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: pvsyst_shading_advanced
+    category: PVSyst Analysis Summary
+    title: Shading and advanced settings
+    description: "PVSyst: near shading 'Fast' method 80% electrical effect, backtracking if tracker, bifacial if applicable."
+    severity: medium
+    check_type: manual
+    confidence: 0.50
+
+  - key: pvsyst_summary_available
+    category: PVSyst Analysis Summary
+    title: PVSyst summary available
+    description: PVSyst report is external. Upload support can be added later.
+    severity: low
+    check_type: manual
+    confidence: 1.0
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Cross-Sheet Consistency
+  # ═══════════════════════════════════════════════════════════════════════════
+  - key: consistency_inverter_specs
+    category: Cross-Sheet Consistency
+    title: Inverter make/model/kVA consistent across all sheets
+    description: "Inverter specifications must match across SLD, 3LD, equipment list, site plan, and DC diagram."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: consistency_transformer_specs
+    category: Cross-Sheet Consistency
+    title: Transformer kVA/voltage/winding consistent
+    description: "Transformer ratings, voltage, and winding configuration must match across SLD, 3LD, and equipment list."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: consistency_cable_sizes
+    category: Cross-Sheet Consistency
+    title: Cable sizes match between SLD and electrical schedule
+    description: "AC, DC, and MV cable sizes on SLD must match the electrical calculation schedule."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: consistency_pole_names
+    category: Cross-Sheet Consistency
+    title: Pole names/numbers consistent across all sheets
+    description: "Pole names and numbers must match across SLD, 3LD, Pole Line Up, and Pole Elevation."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: consistency_poi_voltage
+    category: Cross-Sheet Consistency
+    title: POI voltage consistent across all sheets
+    description: Point of interconnection voltage must be the same on all sheets where it appears.
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: consistency_system_totals
+    category: Cross-Sheet Consistency
+    title: Total DC/AC size consistent
+    description: "Total DC and AC system sizes must match across cover sheet, SLD, equipment list, and electrical schedule."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: consistency_ct_vt_ratios
+    category: Cross-Sheet Consistency
+    title: "CT/VT ratios consistent across SLD, 3LD, relay settings"
+    description: "Metering CT and VT ratios must be consistent across SLD, 3LD, and relay settings sheets."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80
+
+  - key: consistency_breaker_ocpd
+    category: Cross-Sheet Consistency
+    title: Breaker/OCPD ratings consistent
+    description: "All breaker and OCPD ratings must match across SLD, 3LD, and electrical schedule."
+    severity: high
+    check_type: gemini_vision
+    confidence: 0.80

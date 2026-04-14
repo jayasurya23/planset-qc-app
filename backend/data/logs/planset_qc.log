@@ -1,0 +1,947 @@
+2026-04-08 10:41:29 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:41:29 | INFO     | app.analyzer | AI extracted 3 drawing index entries
+2026-04-08 10:41:29 | INFO     | app.analyzer | AI drawing index (3 sheets) replacing regex result (0 sheets)
+2026-04-08 10:41:46 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:41:56 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:42:07 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:42:13 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:42:25 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:44:31 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:44:31 | INFO     | app.analyzer | AI extracted 44 drawing index entries
+2026-04-08 10:44:31 | INFO     | app.analyzer | AI drawing index (44 sheets) replacing regex result (2 sheets)
+2026-04-08 10:45:13 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:45:28 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:45:34 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:45:40 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:45:47 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:45:58 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:46:26 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:46:36 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:46:51 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:47:05 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:47:12 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:47:21 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:47:52 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:54:01 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:54:01 | INFO     | app.analyzer | AI extracted 44 drawing index entries
+2026-04-08 10:54:01 | INFO     | app.analyzer | AI drawing index (44 sheets) replacing regex result (2 sheets)
+2026-04-08 10:54:45 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:55:02 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:55:07 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:55:15 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:55:22 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:55:32 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:55:38 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:55:47 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:56:02 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:56:13 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:56:25 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:56:35 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:57:04 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:57:32 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:57:32 | INFO     | app.analyzer | AI extracted 44 drawing index entries
+2026-04-08 10:57:32 | INFO     | app.analyzer | AI drawing index (44 sheets) replacing regex result (2 sheets)
+2026-04-08 10:58:13 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:58:26 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:58:33 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:58:41 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:58:49 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:59:00 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:59:12 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:59:20 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:59:33 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:59:42 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:59:55 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:00:04 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:00:35 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:35:44 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:35:44 | INFO     | app.analyzer | AI extracted 44 drawing index entries
+2026-04-08 11:35:44 | INFO     | app.analyzer | AI drawing index (44 sheets) replacing regex result (2 sheets)
+2026-04-08 11:36:09 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:36:09 | INFO     | app.analyzer | AI extracted 18 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kva', 'inverter_kw', 'inverter_max_vdc', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio', 'transformer_kva', 'transformer_primary_voltage', 'transformer_secondary_voltage', 'transformer_impedance', 'transformer_bil', 'poi_voltage']
+2026-04-08 11:36:34 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:36:51 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:36:58 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:37:06 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:37:13 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:37:22 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:37:33 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:37:41 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:37:56 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:38:05 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:38:14 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:38:24 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 11:39:32 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:48:51 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:48:51 | INFO     | app.analyzer | AI extracted 44 drawing index entries
+2026-04-08 15:48:51 | INFO     | app.analyzer | AI drawing index (44 sheets) replacing regex result (2 sheets)
+2026-04-08 15:49:16 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:49:16 | INFO     | app.analyzer | AI extracted 15 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kw', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio', 'transformer_kva', 'transformer_primary_voltage', 'transformer_secondary_voltage', 'transformer_impedance', 'transformer_bil']
+2026-04-08 15:49:37 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:50:14 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:51:18 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:51:26 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:51:36 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:51:51 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:51:51 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+[
+  {
+    "check": "Scale and North Arrow",
+    "found": true,
+    "evidence": "North arrow is shown near the upper-right area, and a graphic scale bar with 'SCALE: 1\" = 60\'' appears at the bottom center.",
+    "severity": "low"
+  },
+  {
+    "check": "Legend",
+    "found": true,
+    "evidence": "Legend is present on the right side and includes the cable types and symbols used on the plan, including fence line, underground MV cable, AC/DC lines, and harness outputs.",
+    "severity": "low"
+  },
+2026-04-08 15:51:57 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:52:05 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:52:22 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:52:32 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:52:38 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:52:46 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 15:53:29 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:09:30 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:09:30 | INFO     | app.analyzer | AI extracted 17 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kva', 'inverter_kw', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio', 'transformer_kva', 'transformer_primary_voltage', 'transformer_secondary_voltage', 'transformer_impedance', 'transformer_bil', 'poi_voltage']
+2026-04-08 16:09:57 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:10:15 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:10:24 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:10:32 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:10:40 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:10:48 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:11:02 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:11:15 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:11:23 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:11:35 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:11:42 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:11:49 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:12:00 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:12:17 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:12:31 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:12:50 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 16:25:47 | INFO     | access | 127.0.0.1 GET /api/health → 200
+2026-04-08 16:26:14 | INFO     | access | 192.168.1.150 GET /api/runs → 200
+2026-04-08 16:26:14 | INFO     | access | 192.168.1.150 GET /api/runs → 200
+2026-04-08 16:26:18 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-08 16:27:24 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-08 16:28:42 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-08 16:28:42 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-08 16:29:04 | INFO     | access | 127.0.0.1 OPTIONS /api/issues/b137476c-97e6-4ed1-add1-4750009db77d → 200
+2026-04-08 16:29:04 | INFO     | access | 127.0.0.1 PATCH /api/issues/b137476c-97e6-4ed1-add1-4750009db77d → 200
+2026-04-08 16:29:04 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-08 16:29:22 | INFO     | access | 127.0.0.1 OPTIONS /api/issues/7b9a45fe-e10a-4547-8c80-e5207ae39ad4 → 200
+2026-04-08 16:29:23 | INFO     | access | 127.0.0.1 PATCH /api/issues/7b9a45fe-e10a-4547-8c80-e5207ae39ad4 → 200
+2026-04-08 16:29:23 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-08 16:29:39 | INFO     | access | 127.0.0.1 GET /favicon.ico → 404
+2026-04-13 16:31:07 | INFO     | access | 127.0.0.1 GET /api/health → 200
+2026-04-13 16:31:45 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-13 16:31:45 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-13 16:32:28 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:33:42 | INFO     | access | 127.0.0.1 GET /api/export/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:34:29 | INFO     | access | 127.0.0.1 GET /favicon.ico → 404
+2026-04-13 16:47:20 | INFO     | access | 127.0.0.1 OPTIONS /api/issues/fcda0308-5f25-4891-b6f4-5a6e04d60b50 → 200
+2026-04-13 16:47:21 | INFO     | access | 127.0.0.1 PATCH /api/issues/fcda0308-5f25-4891-b6f4-5a6e04d60b50 → 200
+2026-04-13 16:47:21 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:47:21 | INFO     | access | 127.0.0.1 PATCH /api/issues/fcda0308-5f25-4891-b6f4-5a6e04d60b50 → 200
+2026-04-13 16:47:21 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:47:21 | INFO     | access | 127.0.0.1 PATCH /api/issues/fcda0308-5f25-4891-b6f4-5a6e04d60b50 → 200
+2026-04-13 16:47:21 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:47:24 | INFO     | access | 127.0.0.1 PATCH /api/issues/fcda0308-5f25-4891-b6f4-5a6e04d60b50 → 200
+2026-04-13 16:47:24 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:49:20 | INFO     | access | 127.0.0.1 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:50:56 | INFO     | access | 127.0.0.1 OPTIONS /api/issues/44d4bb82-3372-4fc3-acb0-229f76580edd → 200
+2026-04-13 16:50:56 | INFO     | access | 127.0.0.1 PATCH /api/issues/44d4bb82-3372-4fc3-acb0-229f76580edd → 200
+2026-04-13 16:50:56 | INFO     | access | 127.0.0.1 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:51:00 | INFO     | access | 127.0.0.1 PATCH /api/issues/44d4bb82-3372-4fc3-acb0-229f76580edd → 200
+2026-04-13 16:51:00 | INFO     | access | 127.0.0.1 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:54:06 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-13 16:54:06 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-13 16:54:16 | INFO     | access | 127.0.0.1 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:54:40 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-13 16:54:40 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-13 16:56:03 | INFO     | access | 192.168.1.150 GET /api/runs → 200
+2026-04-13 16:56:03 | INFO     | access | 192.168.1.150 GET /api/runs → 200
+2026-04-13 16:57:01 | INFO     | access | 192.168.1.146 GET /api/runs → 200
+2026-04-13 16:57:01 | INFO     | access | 192.168.1.146 GET /api/runs → 200
+2026-04-13 16:57:06 | INFO     | access | 192.168.1.146 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:57:07 | INFO     | access | 192.168.1.146 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:57:09 | INFO     | access | 192.168.1.146 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:57:10 | INFO     | access | 192.168.1.146 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:57:11 | INFO     | access | 192.168.1.146 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:57:13 | INFO     | access | 192.168.1.146 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-13 16:57:14 | INFO     | access | 192.168.1.146 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-13 16:57:15 | INFO     | access | 192.168.1.146 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-14 09:27:07 | INFO     | access | 192.168.1.150 GET /api/runs → 200
+2026-04-14 09:27:07 | INFO     | access | 192.168.1.150 GET /api/runs → 200
+2026-04-14 10:21:08 | INFO     | access | 127.0.0.1 GET /api/health → 200
+2026-04-14 10:21:12 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 10:21:12 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 10:21:13 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 10:21:13 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 11:34:30 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 11:34:30 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 11:35:52 | INFO     | access | 127.0.0.1 POST /api/analyze → 200
+2026-04-14 11:36:09 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:36:09 | INFO     | app.analyzer | AI extracted 45 drawing index entries
+2026-04-14 11:36:09 | INFO     | app.analyzer | AI drawing index (45 sheets) replacing regex result (2 sheets)
+2026-04-14 11:36:45 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:36:45 | INFO     | app.analyzer | AI extracted 10 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kw', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio']
+2026-04-14 11:37:23 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:37:55 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:38:10 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:38:11 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-14 11:38:11 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 102, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1265, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 415, in analyze_page_image
+    return _claude_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 336, in _claude_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 104, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 327, in _call
+    return client.messages.create(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        model=_claude_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_utils\_utils.py", line 283, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\resources\messages\messages.py", line 996, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1368, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1141, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 5809624 bytes > 5242880 bytes'}, 'request_id': 'req_011Ca3uuwgP3ZHQ2tJgyQJNc'}
+2026-04-14 11:38:20 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:39:32 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:39:32 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make, Model, and Quantity",
+    "category": "inverter",
+    "status": "Pass",
+    "value": "OPS SCI2750T, CG US-800-36 V2 DERATED 249.50-kW/226.81-kW, Qty: 10/11 (Switchboard 1 / Switchboard 2)",
+    "location": "System Information Table, INVERTER row; also SLD Equipment Area labels",
+    "evidence": "Inverter model reads OPS SCI2750T CG US-800-36 V2 DERATED at 249.50kW/226.81kW. Quantities of 10 and 11 units per switchboard are legible and consistent with to
+2026-04-14 11:40:43 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:40:43 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make/Model Identification",
+    "status": "Pass",
+    "value": "Chint Power / OPE SCH279KTL-DO/US-800-36, 250kW AC Rated, Derated 249.50kW/226.81kW AC Rated, 800V 3PH, 36 MPPTs, Integrated DC Disconnect",
+    "evidence": "Inverter callout block at top of diagram clearly identifies model SCH279KTL-DO/US-800-36.",
+    "severity": "low",
+    "location": "Inverter callout note, top-center of DC Line Diagram"
+  },
+  {
+    "check": "Inverter Topology — String vs Ce
+2026-04-14 11:41:15 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:41:18 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-14 11:41:18 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 102, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1265, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 415, in analyze_page_image
+    return _claude_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 336, in _claude_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 104, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 327, in _call
+    return client.messages.create(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        model=_claude_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_utils\_utils.py", line 283, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\resources\messages\messages.py", line 996, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1368, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1141, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 5809624 bytes > 5242880 bytes'}, 'request_id': 'req_011Ca3v9gZgdbQtxTJoeatMv'}
+2026-04-14 11:42:09 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:42:51 | INFO     | access | 127.0.0.1 GET /api/health → 200
+2026-04-14 11:43:04 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 11:43:04 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 11:43:16 | INFO     | access | 127.0.0.1 POST /api/analyze → 200
+2026-04-14 11:43:32 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:43:32 | INFO     | app.analyzer | AI extracted 45 drawing index entries
+2026-04-14 11:43:32 | INFO     | app.analyzer | AI drawing index (45 sheets) replacing regex result (2 sheets)
+2026-04-14 11:44:06 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:44:06 | INFO     | app.analyzer | AI extracted 10 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kw', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio']
+2026-04-14 11:44:49 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:45:22 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:45:35 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:45:36 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-14 11:45:36 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 415, in analyze_page_image
+    return _claude_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 336, in _claude_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 104, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 327, in _call
+    return client.messages.create(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        model=_claude_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_utils\_utils.py", line 283, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\resources\messages\messages.py", line 996, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1368, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1141, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 5809624 bytes > 5242880 bytes'}, 'request_id': 'req_011Ca3vUkvtizrMqkWVQEakQ'}
+2026-04-14 11:45:46 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:46:54 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:46:54 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make, Model, and Quantity",
+    "category": "inverter",
+    "status": "Pass",
+    "value": "SMA OPS SC0750TC, US-800-36 V2 DERATED 249.50 kW/228.81 kW; Qty: 10/11 (Switchboard 1: 10, Switchboard 2: 11)",
+    "location": "System Information Table, INVERTER row; SLD Switchboard #1 and #2 labels",
+    "evidence": "Inverter identified as SMA OPS SC0750TC / US-800-36 V2 DERATED. Total inverter quantity reads 10/11 split across two switchboards. Total AC size shown
+2026-04-14 11:48:03 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:48:03 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make/Model and Topology",
+    "status": "Pass",
+    "value": "SolarEdge SCH279KTL-DO/US-800-36, 250kW AC rated, Derated 249.50kW/226.81kW AC rated, String Inverter with integrated DC disconnect",
+    "evidence": "Inverter header block clearly identifies SCH279KTL-DO/US-800-36 as a string inverter topology — strings connect directly to inverter MPPT inputs without separate DC combiner boxes.",
+    "severity": "low",
+    "location": "Inverter callout block, top
+2026-04-14 11:48:28 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:48:31 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-14 11:48:31 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 415, in analyze_page_image
+    return _claude_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 336, in _claude_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 104, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 327, in _call
+    return client.messages.create(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        model=_claude_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_utils\_utils.py", line 283, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\resources\messages\messages.py", line 996, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1368, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1141, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 5809624 bytes > 5242880 bytes'}, 'request_id': 'req_011Ca3vhdWmSkJFKVn5bEvZf'}
+2026-04-14 11:49:24 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:50:01 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:50:40 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:51:44 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:51:44 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make/Model Consistency",
+    "status": "Pass",
+    "value": "All sheets: OPS SC025PST, CPS US-800-36 V2 DERATED 249.50-kW/226.81-kW",
+    "evidence": "Inverter make/model reads identically in the System Information table on E-100, E-103, and E-301.",
+    "location": "System Information table, INVERTER row, all three sheets",
+    "severity": "low"
+  },
+  {
+    "check": "Inverter Quantity Consistency",
+    "status": "Pass",
+    "value": "All sheets: 10/11 (syst
+2026-04-14 11:51:46 | INFO     | access | 127.0.0.1 GET /api/result/2b552a09-05cc-49d5-98ce-f7342b01fc46 → 200
+2026-04-14 11:54:20 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-14 11:54:26 | INFO     | access | 127.0.0.1 POST /api/runs/ebb1d6c3-e3e0-45ba-aafe-bc1127d3f16f/reanalyze → 200
+2026-04-14 11:54:42 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:54:42 | INFO     | app.analyzer | AI extracted 45 drawing index entries
+2026-04-14 11:54:42 | INFO     | app.analyzer | AI drawing index (45 sheets) replacing regex result (2 sheets)
+2026-04-14 11:55:19 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:55:19 | INFO     | app.analyzer | AI extracted 10 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kw', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio']
+2026-04-14 11:55:39 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 11:55:39 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 11:55:57 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:56:25 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:56:38 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:56:40 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-14 11:56:40 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 415, in analyze_page_image
+    return _claude_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 336, in _claude_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 104, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 327, in _call
+    return client.messages.create(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        model=_claude_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_utils\_utils.py", line 283, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\resources\messages\messages.py", line 996, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1368, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1141, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 5809624 bytes > 5242880 bytes'}, 'request_id': 'req_011Ca3wKgAGb9NuXi7LQqdNe'}
+2026-04-14 11:56:49 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:57:58 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:57:58 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make/Model/Quantity Read",
+    "category": "inverter",
+    "status": "Pass",
+    "value": "CPS SCH275PT, OD US-800-36 V2 DERATED 249.50-kW/226.81-kW; Qty: 10/11 (two switchboards)",
+    "location": "System Information Table, Inverter row; also SLD Switchboard #1 and #2 inverter callouts",
+    "evidence": "Inverter identified as CPS SCH275PT / US-800-36 V2 derated to 249.50kW/226.81kW. Quantity shown as 10/11 per system information table. Total AC size shown a
+2026-04-14 11:59:09 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:59:09 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make/Model and Type",
+    "status": "Pass",
+    "value": "Shoals SCH279KTL-DO/US-800-36, 250kW AC rated, string inverter with integrated DC disconnect",
+    "evidence": "Inverter header block reads: INVERTER SCH279KTL-DO/US-800-36, 250.4kW AC RATED, DERATED 249.50kW/226.81 AC RATED, NO OF MPPTs = 36, 800V 3PH, FLA = 198.5A, 1.25x FLA = 247.6A, WITH INTEGRATED DC DISCONNECT. Strings connect directly to inverter MPPT inputs — confirmed string inverter topology.
+2026-04-14 11:59:36 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 11:59:38 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-14 11:59:38 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 415, in analyze_page_image
+    return _claude_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 336, in _claude_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 104, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 327, in _call
+    return client.messages.create(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        model=_claude_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_utils\_utils.py", line 283, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\resources\messages\messages.py", line 996, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1368, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1141, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 5809624 bytes > 5242880 bytes'}, 'request_id': 'req_011Ca3wYqTyKo3Xa8BdyJpyJ'}
+2026-04-14 12:00:30 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:01:02 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:01:32 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:02:42 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:02:42 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "Inverter Make/Model Consistency",
+    "status": "Pass",
+    "value": "All sheets: OPS SC62750T, CPS US-800-36 V2 DERATED 249.50-kW/226.81-kW",
+    "evidence": "System information table on E-100, E-103, and E-301 all consistently list the same inverter model.",
+    "location": "System Information table, INVERTER row, all sheets E-100, E-103, E-301"
+  },
+  {
+    "check": "Inverter Quantity Consistency",
+    "status": "Pass",
+    "value": "All sheets: 10/11 inverters",
+ 
+2026-04-14 12:03:19 | INFO     | access | 127.0.0.1 GET /api/result/c9007876-c261-4c0a-8e7f-1937c1771672 → 200
+2026-04-14 12:03:21 | INFO     | access | 127.0.0.1 GET /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-14 12:03:32 | INFO     | access | 127.0.0.1 OPTIONS /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-14 12:03:32 | INFO     | access | 127.0.0.1 DELETE /api/runs/3919ad6a-9faf-4126-8afa-c29c74a81856 → 200
+2026-04-14 12:03:39 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:03:39 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:03:42 | INFO     | access | 127.0.0.1 GET /api/runs/d673e3bc-59cb-456e-9fa9-72906efdef4c → 200
+2026-04-14 12:05:28 | INFO     | access | 127.0.0.1 POST /api/analyze → 200
+2026-04-14 12:06:09 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-14 12:06:09 | ERROR    | app.analyzer | AI spec extraction failed
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\analyzer.py", line 538, in extract_specs_from_pages
+    raw = analyze_multiple_images(images, _EXTRACT_SPECS_PROMPT)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 424, in analyze_multiple_images
+    return _claude_multiple_images(images, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 356, in _claude_multiple_images
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 104, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 350, in _call
+    return client.messages.create(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        model=_claude_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        max_tokens=4096,
+        ^^^^^^^^^^^^^^^^
+        messages=[{"role": "user", "content": content}],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_utils\_utils.py", line 283, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\resources\messages\messages.py", line 996, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/v1/messages",
+        ^^^^^^^^^^^^^^^
+    ...<30 lines>...
+        stream_cls=Stream[RawMessageStreamEvent],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1368, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\anthropic\_base_client.py", line 1141, in request
+    raise self._make_status_error_from_response(err.response) from None
+anthropic.BadRequestError: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 6689704 bytes > 5242880 bytes'}, 'request_id': 'req_011Ca3x3f4xYMt4zGZmYZqVj'}
+2026-04-14 12:07:00 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:07:36 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:07:49 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:08:04 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:08:16 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:09:04 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:10:08 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:10:08 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "inverter_make_model",
+    "status": "Pass",
+    "value": "Gamesa Electric PROTEUS PV4500",
+    "evidence": "Inverter identified as Gamesa Electric PROTEUS PV4500, a central inverter topology where strings route through DC combiner boxes before reaching the inverter.",
+    "severity": "low",
+    "location": "Diagram notes, upper right quadrant, inverter callout bubble"
+  },
+  {
+    "check": "inverter_topology",
+    "status": "Pass",
+    "value": "Central inverter with 
+2026-04-14 12:10:30 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:11:18 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:11:18 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:11:38 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:11:38 | WARNING  | app.gemini_analyzer | Could not parse JSON from Gemini response:
+```json
+[
+  {
+    "check": "system_parameters_module_count",
+    "status": "Pass",
+    "location": "System Information Table, MODULES/STRING and STRING QUANTITY rows",
+    "evidence": "Modules/string = 6 (implied from strings), string quantity = 8000, module quantity = 46000 (shown). However, 6 modules/string × 8000 strings = 48,000, not 46,000. This warrants review — but string quantity may represent something else. Flagging as Needs Review.",
+    "severity": "medium"
+  },
+  {
+    "check": "sys
+2026-04-14 12:12:30 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:12:59 | INFO     | httpx | HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-14 12:13:37 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:13:37 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:13:39 | INFO     | access | 127.0.0.1 GET /api/health → 200
+2026-04-14 12:16:26 | INFO     | access | 127.0.0.1 GET /api/health → 200
+2026-04-14 12:16:59 | INFO     | access | 127.0.0.1 POST /api/analyze → 200
+2026-04-14 12:17:55 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:17:55 | INFO     | app.analyzer | AI extracted 18 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kva', 'inverter_kw', 'inverter_max_vdc', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio', 'transformer_kva', 'transformer_primary_voltage', 'transformer_secondary_voltage', 'transformer_impedance', 'transformer_bil', 'poi_voltage']
+2026-04-14 12:18:18 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:18:38 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:18:47 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:18:58 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:19:04 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:19:19 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:19:20 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2026-04-14 12:19:20 | ERROR    | app.gemini_analyzer | Gemini check _gemini_multi_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1370, in _gemini_multi_page_check
+    raw = analyze_multiple_images(images, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 433, in analyze_multiple_images
+    return _openai_multiple_images(images, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 274, in _openai_multiple_images
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 107, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 269, in _call
+    return client.chat.completions.create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model=_openai_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+        messages=[{"role": "user", "content": content}],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1211, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.PermissionDeniedError: Error code: 403 - {'error': {'message': 'Project `proj_GB10ZwgJdJ1g6xaGpysVsbqd` does not have access to model `gpt-5.4`', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}}
+2026-04-14 12:19:30 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:19:31 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2026-04-14 12:19:31 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 424, in analyze_page_image
+    return _openai_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 258, in _openai_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 107, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 250, in _call
+    return client.chat.completions.create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model=_openai_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1211, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.PermissionDeniedError: Error code: 403 - {'error': {'message': 'Project `proj_GB10ZwgJdJ1g6xaGpysVsbqd` does not have access to model `gpt-5.4`', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}}
+2026-04-14 12:19:31 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2026-04-14 12:19:31 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 424, in analyze_page_image
+    return _openai_page_image(image_bytes, prompt, mime_type, deep=deep)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 258, in _openai_page_image
+    response = _call_with_retry(_call)
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 107, in _call_with_retry
+    return fn()
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 250, in _call
+    return client.chat.completions.create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model=_openai_model(deep),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        ]}],
+        ^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1211, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.PermissionDeniedError: Error code: 403 - {'error': {'message': 'Project `proj_GB10ZwgJdJ1g6xaGpysVsbqd` does not have access to model `gpt-5.4`', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}}
+2026-04-14 12:19:37 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:19:44 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:19:59 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:20:19 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:20:32 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:20:52 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:20:56 | INFO     | access | 127.0.0.1 GET /api/result/154278c0-a94e-42c9-aa77-e5f5b9520e25 → 200
+2026-04-14 12:21:22 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:21:22 | INFO     | access | 127.0.0.1 GET /api/runs → 200
+2026-04-14 12:21:37 | INFO     | access | 127.0.0.1 GET /api/runs/e5fb4f79-04a6-4ad0-8795-815e62d5a763 → 200
+2026-04-14 12:21:56 | INFO     | access | 127.0.0.1 POST /api/analyze → 200
+2026-04-14 12:22:43 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:22:43 | INFO     | app.analyzer | AI extracted 18 spec fields from 4 pages: ['module_stc_watts', 'string_size', 'string_quantity', 'total_dc_kw', 'inverter_make', 'inverter_model', 'inverter_kva', 'inverter_kw', 'inverter_max_vdc', 'inverter_quantity', 'total_ac_kva', 'dc_ac_ratio', 'transformer_kva', 'transformer_primary_voltage', 'transformer_secondary_voltage', 'transformer_impedance', 'transformer_bil', 'poi_voltage']
+2026-04-14 12:23:11 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:23:27 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:23:35 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:23:45 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:23:51 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:23:59 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:24:00 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2026-04-14 12:24:00 | ERROR    | app.gemini_analyzer | Gemini check _gemini_multi_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    2. **Date** is shown
+                   ^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1370, in _gemini_multi_page_check
+    value = finding.get("value") or ""
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 433, in analyze_multiple_images
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 274, in _openai_multiple_images
+    # ═══════════════════════════════════════════════════════════════════════════
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 107, in _call_with_retry
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 269, in _call
+    if mime_type == "application/pdf":
+               ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+    
+    
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1211, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.PermissionDeniedError: Error code: 403 - {'error': {'message': 'Project `proj_GB10ZwgJdJ1g6xaGpysVsbqd` does not have access to model `gpt-5.4`', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}}
+2026-04-14 12:24:07 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:24:08 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2026-04-14 12:24:08 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    2. **Date** is shown
+                   ^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    if severity not in ("low", "medium", "high"):
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 424, in analyze_page_image
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 258, in _openai_page_image
+    model=_OPENAI_MODEL,
+       ^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 107, in _call_with_retry
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 250, in _call
+        return response.choices[0].message.content or ""
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        def _call():
+        ^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1211, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.PermissionDeniedError: Error code: 403 - {'error': {'message': 'Project `proj_GB10ZwgJdJ1g6xaGpysVsbqd` does not have access to model `gpt-5.4`', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}}
+2026-04-14 12:24:09 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2026-04-14 12:24:09 | ERROR    | app.gemini_analyzer | Gemini check _gemini_page_check failed – skipping
+Traceback (most recent call last):
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 118, in _safe_gemini_call
+    2. **Date** is shown
+                   ^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_analyzer.py", line 1281, in _gemini_page_check
+    if severity not in ("low", "medium", "high"):
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 424, in analyze_page_image
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 258, in _openai_page_image
+    model=_OPENAI_MODEL,
+       ^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 107, in _call_with_retry
+  File "D:\code\QAQC\planset-qc-app\backend\app\gemini_client.py", line 250, in _call
+        return response.choices[0].message.content or ""
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        def _call():
+        ^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_utils\_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1211, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\code\QAQC\planset-qc-app\backend\.venv\Lib\site-packages\openai\_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.PermissionDeniedError: Error code: 403 - {'error': {'message': 'Project `proj_GB10ZwgJdJ1g6xaGpysVsbqd` does not have access to model `gpt-5.4`', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}}
+2026-04-14 12:24:13 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:24:20 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:24:35 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:24:50 | INFO     | access | 127.0.0.1 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-14 12:24:50 | INFO     | access | 127.0.0.1 GET /api/runs/d673e3bc-59cb-456e-9fa9-72906efdef4c → 200
+2026-04-14 12:24:53 | INFO     | access | 127.0.0.1 GET /api/runs/5fdfb013-f51e-474c-9f9f-72a1ef7ce6b5 → 200
+2026-04-14 12:24:54 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:24:57 | INFO     | access | 127.0.0.1 GET /api/runs/e5fb4f79-04a6-4ad0-8795-815e62d5a763 → 200
+2026-04-14 12:25:07 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:25:21 | INFO     | httpx | HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-14 12:25:25 | INFO     | access | 127.0.0.1 GET /api/result/2edcf2fa-ecd9-459b-ae6e-ea0c627efaf6 → 200
+2026-04-14 12:30:26 | INFO     | access | 127.0.0.1 GET /api/runs/b69e2e82-91cf-426a-95aa-d01ef4e2b7c9 → 200
+2026-04-14 12:30:27 | INFO     | access | 127.0.0.1 GET /api/runs/b69e2e82-91cf-426a-95aa-d01ef4e2b7c9 → 200

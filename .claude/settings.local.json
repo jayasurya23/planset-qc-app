@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node_modules/.bin/vite)",
+      "Bash(taskkill //f //im \"python.exe\")",
+      "Bash(taskkill //f //im \"node.exe\")"
+    ]
+  }
+}
