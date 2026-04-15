@@ -126,6 +126,16 @@ export interface ProjectDetails {
   special_notes: string
 }
 
+export interface SupportingDoc {
+  filename: string
+  doc_type: string
+  summary?: string
+  specs?: Record<string, unknown>
+  raw_excerpt?: string
+  page_count?: number
+  source_pages?: number[]
+}
+
 export interface RunSummary {
   indexed_sheet_count: number
   actual_sheet_count: number
@@ -134,6 +144,9 @@ export interface RunSummary {
   extra_sheets: string[]
   gemini_usage?: GeminiUsage
   page_sheet_map?: Record<string, string>
+  duration_seconds?: number
+  deep_mode?: boolean
+  supporting_docs?: SupportingDoc[]
 }
 
 export interface RunData {

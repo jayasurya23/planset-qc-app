@@ -58,6 +58,7 @@ category_order:
   - Labels
   - PVSyst Analysis Summary
   - Cross-Sheet Consistency
+  - Supporting Document Consistency
 
 rules:
 
@@ -180,13 +181,9 @@ rules:
     check_type: gemini_vision
     confidence: 0.80
 
-  - key: title_block_der_number
-    category: Title Block
-    title: DER Number (if Ameren)
-    description: DER number should appear in the title block if the utility is Ameren.
-    severity: low
-    check_type: gemini_vision
-    confidence: 0.70
+  # DER Number is CONDITIONAL — only reviewed when present on the drawing.
+  # A missing DER number is not a defect; the vision prompt skips emitting
+  # a finding when it isn't shown, so no rule entry is needed here.
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Cover Sheet

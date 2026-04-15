@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -349,18 +350,58 @@ def rect_to_dict(rect: fitz.Rect | None) -> dict | None:
     return {"x0": rect.x0, "y0": rect.y0, "x1": rect.x1, "y1": rect.y1}
 
 
+_NUM_WITH_UNIT = re.compile(
+    r"\d[\d,]*(?:\.\d+)?\s*"
+    r"(?:kV|V|kA|A|MVA|kVA|kW|MWp|kWp|MW|W|ft|in|°|deg|%|Hz|VA)",
+    re.IGNORECASE,
+)
+
+
+def _search_variants(needle: str) -> list[str]:
+    """Generate fuzzy search variants of a needle so PDF text-layer quirks
+    (comma/space differences, trailing units) don't cause silent misses.
+    Order matters — we try the most specific variants first.
+    """
+    needle = (needle or "").strip().strip('"\'')
+    if not needle:
+        return []
+    variants: list[str] = []
+
+    def _push(s: str) -> None:
+        s = s.strip()
+        if s and len(s) >= 3 and s not in variants:
+            variants.append(s)
+
+    # Raw needle
+    _push(needle)
+    # No thousands-separator commas — PDF text layer often has "3078" not "3,078"
+    _push(needle.replace(",", ""))
+    # Collapse whitespace
+    _push(re.sub(r"\s+", " ", needle))
+    # Drop trailing punctuation
+    _push(needle.rstrip(".,;:"))
+    # Leading substrings (for long needles)
+    if len(needle) > 24:
+        _push(needle[:40])
+        _push(needle[:24])
+    # Stand-alone numeric+unit tokens inside the needle ("3078 kWp", "380 A")
+    for m in _NUM_WITH_UNIT.finditer(needle):
+        _push(m.group(0))
+        # Also try the normalized number alone
+        _push(re.sub(r"[,\s]+", "", m.group(0)))
+    return variants
+
+
 def _search_page_multi(page: fitz.Page, needles: list[str]) -> list[fitz.Rect]:
-    """Search a page for each needle, return all match rectangles (deduped)."""
+    """Search a page for each needle, return all match rectangles (deduped).
+
+    Uses several fuzzy variants per needle so tiny text-layer differences
+    (commas, unit spacing) don't cause silent misses.
+    """
     rects: list[fitz.Rect] = []
     seen: set[tuple[float, float, float, float]] = set()
     for needle in needles:
-        if not needle:
-            continue
-        # Try exact text first, then fall back to a shorter leading substring
-        for term in (needle, needle[:60], needle[:40], needle[:24]):
-            term = (term or "").strip()
-            if not term or len(term) < 3:
-                continue
+        for term in _search_variants(needle):
             try:
                 matches = page.search_for(term, quads=False)
             except Exception:
@@ -386,6 +427,118 @@ def _union_rects(rects: list[fitz.Rect]) -> fitz.Rect | None:
     return fitz.Rect(x0, y0, x1, y1)
 
 
+def _cell_for_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
+    """Return the bounding rect of the table cell containing ``rect``,
+    or None if ``rect`` isn't inside a detected table cell."""
+    try:
+        finder = page.find_tables()
+    except Exception:
+        return None
+    tables = getattr(finder, "tables", None) or []
+    for table in tables:
+        cells = getattr(table, "cells", None) or []
+        for cell in cells:
+            if not cell:
+                continue
+            try:
+                cell_rect = fitz.Rect(cell)
+            except Exception:
+                continue
+            if cell_rect.contains(rect) or cell_rect.intersects(rect):
+                # Ignore huge header/full-table cells that would cover the
+                # whole page — only accept "reasonable" cell sizes.
+                if cell_rect.width < page.rect.width * 0.95 and cell_rect.height < page.rect.height * 0.5:
+                    return cell_rect
+    return None
+
+
+def _line_for_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
+    """Return the bounding rect of the full text line containing ``rect``.
+
+    Useful when the matched substring is short (e.g. "380A") but the
+    reader really wants to see the whole row: "AC FEEDER | FLA 380A | ..."
+    """
+    try:
+        td = page.get_text("dict")
+    except Exception:
+        return None
+    for block in td.get("blocks", []):
+        for line in block.get("lines", []):
+            bbox = line.get("bbox")
+            if not bbox:
+                continue
+            try:
+                line_rect = fitz.Rect(bbox)
+            except Exception:
+                continue
+            if line_rect.intersects(rect):
+                # Require a meaningful overlap with the match
+                overlap = line_rect & rect
+                if overlap.get_area() > 0.3 * rect.get_area():
+                    return line_rect
+    return None
+
+
+def _expand_hit(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect:
+    """Expand a narrow word-level match to its enclosing table cell, or
+    failing that, its full text line. This makes the highlight point at
+    the value *and* its surrounding context (row label, units, etc.)
+    instead of a cramped 40-pixel box."""
+    cell = _cell_for_rect(page, rect)
+    if cell is not None:
+        return cell
+    line = _line_for_rect(page, rect)
+    if line is not None:
+        return line
+    return rect
+
+
+def _cluster_hits(rects: list[fitz.Rect], page: fitz.Page) -> list[fitz.Rect]:
+    """When many hits exist across the page (common for repeated tokens
+    like "500 kcmil AL"), keep only the densest cluster — the one whose
+    members are physically close to each other. Prevents the classic
+    "highlight every occurrence across the drawing" mistake.
+
+    Heuristic: if hits span > 30% of the page diagonally, keep only the
+    tightest grouping (one-step DBSCAN with eps = 15% of page diagonal).
+    """
+    if len(rects) <= 1:
+        return rects
+    diag = (page.rect.width ** 2 + page.rect.height ** 2) ** 0.5
+    span_x = max(r.x1 for r in rects) - min(r.x0 for r in rects)
+    span_y = max(r.y1 for r in rects) - min(r.y0 for r in rects)
+    if (span_x ** 2 + span_y ** 2) ** 0.5 < 0.30 * diag:
+        return rects  # already compact
+    eps = 0.15 * diag
+
+    def _center(r: fitz.Rect) -> tuple[float, float]:
+        return ((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+
+    # Build clusters by greedy expansion
+    unassigned = list(range(len(rects)))
+    clusters: list[list[int]] = []
+    while unassigned:
+        seed = unassigned.pop(0)
+        cluster = [seed]
+        changed = True
+        while changed:
+            changed = False
+            for i in list(unassigned):
+                cx, cy = _center(rects[i])
+                if any(
+                    abs(cx - _center(rects[j])[0]) < eps and
+                    abs(cy - _center(rects[j])[1]) < eps
+                    for j in cluster
+                ):
+                    cluster.append(i)
+                    unassigned.remove(i)
+                    changed = True
+        clusters.append(cluster)
+    # Return the densest (largest) cluster
+    best = max(clusters, key=len)
+    return [rects[i] for i in best]
+
+
 def render_issue_artifacts(
     doc: fitz.Document,
     issue_id: str,
@@ -397,10 +550,16 @@ def render_issue_artifacts(
 ) -> tuple[str | None, str | None, dict | None]:
     """Render a highlighted page preview + cropped snippet for an issue.
 
-    If ``target_texts`` is provided, every match for every string is highlighted
-    individually on the preview; the returned bbox is the union of all matches
-    and the snippet is cropped to that union. Falls back to ``target_text`` or
-    the footer bbox when nothing is found.
+    If any of the target texts is found on the page, every match is drawn
+    individually on the preview and the snippet is cropped to the union of
+    matches. If no target texts are found, we do NOT stamp the page with a
+    misleading fallback rectangle — we return the plain page image and a
+    null bbox so the UI shows the page without a fake highlight. This
+    prevents unrelated findings on the same page from sharing identical
+    red boxes.
+
+    An explicit ``fallback_bbox`` is still honored (used by the drawing-index
+    and sheet-existence checks that genuinely target the footer).
     """
     if not page_number:
         return None, None, None
@@ -413,10 +572,38 @@ def render_issue_artifacts(
     if target_text and target_text not in needles:
         needles.append(target_text)
 
-    hit_rects = _search_page_multi(page, needles) if needles else []
+    raw_hits = _search_page_multi(page, needles) if needles else []
+
+    # Drop far-apart stray matches (same token occurring elsewhere on the
+    # drawing). Keeps only the densest cluster when hits are scattered.
+    clustered = _cluster_hits(raw_hits, page) if raw_hits else []
+
+    # Expand each hit to its table cell or text line so we highlight the
+    # whole row / cell instead of a cramped word-level box.
+    hit_rects: list[fitz.Rect] = []
+    seen_expanded: set[tuple[float, float, float, float]] = set()
+    for r in clustered:
+        expanded = _expand_hit(page, r)
+        key = (
+            round(expanded.x0, 1), round(expanded.y0, 1),
+            round(expanded.x1, 1), round(expanded.y1, 1),
+        )
+        if key in seen_expanded:
+            continue
+        seen_expanded.add(key)
+        hit_rects.append(expanded)
+
     union = _union_rects(hit_rects) if hit_rects else None
-    bbox = union or fallback_bbox or default_footer_bbox(page)
-    crop_bbox = expanded_rect(bbox, page.rect, pad=24)
+
+    # Choose a bbox. Priority: matched needles > explicit fallback > no bbox.
+    # We deliberately do NOT default to ``default_footer_bbox`` anymore —
+    # that caused every unlocated finding on a page to share the same red box.
+    bbox = union or fallback_bbox
+
+    if bbox is not None:
+        crop_bbox = expanded_rect(bbox, page.rect, pad=24)
+    else:
+        crop_bbox = page.rect  # whole page for snippet fallback
     crop_bbox = fitz.Rect(
         min(crop_bbox.x0, crop_bbox.x1),
         min(crop_bbox.y0, crop_bbox.y1),
@@ -453,8 +640,11 @@ def render_issue_artifacts(
             _draw_rect(r, outline="#e12a3f", width=4, pad=2)
         if len(hit_rects) > 1 and union is not None:
             _draw_rect(union, outline="#ffb020", width=3, pad=10)
-    else:
-        _draw_rect(crop_bbox, outline="#e12a3f", width=6, pad=0)
+    elif fallback_bbox is not None:
+        # Only the caller's explicit fallback gets a box (drawing-index /
+        # sheet-existence checks that truly target the footer).
+        _draw_rect(fallback_bbox, outline="#e12a3f", width=6, pad=0)
+    # else: no highlight drawn — the preview is the plain page image.
 
     preview_path = previews_dir / f"{issue_id}.png"
     preview.save(preview_path)
@@ -471,7 +661,8 @@ def render_issue_artifacts(
     snippet_path = snippets_dir / f"{issue_id}.png"
     snippet.save(snippet_path)
 
-    return str(snippet_path), str(preview_path), rect_to_dict(crop_bbox)
+    final_bbox = union if union is not None else (fallback_bbox if fallback_bbox is not None else None)
+    return str(snippet_path), str(preview_path), rect_to_dict(final_bbox) if final_bbox else None
 
 
 def make_issue(
@@ -649,11 +840,14 @@ def analyze_pdf(
     original_filename: str,
     progress_cb: object = None,
     project_details: dict | None = None,
+    use_deep: bool = True,
+    supporting_docs: list[dict] | None = None,
 ) -> tuple[dict, list[dict]]:
     def _progress(step: str, detail: str, pct: int) -> None:
         if progress_cb and callable(progress_cb):
             progress_cb(step, detail, pct)
 
+    _analysis_start = time.monotonic()
     run_id = str(uuid.uuid4())
     run_dir = pdf_path.parent
     doc = fitz.open(pdf_path)
@@ -1262,6 +1456,12 @@ def analyze_pdf(
         from .gemini_analyzer import run_gemini_checks
 
         reset_usage()
+
+        # Forward per-check progress from run_gemini_checks so the UI
+        # bar doesn't sit at 40% for the whole Gemini phase.
+        def _gem_progress(detail: str, pct: int) -> None:
+            _progress("gemini", detail, pct)
+
         gemini_issues = run_gemini_checks(
             doc=doc,
             pages=pages,
@@ -1270,6 +1470,9 @@ def analyze_pdf(
             run_dir=run_dir,
             actual_numbers=actual_numbers,
             project_details=project_details,
+            use_deep=use_deep,
+            supporting_docs=supporting_docs,
+            progress_cb=_gem_progress,
         )
         issues.extend(gemini_issues)
         gemini_usage = get_usage()
@@ -1300,6 +1503,8 @@ def analyze_pdf(
         if page.sheet_number
     }
 
+    duration_seconds = round(time.monotonic() - _analysis_start, 2)
+
     summary = {
         "indexed_sheet_count": len(indexed_numbers),
         "actual_sheet_count": len(actual_numbers),
@@ -1308,6 +1513,9 @@ def analyze_pdf(
         "extra_sheets": extra_sheets,
         "gemini_usage": gemini_usage,
         "page_sheet_map": page_sheet_map,
+        "duration_seconds": duration_seconds,
+        "deep_mode": bool(use_deep),
+        "supporting_docs": supporting_docs or [],
     }
 
     run = {
@@ -1321,6 +1529,8 @@ def analyze_pdf(
         "status_counts": dict(status_counts),
         "categories": ordered_categories,
         "project_details": project_details,
+        "duration_seconds": duration_seconds,
+        "deep_mode": bool(use_deep),
     }
     doc.close()
     return run, issues

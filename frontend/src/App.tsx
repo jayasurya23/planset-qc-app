@@ -6,6 +6,7 @@ import type {
   CategorySummary,
   GeminiUsage,
   ProjectDetails,
+  SupportingDoc,
 } from "./types";
 
 const API = `http://${window.location.hostname}:8000`;
@@ -59,6 +60,16 @@ function pdfPageUrl(run: RunData, pg?: number | null) {
   return pg ? `${artifactUrl(run.pdf_path)}#page=${pg}` : null;
 }
 
+function formatDuration(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "—";
+  if (sec < 60) return `${sec.toFixed(sec < 10 ? 1 : 0)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec - m * 60);
+  if (m < 60) return `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m - h * 60}m`;
+}
+
 // ── Tiny helpers ──
 const SL: Record<string, string> = {
   Pass: "Pass",
@@ -82,7 +93,92 @@ function catPct(c: CategorySummary) {
 
 // ── Components ──
 
-function GeminiBar({ u }: { u?: GeminiUsage }) {
+const WAITING_LINES: string[] = [
+  "Counting modules one by one…",
+  "Arguing with NEC 310.16 about ampacity…",
+  "Looking for sheet E-300 in the wrong folder…",
+  "Squinting at title blocks…",
+  "Verifying that 4160V is not 480V (again)…",
+  "Converting kcmil to feelings…",
+  "Asking the inverter what its true kVA is…",
+  "Re-reading the CESIR so you don't have to…",
+  "Chasing a grounding conductor down a rabbit hole…",
+  "Checking if bifacial means 2× the drama…",
+  "Counting strings so many times it got emotional…",
+  "Politely disagreeing with the designer…",
+  "Confirming north arrow points up-ish…",
+  "Calculating DC/AC ratio with vibes…",
+  "Double-checking the PVSyst loss stack…",
+  "Looking for a missing fuse rating…",
+  "Zooming into the title block at 800%…",
+  "Asking: is this a 3-line or a 2.5-line diagram?…",
+  "Counting dashes on the dashed line (again)…",
+  "Wondering if Z% should be a love language…",
+  "Re-checking the BIL because BIL always lies…",
+  "Making sure the inverter isn't actually a toaster…",
+  "Contemplating the difference between AL and CU philosophically…",
+  "Asking: where did all these disconnects come from?…",
+  "Measuring working clearance in imaginary feet…",
+];
+
+const MASCOT_FRAMES = ["\u{1F50D}", "\u{1F4D0}", "\u{1F4CF}", "\u{1F4CB}", "\u{1F9EE}", "\u26A1"];
+// magnifying glass, triangular ruler, straight ruler, clipboard, abacus, lightning
+
+function WaitingAnimation({ pct, label }: { pct: number; label?: string }) {
+  const [lineIdx, setLineIdx] = useState(() =>
+    Math.floor(Math.random() * WAITING_LINES.length),
+  );
+  const [frameIdx, setFrameIdx] = useState(0);
+  useEffect(() => {
+    const t1 = setInterval(
+      () => setLineIdx((i) => (i + 1) % WAITING_LINES.length),
+      3500,
+    );
+    const t2 = setInterval(
+      () => setFrameIdx((i) => (i + 1) % MASCOT_FRAMES.length),
+      550,
+    );
+    return () => {
+      clearInterval(t1);
+      clearInterval(t2);
+    };
+  }, []);
+  const clamped = Math.min(100, Math.max(0, pct));
+  return (
+    <div className="topwait" aria-live="polite" role="status">
+      <div className="topwait-bar">
+        <div
+          className="topwait-fill"
+          style={{ width: `${clamped}%` }}
+        />
+        <div className="topwait-shimmer" />
+        <span
+          className="topwait-mascot"
+          style={{ left: `${Math.min(98, Math.max(1, clamped))}%` }}
+        >
+          {MASCOT_FRAMES[frameIdx]}
+        </span>
+      </div>
+      <div className="topwait-meta">
+        <span className="topwait-pct">{Math.round(clamped)}%</span>
+        {label && <span className="topwait-step">{label}</span>}
+        <span className="topwait-quip" key={lineIdx}>
+          {WAITING_LINES[lineIdx]}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function GeminiBar({
+  u,
+  durationSeconds,
+  deepMode,
+}: {
+  u?: GeminiUsage;
+  durationSeconds?: number | null;
+  deepMode?: boolean | null;
+}) {
   if (!u || !u.api_calls) return null;
   return (
     <div className="gem">
@@ -96,6 +192,22 @@ function GeminiBar({ u }: { u?: GeminiUsage }) {
       <span className="gem-cost">
         ~${((u.total_tokens / 1e6) * 0.1).toFixed(4)}
       </span>
+      {durationSeconds != null && (
+        <>
+          <span className="gem-sep">&middot;</span>
+          <span className="gem-text" title="Total analysis time">
+            {formatDuration(durationSeconds)}
+          </span>
+        </>
+      )}
+      {deepMode != null && (
+        <>
+          <span className="gem-sep">&middot;</span>
+          <span className={`mode-pill ${deepMode ? "mode-deep" : "mode-mini"}`}>
+            {deepMode ? "Deep" : "Mini"}
+          </span>
+        </>
+      )}
     </div>
   );
 }
@@ -159,6 +271,51 @@ export default function App() {
   const pdHasValues = Object.values(pd).some((v) => v && String(v).trim());
   const [parsing, setParsing] = useState(false);
   const [parseMsg, setParseMsg] = useState("");
+  const [deepMode, setDeepMode] = useState(true);
+  const [supportingDocs, setSupportingDocs] = useState<SupportingDoc[]>([]);
+  const [supportingLoading, setSupportingLoading] = useState(false);
+  const [supportingMsg, setSupportingMsg] = useState("");
+
+  const parseSupportingDocs = async (fileList: FileList) => {
+    setSupportingLoading(true);
+    setSupportingMsg("Reading engineering documents...");
+    const fd = new FormData();
+    for (let i = 0; i < fileList.length; i++) fd.append("files", fileList[i]);
+    try {
+      const r = await fetch(`${API}/api/parse-supporting-docs`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!r.ok) {
+        setSupportingMsg(`Error: ${await r.text()}`);
+        return;
+      }
+      const d = (await r.json()) as { supporting_docs: SupportingDoc[] };
+      const incoming = d.supporting_docs || [];
+      setSupportingDocs((prev) => {
+        const byName = new Map<string, SupportingDoc>();
+        for (const p of prev) byName.set(p.filename, p);
+        for (const x of incoming) byName.set(x.filename, x);
+        return Array.from(byName.values());
+      });
+      setSupportingMsg(
+        incoming.length
+          ? `Loaded ${incoming.length} evidence doc${incoming.length > 1 ? "s" : ""}.`
+          : "No evidence extracted.",
+      );
+      setTimeout(() => setSupportingMsg(""), 4000);
+    } catch (err) {
+      setSupportingMsg(
+        err instanceof Error ? err.message : "Failed to parse supporting docs",
+      );
+    } finally {
+      setSupportingLoading(false);
+    }
+  };
+
+  const removeSupportingDoc = (filename: string) => {
+    setSupportingDocs((prev) => prev.filter((d) => d.filename !== filename));
+  };
 
   const parseDocuments = async (fileList: FileList) => {
     setParsing(true);
@@ -365,6 +522,10 @@ export default function App() {
     fd.append("file", inp.files[0]);
     if (projName.trim()) fd.append("project_name", projName.trim());
     if (pdHasValues) fd.append("project_details", JSON.stringify(pd));
+    fd.append("use_deep", deepMode ? "true" : "false");
+    if (supportingDocs.length > 0) {
+      fd.append("supporting_docs", JSON.stringify(supportingDocs));
+    }
     setUploading(true);
     setProgress("Uploading...");
     setProgressPct(5);
@@ -422,8 +583,11 @@ export default function App() {
     setProgress("Re-analyzing...");
     setProgressPct(10);
     try {
+      const rfd = new FormData();
+      rfd.append("use_deep", deepMode ? "true" : "false");
       const r = await fetch(`${API}/api/runs/${id}/reanalyze`, {
         method: "POST",
+        body: rfd,
       });
       if (!r.ok) {
         setProgress(`Error: ${await r.text()}`);
@@ -515,6 +679,10 @@ export default function App() {
   // ── Render ──
   return (
     <div className="app">
+      {/* ── Global top-bar waiting animation ── */}
+      {uploading && (
+        <WaitingAnimation pct={progressPct} label={progress} />
+      )}
       {/* ── Sidebar ── */}
       <aside className={`side ${sideOpen ? "" : "collapsed"}`}>
         <div className="side-head">
@@ -522,7 +690,7 @@ export default function App() {
             <div className="brand-mark">CE</div>
             <div className="brand-text">
               <span className="brand-sub">Castillo Engineering</span>
-              <span className="brand-name">Planset QC <span style={{fontSize:"0.6em",opacity:0.5,fontWeight:400}}>v0.2.0</span></span>
+              <span className="brand-name">Planset QC <span style={{fontSize:"0.6em",opacity:0.5,fontWeight:400}}>v0.3.0</span></span>
             </div>
           </div>
           <button
@@ -557,6 +725,67 @@ export default function App() {
                 Details
                 {pdHasValues && <span className="btn-pd-dot" />}
               </button>
+              <label
+                className="deep-toggle"
+                title={
+                  deepMode
+                    ? "Hybrid: heavy reasoning checks (SLD, DC, TLD, cross-sheet, sysinfo) use the full model; the rest use mini."
+                    : "Fast/cheap: every check uses the mini model."
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={deepMode}
+                  onChange={(e) => setDeepMode(e.target.checked)}
+                />
+                <span>Deep mode {deepMode ? "(hybrid)" : "(mini only)"}</span>
+              </label>
+              <div className="sd-box">
+                <div className="sd-label">
+                  Supporting documents{" "}
+                  <span className="sd-hint">
+                    (CESIR, PVSyst, ampacity, …)
+                  </span>
+                </div>
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.xlsx,.xls,.csv,.txt,.eml,.msg,.png,.jpg,.jpeg"
+                  className="si"
+                  disabled={supportingLoading}
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      parseSupportingDocs(e.target.files);
+                      e.target.value = "";
+                    }
+                  }}
+                />
+                {supportingMsg && (
+                  <div className="sd-msg">{supportingMsg}</div>
+                )}
+                {supportingDocs.length > 0 && (
+                  <ul className="sd-list">
+                    {supportingDocs.map((d) => (
+                      <li key={d.filename} className="sd-item">
+                        <span className={`sd-type sd-type-${d.doc_type}`}>
+                          {d.doc_type}
+                        </span>
+                        <span className="sd-name" title={d.summary || ""}>
+                          {d.filename}
+                        </span>
+                        <button
+                          type="button"
+                          className="sd-del"
+                          title="Remove"
+                          onClick={() => removeSupportingDoc(d.filename)}
+                        >
+                          &times;
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <button className="btn-upload" disabled={uploading}>
                 {uploading ? "Analyzing\u2026" : "Analyze PDF"}
               </button>
@@ -588,7 +817,15 @@ export default function App() {
                   }}
                 >
                   <div className="run-item-name">{r.project_name}</div>
-                  <div className="run-item-meta">{r.original_filename}</div>
+                  <div className="run-item-meta">
+                    {r.original_filename}
+                    {r.summary?.duration_seconds != null && (
+                      <> &middot; {formatDuration(r.summary.duration_seconds)}</>
+                    )}
+                    {r.summary?.deep_mode === false && (
+                      <> &middot; <em>mini</em></>
+                    )}
+                  </div>
                   <div className="run-item-pills">
                     <span className="pill pill-p">
                       {r.issues
@@ -1349,7 +1586,26 @@ export default function App() {
                   {run.original_filename} &middot; {run.page_count} pages
                   &middot; {new Date(run.created_at).toLocaleDateString()}
                 </div>
-                <GeminiBar u={run.summary.gemini_usage} />
+                <GeminiBar
+                  u={run.summary.gemini_usage}
+                  durationSeconds={run.summary.duration_seconds}
+                  deepMode={run.summary.deep_mode}
+                />
+                {run.summary.supporting_docs &&
+                  run.summary.supporting_docs.length > 0 && (
+                    <div className="evidence-bar">
+                      <span className="evidence-label">Evidence:</span>
+                      {run.summary.supporting_docs.map((d) => (
+                        <span
+                          key={d.filename}
+                          className={`sd-type sd-type-${d.doc_type}`}
+                          title={`${d.filename}${d.summary ? " — " + d.summary : ""}`}
+                        >
+                          {d.doc_type}
+                        </span>
+                      ))}
+                    </div>
+                  )}
               </div>
               <div className="hdr-right">
                 <button

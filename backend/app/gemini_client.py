@@ -21,15 +21,28 @@ log = logging.getLogger(__name__)
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 # ── Provider selection ────────────────────────────────────────────────────
-AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()  # "gemini" or "openai"
+# "gemini" or "openai"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
 
 # Gemini settings
 _GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 _GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Optional stronger model for complex reasoning (SLD validation, cross-sheet
+# consistency, etc.). Falls back to the standard model when unset.
+_GEMINI_MODEL_DEEP = os.getenv("GEMINI_MODEL_DEEP", "") or _GEMINI_MODEL
 
 # OpenAI settings
 _OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 _OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+_OPENAI_MODEL_DEEP = os.getenv("OPENAI_MODEL_DEEP", "") or _OPENAI_MODEL
+
+
+def _pick_openai_model(deep: bool) -> str:
+    return _OPENAI_MODEL_DEEP if deep else _OPENAI_MODEL
+
+
+def _pick_gemini_model(deep: bool) -> str:
+    return _GEMINI_MODEL_DEEP if deep else _GEMINI_MODEL
 
 _REQUEST_TIMEOUT = int(os.getenv("AI_TIMEOUT", "90"))  # seconds
 _MAX_RETRIES = int(os.getenv("AI_RETRIES", "2"))
@@ -60,9 +73,12 @@ def _track_gemini(response) -> None:
         _usage["api_calls"] += 1
         meta = getattr(response, "usage_metadata", None)
         if meta:
-            _usage["prompt_tokens"] += getattr(meta, "prompt_token_count", 0) or 0
-            _usage["completion_tokens"] += getattr(meta, "candidates_token_count", 0) or 0
-            _usage["total_tokens"] += getattr(meta, "total_token_count", 0) or 0
+            _usage["prompt_tokens"] += getattr(meta,
+                                               "prompt_token_count", 0) or 0
+            _usage["completion_tokens"] += getattr(
+                meta, "candidates_token_count", 0) or 0
+            _usage["total_tokens"] += getattr(meta,
+                                              "total_token_count", 0) or 0
 
 
 def _track_openai(response) -> None:
@@ -71,7 +87,8 @@ def _track_openai(response) -> None:
         usage = getattr(response, "usage", None)
         if usage:
             _usage["prompt_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
-            _usage["completion_tokens"] += getattr(usage, "completion_tokens", 0) or 0
+            _usage["completion_tokens"] += getattr(
+                usage, "completion_tokens", 0) or 0
             _usage["total_tokens"] += getattr(usage, "total_tokens", 0) or 0
 
 
@@ -91,7 +108,8 @@ def _call_with_retry(fn):
                 status = getattr(exc, "status", 0) or 0
             if status in (429, 503, 504) and attempt < _MAX_RETRIES:
                 wait = 3 * (attempt + 1)
-                log.warning("AI %d on attempt %d, retrying in %ds...", status, attempt + 1, wait)
+                log.warning("AI %d on attempt %d, retrying in %ds...",
+                            status, attempt + 1, wait)
                 time.sleep(wait)
                 continue
             raise
@@ -122,13 +140,17 @@ def _gemini_gen_config():
     )
 
 
-def _gemini_page_image(image_bytes: bytes, prompt: str, mime_type: str = "image/png") -> str:
+def _gemini_page_image(
+    image_bytes: bytes, prompt: str,
+    mime_type: str = "image/png", deep: bool = False,
+) -> str:
     from google.genai import types
     client = _get_gemini()
+    model = _pick_gemini_model(deep)
 
     def _call():
         return client.models.generate_content(
-            model=_GEMINI_MODEL,
+            model=model,
             contents=[types.Content(parts=[
                 types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 types.Part.from_text(text=prompt),
@@ -141,15 +163,20 @@ def _gemini_page_image(image_bytes: bytes, prompt: str, mime_type: str = "image/
     return response.text or ""
 
 
-def _gemini_multiple_images(images: list[bytes], prompt: str, mime_type: str = "image/png") -> str:
+def _gemini_multiple_images(
+    images: list[bytes], prompt: str,
+    mime_type: str = "image/png", deep: bool = False,
+) -> str:
     from google.genai import types
     client = _get_gemini()
-    parts = [types.Part.from_bytes(data=img, mime_type=mime_type) for img in images]
+    model = _pick_gemini_model(deep)
+    parts = [types.Part.from_bytes(
+        data=img, mime_type=mime_type) for img in images]
     parts.append(types.Part.from_text(text=prompt))
 
     def _call():
         return client.models.generate_content(
-            model=_GEMINI_MODEL,
+            model=model,
             contents=[types.Content(parts=parts)],
             config=_gemini_gen_config(),
         )
@@ -159,12 +186,13 @@ def _gemini_multiple_images(images: list[bytes], prompt: str, mime_type: str = "
     return response.text or ""
 
 
-def _gemini_text(prompt: str) -> str:
+def _gemini_text(prompt: str, deep: bool = False) -> str:
     client = _get_gemini()
+    model = _pick_gemini_model(deep)
 
     def _call():
         return client.models.generate_content(
-            model=_GEMINI_MODEL, contents=prompt, config=_gemini_gen_config(),
+            model=model, contents=prompt, config=_gemini_gen_config(),
         )
 
     response = _call_with_retry(_call)
@@ -172,13 +200,14 @@ def _gemini_text(prompt: str) -> str:
     return response.text or ""
 
 
-def _gemini_document(file_bytes: bytes, mime_type: str, prompt: str) -> str:
+def _gemini_document(file_bytes: bytes, mime_type: str, prompt: str, deep: bool = False) -> str:
     from google.genai import types
     client = _get_gemini()
+    model = _pick_gemini_model(deep)
 
     def _call():
         return client.models.generate_content(
-            model=_GEMINI_MODEL,
+            model=model,
             contents=[types.Content(parts=[
                 types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
                 types.Part.from_text(text=prompt),
@@ -204,7 +233,8 @@ def _get_openai():
         from openai import OpenAI
         if not _OPENAI_API_KEY:
             raise RuntimeError("OPENAI_API_KEY is not set in .env")
-        _openai_client = OpenAI(api_key=_OPENAI_API_KEY, timeout=_REQUEST_TIMEOUT)
+        _openai_client = OpenAI(api_key=_OPENAI_API_KEY,
+                                timeout=_REQUEST_TIMEOUT)
     return _openai_client
 
 
@@ -217,12 +247,16 @@ def _b64_image(image_bytes: bytes, mime_type: str = "image/png") -> dict:
     }
 
 
-def _openai_page_image(image_bytes: bytes, prompt: str, mime_type: str = "image/png") -> str:
+def _openai_page_image(
+    image_bytes: bytes, prompt: str,
+    mime_type: str = "image/png", deep: bool = False,
+) -> str:
     client = _get_openai()
+    model = _pick_openai_model(deep)
 
     def _call():
         return client.chat.completions.create(
-            model=_OPENAI_MODEL,
+            model=model,
             messages=[{"role": "user", "content": [
                 _b64_image(image_bytes, mime_type),
                 {"type": "text", "text": prompt},
@@ -234,14 +268,18 @@ def _openai_page_image(image_bytes: bytes, prompt: str, mime_type: str = "image/
     return response.choices[0].message.content or ""
 
 
-def _openai_multiple_images(images: list[bytes], prompt: str, mime_type: str = "image/png") -> str:
+def _openai_multiple_images(
+    images: list[bytes], prompt: str,
+    mime_type: str = "image/png", deep: bool = False,
+) -> str:
     client = _get_openai()
+    model = _pick_openai_model(deep)
     content: list[dict] = [_b64_image(img, mime_type) for img in images]
     content.append({"type": "text", "text": prompt})
 
     def _call():
         return client.chat.completions.create(
-            model=_OPENAI_MODEL,
+            model=model,
             messages=[{"role": "user", "content": content}],
         )
 
@@ -250,12 +288,13 @@ def _openai_multiple_images(images: list[bytes], prompt: str, mime_type: str = "
     return response.choices[0].message.content or ""
 
 
-def _openai_text(prompt: str) -> str:
+def _openai_text(prompt: str, deep: bool = False) -> str:
     client = _get_openai()
+    model = _pick_openai_model(deep)
 
     def _call():
         return client.chat.completions.create(
-            model=_OPENAI_MODEL,
+            model=model,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -264,39 +303,54 @@ def _openai_text(prompt: str) -> str:
     return response.choices[0].message.content or ""
 
 
-def _openai_document(file_bytes: bytes, mime_type: str, prompt: str) -> str:
+def _openai_document(file_bytes: bytes, mime_type: str, prompt: str, deep: bool = False) -> str:
     # For PDFs/docs, OpenAI only supports images — convert to text fallback
     if mime_type == "application/pdf":
-        return _openai_text(f"[Document content provided as context]\n\n{prompt}")
-    return _openai_page_image(file_bytes, prompt, mime_type)
+        return _openai_text(f"[Document content provided as context]\n\n{prompt}", deep=deep)
+    return _openai_page_image(file_bytes, prompt, mime_type, deep=deep)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Public API – delegates to the active provider
 # ═══════════════════════════════════════════════════════════════════════════
 
-def analyze_page_image(image_bytes: bytes, prompt: str, mime_type: str = "image/png") -> str:
+def analyze_page_image(
+    image_bytes: bytes, prompt: str,
+    mime_type: str = "image/png", deep: bool = False,
+) -> str:
     if AI_PROVIDER == "openai":
-        return _openai_page_image(image_bytes, prompt, mime_type)
-    return _gemini_page_image(image_bytes, prompt, mime_type)
+        return _openai_page_image(image_bytes, prompt, mime_type, deep=deep)
+    return _gemini_page_image(image_bytes, prompt, mime_type, deep=deep)
 
 
-def analyze_multiple_images(images: list[bytes], prompt: str, mime_type: str = "image/png") -> str:
+def analyze_multiple_images(
+    images: list[bytes], prompt: str,
+    mime_type: str = "image/png", deep: bool = False,
+) -> str:
     if AI_PROVIDER == "openai":
-        return _openai_multiple_images(images, prompt, mime_type)
-    return _gemini_multiple_images(images, prompt, mime_type)
+        return _openai_multiple_images(images, prompt, mime_type, deep=deep)
+    return _gemini_multiple_images(images, prompt, mime_type, deep=deep)
 
 
-def analyze_text(prompt: str) -> str:
+def analyze_text(prompt: str, deep: bool = False) -> str:
     if AI_PROVIDER == "openai":
-        return _openai_text(prompt)
-    return _gemini_text(prompt)
+        return _openai_text(prompt, deep=deep)
+    return _gemini_text(prompt, deep=deep)
 
 
-def analyze_document(file_bytes: bytes, mime_type: str, prompt: str) -> str:
+def analyze_document(
+    file_bytes: bytes, mime_type: str, prompt: str, deep: bool = False,
+) -> str:
     if AI_PROVIDER == "openai":
-        return _openai_document(file_bytes, mime_type, prompt)
-    return _gemini_document(file_bytes, mime_type, prompt)
+        return _openai_document(file_bytes, mime_type, prompt, deep=deep)
+    return _gemini_document(file_bytes, mime_type, prompt, deep=deep)
+
+
+def get_active_models() -> dict[str, str]:
+    """Return the model IDs currently in use, for logging/debugging."""
+    if AI_PROVIDER == "openai":
+        return {"provider": "openai", "standard": _OPENAI_MODEL, "deep": _OPENAI_MODEL_DEEP}
+    return {"provider": "gemini", "standard": _GEMINI_MODEL, "deep": _GEMINI_MODEL_DEEP}
 
 
 # For backwards compatibility

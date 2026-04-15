@@ -214,7 +214,12 @@ Extract and verify ALL of the following from this page:
 2. Project Address
 3. Site Coordinates (lat/long)
 4. Building Codes referenced (NEC year, state/county/city adopted codes)
-5. DER Number (if present)
+5. DER Number — CONDITIONAL check. If a DER number is shown anywhere on the
+   cover sheet, verify the value (format, plausibility) and emit a finding.
+   If no DER number is shown, DO NOT emit a finding at all — skip it
+   entirely. A missing DER number is NOT a defect (not every utility
+   requires one). Do not output "Fail" or "Needs Review" for a missing
+   DER number.
 
 **Owner Info:**
 6. Owner Name
@@ -255,48 +260,143 @@ Only return the JSON array.
 """
 
 _SYSTEM_INFO_PROMPT = """\
-You are a QC engineer reviewing a solar PV planset page that should contain a SYSTEM INFORMATION TABLE.
+You are a senior solar PV QC engineer auditing the SYSTEM INFORMATION TABLE of a
+planset. This table is the single source of truth for the project — errors here
+propagate to every other sheet, so EVERY numeric value must be validated, not
+just extracted. The table layout is standardized across plansets; the defects
+you are looking for are DATA errors (wrong numbers, unit mistakes, stale values
+copied from a previous project, math that does not check out).
 
-Extract ALL of the following values. Look in the system information table FIRST, but also \
-check equipment datasheets, nameplate data, spec tables, notes, and any other tables or \
-callouts on this page. Values may appear in different locations — report wherever you find them.
+════════════════════════════════════════════════════════════════
+STEP 1 — EXTRACT every value you can read. Be precise — include units.
+════════════════════════════════════════════════════════════════
 
-1. PV Module Make and Model
-2. Module STC Rating (Watts)
-3. Module Voc, Vmp, Isc, Imp (from datasheet or table if visible)
-4. Module Temperature Coefficients (if visible)
-5. String Size (modules per string)
-6. String Quantity (total strings)
-7. Total DC Size (kWp or MWp)
-8. Inverter Make and Model
-9. Inverter kVA Rating (check system info table, SLD, equipment list, AND datasheet)
-10. Inverter kW Rating (check system info table, SLD, equipment list, AND datasheet)
-11. Derated kVA/kW Rating (if applicable)
-12. Inverter Max Vdc, MPPT Voltage Range (from datasheet or SLD if visible)
-13. Inverter Quantity
-14. Total AC Size (kVA or MVA)
-15. Racking Make, Model and Size
-16. DC/AC Ratio
-17. Pitch (ft or m)
-18. Interrow Spacing (ft or m)
-19. GCR (Ground Coverage Ratio)
-20. Tilt Angle or Tracker Rotation Angle
-21. Azimuth (degrees)
+Read from the system info table FIRST. If a field is missing from the table,
+look at datasheets, equipment list, SLD callouts, title block, and notes on
+this page. Report WHERE you found each value.
 
-For each field, note WHERE you found the value (system info table, datasheet, SLD callout, etc.).
-If a value appears in multiple places, check they are consistent and flag any mismatch.
+Module: Make, Model, STC Watts (W), Voc, Vmp, Isc, Imp, Temp Coeff Voc (%/°C),
+  Temp Coeff Isc, Temp Coeff Pmax, Bifaciality factor (if bifacial).
+Array: Module Quantity (total), String Size (modules/string), String Quantity
+  (total strings), Total DC Size (kWp or MWp).
+Inverter: Make, Model, kVA, kW, AC Voltage, Max Vdc, MPPT Range (V), Inverter
+  Quantity, Derated kVA/kW (if present).
+System Totals: Total AC Size (kVA or MVA), DC/AC Ratio.
+Layout: Racking Make/Model/Size, Pitch (ft or m), Interrow Spacing, GCR, Tilt
+  Angle OR Tracker Rotation Range, Azimuth.
+Site: Design Low Temp (°C), Design High Temp (°C), Ambient Temp (°C),
+  Site Elevation (if shown).
 
-Return a JSON array:
+════════════════════════════════════════════════════════════════
+STEP 2 — VALIDATE with math. For each rule below, emit ONE finding.
+════════════════════════════════════════════════════════════════
+
+Show every calculation as "Expected: X (reason) / Found: Y → Pass|Fail" in the
+"evidence" field. Use a 2% tolerance for DC total (rounding/binning), 0.5%
+for ratios and string counts (must match exactly). When a math check fails,
+use severity "high". When a value is simply missing, use "medium". Use "low"
+only for cosmetic issues.
+
+**M1 — Module count consistency:**
+  Module Qty should equal String Size × String Quantity.
+  e.g. 28 × 200 = 5600. Flag mismatch.
+
+**M2 — Total DC size math:**
+  Total DC (kW) ≈ Module Qty × Module STC Watts / 1000.
+  e.g. 5600 × 550W / 1000 = 3,080 kWp. Allow ±2% for binning.
+
+**M3 — Total AC size math:**
+  Total AC (kVA) ≈ Inverter Qty × Inverter kVA rating.
+  Must be exact. Flag any mismatch.
+
+**M4 — DC/AC ratio math:**
+  DC/AC = Total DC (kW) / Total AC (kW). Compare against stated ratio.
+  Typical acceptable range 1.10–1.50. Flag values outside that range as
+  "Needs Review".
+
+**M5 — Unit sanity:**
+  If "Total DC" is shown in the same units as a single module's watts,
+  something is wrong. Example red flag: "Total DC: 550 W" (single module
+  value in the total row). Flag any field whose order of magnitude looks
+  inconsistent with its label (kW vs MW, V vs kV, A vs kA).
+
+**M6 — Inverter make/model match:**
+  Inverter make/model on the system info table MUST match the inverter
+  datasheet (if visible) and the SLD equipment box (if visible). Flag any
+  manufacturer/model mismatch — this is a common copy-paste error.
+
+**M7 — Module make/model match:**
+  Module make/model on the system info table MUST match the module datasheet
+  if one is on the submitted pages. Flag mismatches.
+
+**M8 — Electrical value match between table and datasheet:**
+  Module Voc, Vmp, Isc, Imp, Pmax on the system info table MUST match the
+  datasheet exactly (within 0.1). Flag any mismatch. This is where stale
+  values from a previous job are most often left behind.
+
+**M9 — Bifacial sanity:**
+  If the module is bifacial (Bifaciality > 0), the inverter's max Isc rating
+  must accommodate the bifacial gain. Note if bifaciality is declared but
+  not reflected anywhere else. If NOT bifacial, there should be no bifacial
+  factor or backside gain reported.
+
+**M10 — Voltage/MPPT window (read-only sanity):**
+  If module Voc and Temp Coeff Voc are shown, and design low temp is shown,
+  compute cold Voc = Voc × (1 + TempCoeffVoc/100 × (Tmin − 25)). Then
+  cold-string Voc = cold Voc × String Size. This MUST be < Inverter Max Vdc.
+  If any input is missing, mark "Needs Review" with the missing fields.
+
+**M11 — GCR vs Pitch sanity:**
+  GCR = (module width along pitch axis) / Pitch. If module dimensions are
+  visible, recompute; else just verify GCR is within 0.25–0.55. Flag values
+  outside typical range.
+
+**M12 — Azimuth/tilt plausibility:**
+  Azimuth for fixed-tilt in N hemisphere typically 180° (south). Tracker
+  systems typically list azimuth of 0° with a tilt RANGE (e.g. ±60°). Flag
+  implausible combos (e.g. a tracker with a single fixed tilt angle).
+
+**M13 — Derated rating check:**
+  If derated kVA/kW is shown, it must be ≤ nameplate kVA/kW. Flag if
+  greater. Note the derating factor for evidence.
+
+**M14 — String fuse / Isc consistency:**
+  If string fuse is shown, Isc × 1.56 should be ≤ string fuse rating.
+  (1.56 = 1.25 × 1.25 NEC factor). Flag if over-fused.
+
+**M15 — Blank / TBD / placeholder detection:**
+  Flag any field that reads "TBD", "TODO", "XXX", "---", "N/A" where a
+  real value is required, or an obvious placeholder like "Project Name"
+  literally as the project name.
+
+**M16 — Multi-location consistency (if multiple pages submitted):**
+  For any value appearing on more than one submitted page (cover system
+  info vs datasheet vs SLD), they must agree. Emit a finding per mismatch
+  with both values quoted and severity "high".
+
+════════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+════════════════════════════════════════════════════════════════
+
+Return a JSON array. Emit one finding per rule (M1 through M16) plus one
+finding per extracted field group (module, array, inverter, layout, site).
+For EACH finding include the standard "location" / "location_text" fields so
+the reviewer can highlight the value on the PDF.
+
 ```json
 [
   {
-    "field": "field_name",
-    "found": true/false,
-    "value": "extracted value or null",
-    "notes": "Found in: system info table / datasheet / SLD. Any issues noticed."
+    "check": "m2_total_dc_size_math",
+    "status": "Pass|Fail|Needs Review",
+    "value": "3080 kWp",
+    "evidence": "Expected: 5600 modules × 550W = 3080 kWp. Found: 3078 kWp in system info table. Within 2% tolerance → Pass.",
+    "location": "System Info Table, Row 'Total DC Size'",
+    "location_text": "3078 kWp",
+    "severity": "low|medium|high"
   }
 ]
 ```
+
 Only return the JSON array.
 """
 
@@ -654,7 +754,14 @@ Check:
 3. **Pile Depth** – Is minimum pile embedment depth shown?
 4. **Clearance from Grade** – Is the minimum module clearance from grade shown?
 5. **Equipment Clearances** – Are front, side, and back clearances for inverters/equipment shown?
-6. **NEC Clearance Table** – Is there a reference to NEC clearance requirements?
+6. **Clearances vs NEC 110.26(A)(1)** – READ the front/side/rear clearance
+   dimensions shown and VALIDATE them against the NEC working-space table
+   for the system voltage. For 0–150V to ground: Condition 1 = 3 ft,
+   Cond 2 = 3 ft, Cond 3 = 3 ft. For 151–600V: 3/3.5/4 ft.
+   For 601–2500V: 3/4/5 ft. For 2501–9000V: 4/5/6 ft. For 9001–25000V: 5/6/9 ft.
+   Flag "Fail" with the required vs shown value if below minimum. DO NOT
+   check for the presence of an NEC table on the drawing — the NEC tables
+   are a validation REFERENCE, not required planset content.
 7. **Sweep/Bend Distance** – Are conduit sweep or bend distances noted?
 8. **CAB Details** – CAB spacing, sag, and clearance from grade shown?
 9. **Weather Sensors** – Are weather sensor mounting locations shown?
@@ -1135,7 +1242,13 @@ Check:
 7. **Pile Details** – For inverter/aux rack piles: count, spacing, type, depth shown?
 8. **Pad Type** – Is it individual or combined pad? Is gravel/material specified?
 9. **Inverter Clearances** – Min clearance from side, front, and back dimensioned?
-10. **NEC Table Reference** – Is there a reference to NEC clearance tables?
+10. **NEC 110.26 validation** – READ the shown clearance dimensions and
+    VALIDATE against the NEC 110.26(A)(1) working-space table for the
+    system voltage. Flag any dimension below the required minimum with
+    "Fail" and evidence "Required: X ft (NEC 110.26, <voltage> band) /
+    Shown: Y ft". DO NOT mark this as Fail just because an NEC table is
+    not printed on the drawing — the NEC is a validation REFERENCE,
+    not required planset content.
 
 Return a JSON array:
 ```json
@@ -1319,12 +1432,13 @@ def _gemini_page_check(
     category: str,
     item_key_prefix: str,
     default_title: str,
+    deep: bool = False,
 ) -> list[dict]:
     """Send a page to Gemini with *prompt* and convert response to issues."""
     from .gemini_client import analyze_page_image
 
     image_bytes = render_page_to_bytes(doc, page_number)
-    raw = analyze_page_image(image_bytes, prompt)
+    raw = analyze_page_image(image_bytes, prompt, deep=deep)
     findings = _extract_json(raw)
 
     issues: list[dict] = []
@@ -1412,6 +1526,7 @@ def _gemini_multi_page_check(
     category: str,
     item_key_prefix: str,
     default_title: str,
+    deep: bool = False,
 ) -> list[dict]:
     """Send multiple pages to Gemini in one call."""
     from .gemini_client import analyze_multiple_images
@@ -1430,7 +1545,7 @@ def _gemini_multi_page_check(
         "issue was found on. Also include the \"location_text\" / "
         "\"location_texts\" fields as described above."
     )
-    raw = analyze_multiple_images(images, prompt + multi_page_suffix)
+    raw = analyze_multiple_images(images, prompt + multi_page_suffix, deep=deep)
     findings = _extract_json(raw)
 
     issues: list[dict] = []
@@ -1604,17 +1719,61 @@ def run_gemini_checks(
     run_dir: Path,
     actual_numbers: list[str],
     project_details: dict | None = None,
+    use_deep: bool = True,
+    supporting_docs: list[dict] | None = None,
+    progress_cb: Any = None,
 ) -> list[dict]:
     """Run all Gemini-powered deep checks.  Returns a list of issue dicts.
 
     This is called from ``analyze_pdf`` after the regex-based checks.
-    Each section is wrapped in ``_safe_gemini_call`` so a single failure
+    Each section is wrapped in ``_safe_call`` so a single failure
     does not block the rest.
+
+    When ``use_deep`` is False, every call is forced onto the standard
+    (mini) model — useful for cheap/fast scans. When True (default), the
+    heavy reasoning checks (SLD, DC, TLD, relay, cross-sheet, electrical
+    deep, system info) are routed through the configured deep model.
+
+    ``supporting_docs`` is a list of SupportingDoc dicts produced by the
+    ``/api/parse-supporting-docs`` endpoint. Their extracted specs are
+    appended as an Evidence block to every vision prompt, and a dedicated
+    consistency pass compares planset values against them.
     """
+
+    def _deep(want: bool) -> bool:
+        return bool(want and use_deep)
+
+    # Progress helper: each vision check bumps the bar between 40% and 88%
+    # so the UI doesn't appear frozen at 40% for the whole Gemini phase.
+    # Total is capped — extra checks just stay at 88% instead of overshooting.
+    _progress_state = {"done": 0, "total": 25}
+
+    def _safe_call(func, *args, **kwargs) -> list[dict]:
+        # Default label is the category name — it's the 7th positional arg
+        # for both _gemini_page_check and _gemini_multi_page_check
+        # (doc, page_or_pages, prompt, run_id, run_dir, category, ...).
+        default_label = args[5] if len(args) > 5 and isinstance(args[5], str) else func.__name__
+        label = kwargs.pop("_label", default_label)
+        if progress_cb is not None:
+            done = _progress_state["done"]
+            total = max(1, _progress_state["total"])
+            pct = int(40 + (48 * min(done, total) / total))
+            try:
+                progress_cb(f"AI vision: {label}", pct)
+            except Exception:
+                pass
+        result = _safe_gemini_call(func, *args, **kwargs)
+        _progress_state["done"] += 1
+        return result
+
     all_issues: list[dict] = []
 
     # Build project context to append to every AI prompt
     _ctx = _build_project_context(project_details)
+
+    # Supporting-document evidence block (engineering source of truth).
+    from .supporting_docs import build_evidence_context
+    _evidence_ctx = build_evidence_context(supporting_docs)
 
     _GLOBAL_INSTRUCTIONS = """
 
@@ -1623,13 +1782,19 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
    and column header where you found the issue (e.g. "AC Schedule, Row 3 (INV-1 to SWBD), FLA column").
 2. Include a "location_text" field in EVERY finding — this is a LITERAL, VERBATIM short text
    excerpt copied EXACTLY as it appears on the drawing near the issue. It MUST be searchable
-   via a plain text search on the PDF page. Good examples: "FLA = 380A", "500 kcmil AL",
-   "INV-01", "AC SCHEDULE", "NOTE 3". Bad examples (do NOT use): descriptions, paraphrases,
-   or long sentences. Keep it to 3–30 characters where possible. If you cannot find literal
-   text near the issue, omit this field.
-3. Optionally include a "location_texts" field — a JSON array of 2–5 distinct short literal
-   text excerpts (each as above) when the issue spans multiple callouts (e.g. a mismatched
-   pair of values on the same page). These will each be highlighted individually.
+   via a plain text search on the PDF page.
+   GOOD: the specific value that is wrong, e.g. "3,078 kWp", "500 kcmil AL", "FLA = 380A",
+     "INV-01", "NOTE 3", "8.5 kA".
+   BAD (do NOT use): row/column labels like "Total DC row", descriptive phrases like
+     "the third entry", paraphrases, section headings without their value, or anything
+     that is not a copy of a string actually printed on the drawing.
+   CRITICAL: EVERY finding on the SAME page MUST have a DIFFERENT location_text
+   pointing at the specific value that triggered it. Two findings sharing the
+   same location_text almost always means one of them is mislocated — rewrite
+   the location_text to point at the correct cell/callout.
+3. Include "location_texts" (array, 2–5 items) when the finding compares values in
+   TWO places (e.g. a mismatch between the system-info table and the datasheet);
+   each entry MUST be a distinct literal excerpt. They'll all be highlighted.
 4. Write "evidence" as a concise readable sentence — NOT raw JSON or dict dumps.
    Good: "FLA shown as 380A. Calculated: 275kVA / (480V × 1.732) = 331A. Matches within tolerance."
    Bad: "{'fla': 380, 'calc': 331}"
@@ -1637,11 +1802,21 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
    If the image is blurry, values are hard to read, or you're unsure — use "Needs Review", not "Fail".
 6. Each distinct issue must be a SEPARATE JSON object — do not combine multiple problems into one finding.
 7. For "Pass" items, keep evidence brief (one sentence). Save detail for failures.
+8. **NEC / IEEE references are a REFERENCE resource you use to validate values,
+   NOT required content on the planset.** If a check description says
+   "Check NEC Table X" or "per NEC 310.16", it means: apply that table/rule
+   from your engineering knowledge to validate the values shown on the
+   drawing. DO NOT mark a finding as "Fail" simply because the planset
+   does not reprint an NEC table or does not cite the NEC article number.
+   The only exception is the REQUIRED WARNING LABELS check (NEC 690.56,
+   705.12, etc.) — those labels MUST physically appear on the equipment
+   and on the placards/labels sheet.
 """
 
     def _prompt(base: str) -> str:
-        """Append global instructions and project context to an AI prompt."""
-        return base + _GLOBAL_INSTRUCTIONS + _ctx
+        """Append global instructions, project context, and supporting-doc
+        evidence (if any) to an AI prompt."""
+        return base + _GLOBAL_INSTRUCTIONS + _ctx + _evidence_ctx
 
     # ── Find pages by TITLE keywords (not E-number prefixes) ──
     def find_pages(*keywords: str) -> list[int]:
@@ -1655,7 +1830,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
 
     # 1 ── Cover Sheet (always page 1) ─────────────────────────────────────
     all_issues.extend(
-        _safe_gemini_call(
+        _safe_call(
             _gemini_page_check, doc, 1, _prompt(_COVER_SHEET_PROMPT),
             run_id, run_dir, "Cover Sheet", "ai_cover", "Cover Sheet Review",
         )
@@ -1672,19 +1847,21 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         sysinfo_pages.extend(datasheet_pages[:2])
     if len(sysinfo_pages) == 1:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, 1, _prompt(_SYSTEM_INFO_PROMPT),
                 run_id, run_dir, "System Information Table", "ai_sysinfo",
                 "System Information Table",
+                deep=_deep(True),
             )
         )
     else:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, sysinfo_pages[:3],
                 _prompt(_SYSTEM_INFO_PROMPT),
                 run_id, run_dir, "System Information Table", "ai_sysinfo",
                 f"System Info + Datasheets ({len(sysinfo_pages[:3])} pages)",
+                deep=_deep(True),
             )
         )
 
@@ -1693,7 +1870,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     for pn in sample:
         if pn >= 1:
             all_issues.extend(
-                _safe_gemini_call(
+                _safe_call(
                     _gemini_page_check, doc, pn, _prompt(_TITLE_BLOCK_PROMPT),
                     run_id, run_dir, "Title Block", f"ai_tb_p{pn}", f"Title Block (p.{pn})",
                 )
@@ -1703,7 +1880,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     sp = find_pages("SITE PLAN", "OVERALL SITE", "SITE LAYOUT")
     if sp:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, sp[0], _prompt(_SITE_PLAN_PROMPT),
                 run_id, run_dir, "Site Plan", "ai_siteplan", "Site Plan Review",
             )
@@ -1714,7 +1891,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "POLE ARRANGEMENT", "INTERCONNECTION")
     if pl:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, pl[0], _prompt(_POLE_LINEUP_PROMPT),
                 run_id, run_dir, "Pole Line Up", "ai_pole", "Pole Line Up Review",
             )
@@ -1725,7 +1902,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "BOM", "BILL OF MATERIAL")
     if eq:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, eq[0], _prompt(_EQUIPMENT_LIST_PROMPT),
                 run_id, run_dir, "Engineered Equipment List", "ai_equip", "Equipment List Review",
             )
@@ -1742,10 +1919,11 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         # Always use multi-page so AI sees ALL SLD pages together for
         # cross-validation of cable sizes, equipment ratings, etc.
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, sld[:5], _prompt(_SLD_PROMPT),
                 run_id, run_dir, "AC Single Line Diagram", "ai_sld",
                 f"SLD NEC Review ({len(sld[:5])} pages)",
+                deep=_deep(True),
             )
         )
 
@@ -1754,10 +1932,11 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "DC WIRING", "STRING DIAGRAM")
     if dc:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, dc[:4], _prompt(_DC_DIAGRAM_PROMPT),
                 run_id, run_dir, "DC Line Diagram", "ai_dc",
                 f"DC Diagram NEC Review ({len(dc[:4])} pages)",
+                deep=_deep(True),
             )
         )
 
@@ -1765,10 +1944,11 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     tld = find_pages("THREE LINE", "THREE-LINE", "3-LINE", "3LD", "3 LINE")
     if tld:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, tld[:3], _prompt(_THREE_LINE_PROMPT),
                 run_id, run_dir, "Three Line Diagram", "ai_3ld",
                 f"3LD Review ({len(tld[:3])} pages)",
+                deep=_deep(True),
             )
         )
 
@@ -1777,7 +1957,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "CABLE PLAN", "WIRING PLAN")
     if fp:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, fp[0], _prompt(_FEEDER_PLAN_PROMPT),
                 run_id, run_dir, "Feeder Plan", "ai_feeder", "Feeder Plan Review",
             )
@@ -1788,7 +1968,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "AMPACITY", "WIRE SCHEDULE")
     if es:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, es[0], _prompt(_ELECTRICAL_SHEET_PROMPT),
                 run_id, run_dir, "Electrical Sheet", "ai_elec", "Electrical Schedule Review",
             )
@@ -1798,7 +1978,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     ev = find_pages("ELEVATION", "EQUIPMENT DETAIL", "EQUIPMENT ELEVATION")
     if ev:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, ev[0], _prompt(_ELEVATION_PROMPT),
                 run_id, run_dir, "Elevation Details", "ai_elev", "Elevation Details Review",
             )
@@ -1808,7 +1988,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     gnd = find_pages("GROUNDING", "GROUND PLAN", "GND", "EARTHING")
     if gnd:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, gnd[0], _prompt(_GROUNDING_PROMPT),
                 run_id, run_dir, "Grounding Diagram", "ai_gnd", "Grounding Review",
             )
@@ -1819,10 +1999,11 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "IEEE 1547", "PROTECTION SETTING")
     if rs:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, rs[0], _prompt(_RELAY_SETTINGS_PROMPT),
                 run_id, run_dir, "Relay and Inverter Settings", "ai_relay",
                 "Relay & Inverter Settings Review",
+                deep=_deep(True),
             )
         )
 
@@ -1836,7 +2017,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
            or "AUXILIARY" in (pages[p-1].sheet_title or "").upper()]
     if aux:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, aux[0], _prompt(_AUX_SLD_PROMPT),
                 run_id, run_dir, "AUX SLD", "ai_aux", "Auxiliary SLD Review",
             )
@@ -1847,7 +2028,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "COMMUNICATION SLD", "SCADA")
     if cd:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, cd[0], _prompt(_COMM_DIAGRAM_PROMPT),
                 run_id, run_dir, "Communication Diagram", "ai_comm",
                 "Communication Diagram Review",
@@ -1858,7 +2039,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     tr = find_pages("TRENCH", "TRENCHING", "CONDUIT DETAIL", "BURIAL DETAIL")
     if tr:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, tr[0], _prompt(_TRENCHING_PROMPT),
                 run_id, run_dir, "Trenching Details", "ai_trench",
                 "Trenching Details Review",
@@ -1870,7 +2051,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                      "CABLE BRIDGE")
     if cab:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, cab[0], _prompt(_CAB_DETAILS_PROMPT),
                 run_id, run_dir, "CAB or Cable Hanger Details", "ai_cab",
                 "CAB Details Review",
@@ -1881,7 +2062,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     lb = find_pages("LABEL", "PLACARD", "SIGNAGE")
     if lb:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, lb[0], _prompt(_LABELS_PROMPT),
                 run_id, run_dir, "Labels", "ai_labels", "Labels Review",
             )
@@ -1892,7 +2073,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                      "EQUIPMENT FEEDER")
     if eaf:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, eaf[0], _prompt(_EQUIP_AREA_FEEDER_PROMPT),
                 run_id, run_dir, "Equipment Area Feeder Plan", "ai_eaf",
                 "Equipment Area Feeder Plan Review",
@@ -1904,7 +2085,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                      "COMMUNICATION PLAN", "DAS FEEDER", "FIBER PLAN")
     if cfp:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, cfp[0], _prompt(_COMM_FEEDER_PLAN_PROMPT),
                 run_id, run_dir, "Communication Feeder Plan", "ai_cfp",
                 "Communication Feeder Plan Review",
@@ -1916,7 +2097,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                      "EQUIPMENT PAD", "FOUNDATION DETAIL")
     if pad:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, pad[0], _prompt(_PAD_SLAB_PROMPT),
                 run_id, run_dir, "PAD / Slab Details", "ai_pad",
                 "PAD/Slab Details Review",
@@ -1928,7 +2109,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                     "POLE FRAMING")
     if pd:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, pd[0], _prompt(_POLE_DETAILS_PROMPT),
                 run_id, run_dir, "Pole Details", "ai_poledet",
                 "Pole Details Review",
@@ -1944,7 +2125,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
           and "SLD" not in (pages[p - 1].sheet_title or "").upper()]
     if gp:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_page_check, doc, gp[0], _prompt(_GROUNDING_PLAN_PROMPT),
                 run_id, run_dir, "Overall Site Grounding Plan", "ai_gndplan",
                 "Overall Site Grounding Plan Review",
@@ -1957,10 +2138,11 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                          "E-300", "CALC SHEET")
     if es_deep and len(es_deep) > 1:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, es_deep[:4], _prompt(_ELECTRICAL_SHEET_DEEP_PROMPT),
                 run_id, run_dir, "Electrical Sheet", "ai_elec_deep",
                 "Electrical Schedule Deep Review",
+                deep=_deep(True),
             )
         )
 
@@ -1968,7 +2150,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     gnd_all = find_pages("GROUNDING", "GROUND", "GND", "EARTHING")
     if gnd_all and len(gnd_all) > 1:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, gnd_all[:3], _prompt(_GROUNDING_PROMPT),
                 run_id, run_dir, "Grounding Diagram", "ai_gnd_deep",
                 "Grounding Deep Multi-Page Review",
@@ -1980,11 +2162,12 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                         "IEEE 1547", "PROTECTION SETTING")
     if rs_all and len(rs_all) > 1:
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, rs_all[:3], _prompt(_RELAY_SETTINGS_PROMPT),
                 run_id, run_dir, "Relay and Inverter Settings",
                 "ai_relay_deep",
                 "Relay & Inverter Settings Deep Review",
+                deep=_deep(True),
             )
         )
 
@@ -2007,10 +2190,27 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     if len(consistency_pages) >= 2:
         # Limit to 3 pages to avoid long Gemini response times
         all_issues.extend(
-            _safe_gemini_call(
+            _safe_call(
                 _gemini_multi_page_check, doc, consistency_pages[:3], _prompt(_CROSS_SHEET_CONSISTENCY_PROMPT),
                 run_id, run_dir, "Cross-Sheet Consistency",
                 "ai_consistency", "Cross-Sheet Consistency Check",
+                deep=_deep(True),
+            )
+        )
+
+    # 29 ── Supporting Document Consistency (planset vs CESR / PVSyst / …) ──
+    if supporting_docs and consistency_pages:
+        from .supporting_docs import (
+            CONSISTENCY_CHECK_CATEGORY,
+            CONSISTENCY_PROMPT,
+        )
+        all_issues.extend(
+            _safe_call(
+                _gemini_multi_page_check, doc, consistency_pages[:4],
+                _prompt(CONSISTENCY_PROMPT),
+                run_id, run_dir, CONSISTENCY_CHECK_CATEGORY,
+                "ai_support_docs", "Supporting Document Consistency",
+                deep=_deep(True),
             )
         )
 

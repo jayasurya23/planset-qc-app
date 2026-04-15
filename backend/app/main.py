@@ -47,7 +47,7 @@ EXPORTS_DIR = DATA_DIR / "exports"
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Castillo Planset QC API", version="0.1.0")
+app = FastAPI(title="Castillo Planset QC API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -320,6 +320,33 @@ def _parse_extracted_json(text: str) -> dict:
     return {}
 
 
+@app.post("/api/parse-supporting-docs")
+async def api_parse_supporting_docs(
+    files: list[UploadFile] = File(...),
+) -> dict:
+    """Ingest supporting engineering documents (CESIR, PVSyst, ampacity, …).
+
+    Each file is classified and sent through a type-specific extractor.
+    Returns a list of SupportingDoc dicts that the frontend can preview before
+    attaching to an analyze call.
+    """
+    from .supporting_docs import process_document
+
+    out: list[dict] = []
+    for f in files:
+        if not f.filename:
+            continue
+        data = await f.read()
+        try:
+            doc = process_document(f.filename, data)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Failed to ingest supporting doc %s", f.filename)
+            continue
+        out.append(doc.to_dict())
+    return {"supporting_docs": out}
+
+
 @app.get("/api/runs")
 def api_list_runs() -> list[dict]:
     return list_runs()
@@ -348,7 +375,8 @@ _analysis_lock = threading.Lock()
 
 def _run_analysis_bg(
     upload_id: str, pdf_path: Path, project_name: str | None,
-    original_filename: str, pd: dict | None,
+    original_filename: str, pd: dict | None, use_deep: bool = True,
+    supporting_docs: list[dict] | None = None,
 ) -> None:
     """Run analysis in a background thread, updating progress along the way."""
     try:
@@ -361,6 +389,8 @@ def _run_analysis_bg(
             original_filename=original_filename,
             progress_cb=on_progress,
             project_details=pd,
+            use_deep=use_deep,
+            supporting_docs=supporting_docs,
         )
 
         set_progress(upload_id, "saving", "Saving results...", 95)
@@ -381,6 +411,8 @@ def _run_analysis_bg(
 async def api_analyze(
     project_name: str | None = Form(None),
     project_details: str | None = Form(None),
+    use_deep: str | None = Form("true"),
+    supporting_docs: str | None = Form(None),
     file: UploadFile = File(...),
 ) -> dict:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -394,6 +426,16 @@ async def api_analyze(
             raise HTTPException(
                 status_code=400, detail="Invalid project_details JSON")
 
+    sd: list[dict] | None = None
+    if supporting_docs:
+        try:
+            sd_raw = json.loads(supporting_docs)
+            if isinstance(sd_raw, list):
+                sd = [d for d in sd_raw if isinstance(d, dict)]
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=400, detail="Invalid supporting_docs JSON")
+
     upload_id = str(uuid.uuid4())
     run_dir = RUNS_DIR / upload_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -405,15 +447,17 @@ async def api_analyze(
 
     set_progress(upload_id, "analyze", "Starting analysis...", 10)
 
+    deep_flag = (use_deep or "true").strip().lower() not in ("false", "0", "no", "off")
+
     # Launch in background thread — return upload_id immediately
     t = threading.Thread(
         target=_run_analysis_bg,
-        args=(upload_id, pdf_path, project_name, file.filename, pd),
+        args=(upload_id, pdf_path, project_name, file.filename, pd, deep_flag, sd),
         daemon=True,
     )
     t.start()
 
-    return {"upload_id": upload_id, "status": "running"}
+    return {"upload_id": upload_id, "status": "running", "deep_mode": deep_flag}
 
 
 @app.get("/api/result/{upload_id}")
@@ -451,7 +495,7 @@ def api_delete_run(run_id: str) -> dict:
 
 
 @app.post("/api/runs/{run_id}/reanalyze")
-async def api_reanalyze(run_id: str) -> dict:
+async def api_reanalyze(run_id: str, use_deep: str | None = Form("true")) -> dict:
     old_run = get_run(run_id)
     if not old_run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -476,14 +520,16 @@ async def api_reanalyze(run_id: str) -> dict:
 
     set_progress(upload_id, "analyze", "Re-running analysis...", 10)
 
+    deep_flag = (use_deep or "true").strip().lower() not in ("false", "0", "no", "off")
+
     t = threading.Thread(
         target=_run_analysis_bg,
-        args=(upload_id, new_pdf_path, project_name, original_filename, None),
+        args=(upload_id, new_pdf_path, project_name, original_filename, None, deep_flag),
         daemon=True,
     )
     t.start()
 
-    return {"upload_id": upload_id, "status": "running"}
+    return {"upload_id": upload_id, "status": "running", "deep_mode": deep_flag}
 
 
 @app.patch("/api/issues/{issue_id}")
