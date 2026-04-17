@@ -1039,32 +1039,45 @@ Only return the JSON array.
 """
 
 _AUX_SLD_PROMPT = """\
-You are a QC engineer reviewing the AUXILIARY SINGLE LINE DIAGRAM (AUX SLD) of a solar PV planset.
+You are a QC engineer reviewing the AUXILIARY SINGLE LINE DIAGRAM (AUX SLD) or
+aux-power / aux-loads schedule of a solar PV planset.
 
-Check the following:
+For EACH numbered check: the item is REQUIRED on a complete aux power
+design. If the item is clearly visible on the sheet → Pass with the
+value you read. If the item is NOT shown / missing / not called out →
+Fail with evidence "Not shown on this sheet". Only use Needs Review
+when the item is partially shown or ambiguous. Do not Pass by default.
 
-1. **Aux Transformer** – Is an aux transformer shown? What is its rating (kVA, voltage)?
-2. **Single Phase Check** – If the aux transformer is single phase, it should NOT show WYE/DELTA winding configuration.
-3. **Aux Power Phase** – Is the aux power 3-phase or 1-phase?
-4. **Aux Panel** – Is an aux panel/panelboard shown? What is its rating?
+1. **Aux Transformer** – An aux transformer MUST be shown with its
+   rating (kVA, voltage). Missing → Fail.
+2. **Single Phase Check** – If the aux transformer is single phase, it
+   MUST NOT show WYE/DELTA winding. Wrong winding → Fail.
+3. **Aux Power Phase** – Aux power phase (3-phase or 1-phase) MUST be
+   stated. Missing → Fail.
+4. **Aux Panel** – An aux panel / panelboard MUST be shown with its
+   rating. Missing → Fail.
 
-**Loads – List ALL aux loads shown:**
-5. **DAS Equipment** – Data acquisition system shown?
-6. **Data Controller** – Data controller shown?
-7. **Tracker Controller** – Tracker controller (if tracker system)?
-8. **Outlets** – GFCI outlets shown?
-9. **UPS** – Uninterruptible power supply shown?
-10. **Weather Station** – Weather station power shown?
+**Loads — each of the following MUST appear as a labeled load on the
+aux SLD / aux loads schedule. If not shown → Fail:**
+5. **DAS Equipment** – Data acquisition system as a load.
+6. **Data Controller** – Data controller as a separate load.
+7. **Tracker Controller** – If this is a tracker system, tracker
+   controller must appear. If fixed-tilt, emit Pass (N/A).
+8. **Outlets** – GFCI outlet circuit.
+9. **UPS** – Uninterruptible power supply circuit.
+10. **Weather Station** – Weather station power circuit.
 
-**Motors:**
-11. **Motor Power** – What motor power requirements are shown?
-12. **Motor Configuration** – 1 motor per tracker (self-powered or from aux panel) or 1 motor per array?
-13. **Motor Daisy Chain** – How are motors daisy chained?
+**Motors (tracker systems only; fixed-tilt → Pass N/A):**
+11. **Motor Power** – Motor power (W or A per motor) MUST be specified.
+12. **Motor Configuration** – 1 motor per tracker or 1 motor per array
+    MUST be clear. Ambiguous → Fail.
+13. **Motor Daisy Chain** – Daisy-chain topology MUST be shown.
 
 **Equipment:**
-14. **Breaker Ratings** – Are all breaker ratings shown?
-15. **Cable and Conduit** – Cable sizes and conduit sizes shown?
-16. **CAB Insulation** – For cables in CAB, is motor wire sunlight resistant?
+14. **Breaker Ratings** – All breaker ratings MUST be shown.
+15. **Cable and Conduit** – Cable sizes and conduit sizes MUST be shown.
+16. **CAB Insulation** – For cables in CAB, motor wire MUST be sunlight
+    resistant (if motors aren't in CAB, Pass N/A).
 
 Return a JSON array:
 ```json

@@ -268,24 +268,36 @@ indicate the model skipped checks it should have evaluated.
 - **Fail** — clearly violated. State the value you read and the value
   required, with the math if applicable. PREFER FAIL OVER NEEDS REVIEW
   when you can see the defect.
-- **Needs Review** — the sheet has the relevant area but you cannot
-  definitively verify the check (value blurry, depends on a cell not
-  shown, requires a document not uploaded, or you'd need to see an
-  adjacent sheet to be certain). Write a short "evidence" reason.
-  Needs Review IS valuable — it tells the reviewer what to double-check
-  manually. Do not hide uncertain findings by skipping them.
+- **Needs Review** — use ONLY when the sheet clearly shows the relevant
+  area AND the value on THIS sheet is genuinely ambiguous (blurry
+  printout, partially obscured, two conflicting-looking values next to
+  each other). Write a short "evidence" reason naming the exact thing
+  the reviewer should double-check visually.
 
-SKIP (emit NO object) ONLY in these narrow cases:
+SKIP (emit NO object) in these cases:
 - The rule's category is clearly not the sheet you are looking at
-  (e.g. an E-500 grounding-plan rule when you are looking at a
-  title-block-only page).
-- The rule explicitly requires a document upload that is not listed in
-  the AVAILABLE EVIDENCE block (this was already filtered out — you
-  should not normally see these).
+  (e.g. an E-500 grounding-plan rule when the sheet is a title-block
+  detail).
+- The rule requires comparing to ANOTHER sheet or document NOT in
+  view ("E-300 = E-210", "matches submittal", "per PVCase export",
+  "CAB calcs Excel"). The legacy supplement + Cross-Sheet category
+  handle those — don't NR them here.
+- The rule requires an external workbook/study/survey/manual that
+  isn't in AVAILABLE EVIDENCE. If you cannot evaluate without it,
+  skip rather than NR. (These are usually filtered out upstream, but
+  occasionally slip through.)
+- The rule is asking about a feature the sheet doesn't actually have
+  (e.g. a CAB rule on an E-900 datasheet page). Skip — do not NR.
 
-For every other case you should emit a Pass / Fail / NR finding. Do NOT
-hedge by skipping rules just because you're uncertain — that's what
-"Needs Review" is for.
+Prefer PASS over NR when:
+- The relevant area is visible and nothing looks wrong.
+- The criterion is met at a glance — you don't need a magnifier.
+- You genuinely can't verify, but the planset isn't obviously broken
+  (i.e. nothing on this sheet contradicts the rule).
+
+Only emit NR when a real reviewer would benefit from specifically
+double-checking this item on this sheet. An NR that says "I need to
+see another sheet" wastes reviewer time — skip instead.
 
 Do NOT invent values. One finding per rule key. Maximum one skip in a
 normal category — if you're skipping many rules, you are being too
