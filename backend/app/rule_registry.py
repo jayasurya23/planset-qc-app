@@ -8,13 +8,42 @@ file is loaded once at import time and cached.  Every rule is exposed as a
 from __future__ import annotations
 
 import functools
+import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-_RULES_PATH = Path(__file__).resolve().parent / "rules.yaml"
+log = logging.getLogger(__name__)
+
+_DEFAULT_RULES_FILE = "rules.yaml"
+
+
+def _resolve_rules_path() -> Path:
+    """Pick which rules file to load.
+
+    Priority:
+      1. ``RULES_FILE`` env var — absolute, or relative to ``backend/app/``.
+      2. ``rules.yaml`` next to this module (default).
+
+    Lets us A/B test rule sets without code changes:
+        RULES_FILE=rules_v4_draft.yaml  python -m uvicorn app.main:app …
+    """
+    app_dir = Path(__file__).resolve().parent
+    env_value = os.getenv("RULES_FILE", "").strip()
+    if env_value:
+        p = Path(env_value)
+        if not p.is_absolute():
+            p = app_dir / p
+        if p.exists():
+            return p
+        log.warning(
+            "RULES_FILE=%s does not exist — falling back to default %s",
+            env_value, _DEFAULT_RULES_FILE,
+        )
+    return app_dir / _DEFAULT_RULES_FILE
 
 
 @dataclass(frozen=True)
@@ -30,6 +59,11 @@ class Rule:
     confidence: float = 0.75
     nec_ref: str | None = None
     handbook_ref: str | None = None
+
+    # V4 additions
+    source: str | None = None
+    v4_status: str | None = None
+    v4_row: int | None = None
 
     # keyword check fields
     keywords: list[Any] = field(default_factory=list)
@@ -48,7 +82,9 @@ class Rule:
 
 @functools.lru_cache(maxsize=1)
 def _load_raw() -> dict:
-    with open(_RULES_PATH, encoding="utf-8") as f:
+    path = _resolve_rules_path()
+    log.info("Loading rules from %s", path)
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -64,6 +100,11 @@ def load_rules() -> tuple[list[Rule], list[str]]:
             if k in Rule.__dataclass_fields__
         }))
     return rules, category_order
+
+
+def active_rules_path() -> Path:
+    """Which file is currently being loaded — useful for logging / UI."""
+    return _resolve_rules_path()
 
 
 def get_rules() -> list[Rule]:

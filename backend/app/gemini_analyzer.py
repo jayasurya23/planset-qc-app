@@ -11,6 +11,7 @@ Architecture
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
@@ -80,6 +81,40 @@ def render_page_preview(
         pix = page.get_pixmap(matrix=mat, alpha=False)
         pix.save(str(preview_path))
     return None, str(preview_path)
+
+
+@functools.lru_cache(maxsize=1)
+def _rule_title_index() -> dict[str, str]:
+    """Map rule key → original human title from the registry. Lets V4
+    vision findings show a readable title (``"XFMR primary V: six-document
+    match"``) instead of a slugified rule key (``"V4 E 100 Xfmr Primary V
+    Six Document Match"``).
+    """
+    try:
+        from .rule_registry import get_rules
+        return {r.key: r.title for r in get_rules()}
+    except Exception:
+        return {}
+
+
+def _pretty_title_for(check_name: str) -> str:
+    """Preferred display title for a finding's ``check`` field.
+
+    Lookup order:
+    1. Rule registry (V4-style rules).
+    2. Known synthetic rule keys from the Other-Electrical catch-all.
+    3. Slug → Title Case fallback (so legacy hard-coded prompts still work).
+    """
+    idx = _rule_title_index()
+    if check_name in idx:
+        return idx[check_name]
+    try:
+        from .v4_engine import OTHER_ELECTRICAL_RULE_TITLES
+        if check_name in OTHER_ELECTRICAL_RULE_TITLES:
+            return OTHER_ELECTRICAL_RULE_TITLES[check_name]
+    except Exception:
+        pass
+    return check_name.replace("_", " ").title()
 
 
 def _pick_page_for_finding(finding: dict, page_numbers: list[int]) -> int | None:
@@ -1528,7 +1563,7 @@ def _gemini_page_check(
             parts.append(f"Value: {value}")
         full_evidence = " | ".join(parts) if parts else ""
 
-        title = check_name.replace("_", " ").title()
+        title = _pretty_title_for(check_name)
         issue_id = str(uuid.uuid4())
 
         # Generate page preview for Fail / Needs Review items. Highlight every
@@ -1634,7 +1669,7 @@ def _gemini_multi_page_check(
             parts.append(f"Value: {value}")
         full_evidence = " | ".join(parts) if parts else ""
 
-        title = check_name.replace("_", " ").title()
+        title = _pretty_title_for(check_name)
         issue_id = str(uuid.uuid4())
 
         ref_page = page_numbers[0]
@@ -1879,6 +1914,57 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         """Append global instructions, project context, and supporting-doc
         evidence (if any) to an AI prompt."""
         return base + _GLOBAL_INSTRUCTIONS + _ctx + _evidence_ctx
+
+    # ── V4 rule engine branch ───────────────────────────────────────────
+    # If the active rules.yaml is a V4-style set (rules carry ``source`` and
+    # ``v4_status`` fields), dispatch dynamically from the rule registry
+    # instead of running the hard-coded prompts below. The V4 engine reuses
+    # _safe_call so parallelism, progress, caching, and highlighting work
+    # unchanged.
+    try:
+        from .rule_registry import get_rules
+        from . import v4_engine
+        _all_rules = get_rules()
+    except Exception:
+        _all_rules = []
+
+    if v4_engine.is_v4_ruleset(_all_rules):
+        logger.info("V4 engine active (%d rules loaded)", len(_all_rules))
+        v4_engine.run_v4_checks(
+            doc=doc,
+            pages=pages,
+            rules=_all_rules,
+            submit=_safe_call,
+            prompt_wrap=_prompt,
+            deep_for=lambda cat: _deep(v4_engine.deep_for_category(cat)),
+            page_check=_gemini_page_check,
+            multi_page_check=_gemini_multi_page_check,
+            run_id=run_id,
+            run_dir=run_dir,
+            supporting_docs=supporting_docs,
+        )
+        # Drain the futures submitted by the engine and return early —
+        # skip the legacy hard-coded dispatches below.
+        fmap = {fut: label for fut, label in _futures}
+        total = len(fmap)
+        done = 0
+        try:
+            for fut in _cf.as_completed(fmap):
+                done += 1
+                label = fmap[fut]
+                if progress_cb is not None:
+                    pct = int(40 + (48 * min(done, total) / max(1, total)))
+                    try:
+                        progress_cb(f"AI vision: {label} ({done}/{total})", pct)
+                    except Exception:
+                        pass
+                try:
+                    all_issues.extend(fut.result())
+                except Exception:
+                    logger.exception("V4 vision check '%s' failed", label)
+        finally:
+            _pool.shutdown(wait=True)
+        return all_issues
 
     # ── Find pages by TITLE keywords (not E-number prefixes) ──
     def find_pages(*keywords: str) -> list[int]:
