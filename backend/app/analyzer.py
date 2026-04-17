@@ -427,55 +427,95 @@ def _union_rects(rects: list[fitz.Rect]) -> fitz.Rect | None:
     return fitz.Rect(x0, y0, x1, y1)
 
 
-def _cell_for_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
-    """Return the bounding rect of the table cell containing ``rect``,
-    or None if ``rect`` isn't inside a detected table cell."""
+def _cached_table_cells(page: fitz.Page) -> list[fitz.Rect]:
+    """All non-trivial table cells on the page. Computed once per page
+    (attached to the Page object) and reused across every issue rendered
+    from that page — table detection is expensive on big plansets.
+    """
+    cached = getattr(page, "_qc_cell_cache", None)
+    if cached is not None:
+        return cached
+    cells_out: list[fitz.Rect] = []
     try:
         finder = page.find_tables()
-    except Exception:
-        return None
-    tables = getattr(finder, "tables", None) or []
-    for table in tables:
-        cells = getattr(table, "cells", None) or []
-        for cell in cells:
-            if not cell:
-                continue
-            try:
-                cell_rect = fitz.Rect(cell)
-            except Exception:
-                continue
-            if cell_rect.contains(rect) or cell_rect.intersects(rect):
-                # Ignore huge header/full-table cells that would cover the
-                # whole page — only accept "reasonable" cell sizes.
+        tables = getattr(finder, "tables", None) or []
+        for table in tables:
+            cells = getattr(table, "cells", None) or []
+            for cell in cells:
+                if not cell:
+                    continue
+                try:
+                    cell_rect = fitz.Rect(cell)
+                except Exception:
+                    continue
+                # Only accept reasonable cell sizes — skip full-page or
+                # full-width wrapper cells.
                 if cell_rect.width < page.rect.width * 0.95 and cell_rect.height < page.rect.height * 0.5:
-                    return cell_rect
+                    cells_out.append(cell_rect)
+    except Exception:
+        pass
+    try:
+        setattr(page, "_qc_cell_cache", cells_out)
+    except Exception:
+        pass
+    return cells_out
+
+
+def _cached_text_lines(page: fitz.Page) -> list[fitz.Rect]:
+    """All line-level bounding rects on the page (cached)."""
+    cached = getattr(page, "_qc_line_cache", None)
+    if cached is not None:
+        return cached
+    lines: list[fitz.Rect] = []
+    try:
+        td = page.get_text("dict")
+        for block in td.get("blocks", []):
+            for line in block.get("lines", []):
+                bbox = line.get("bbox")
+                if not bbox:
+                    continue
+                try:
+                    lines.append(fitz.Rect(bbox))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    try:
+        setattr(page, "_qc_line_cache", lines)
+    except Exception:
+        pass
+    return lines
+
+
+def _cached_page_image(page: fitz.Page, zoom: float = 2.0) -> Image.Image:
+    """Render the page to a PIL image once per analysis and reuse it."""
+    cache_key = f"_qc_image_{zoom}"
+    cached = getattr(page, cache_key, None)
+    if cached is not None:
+        return cached
+    mat = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=mat, alpha=False)
+    image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    try:
+        setattr(page, cache_key, image)
+    except Exception:
+        pass
+    return image
+
+
+def _cell_for_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
+    for cell_rect in _cached_table_cells(page):
+        if cell_rect.contains(rect) or cell_rect.intersects(rect):
+            return cell_rect
     return None
 
 
 def _line_for_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
-    """Return the bounding rect of the full text line containing ``rect``.
-
-    Useful when the matched substring is short (e.g. "380A") but the
-    reader really wants to see the whole row: "AC FEEDER | FLA 380A | ..."
-    """
-    try:
-        td = page.get_text("dict")
-    except Exception:
-        return None
-    for block in td.get("blocks", []):
-        for line in block.get("lines", []):
-            bbox = line.get("bbox")
-            if not bbox:
-                continue
-            try:
-                line_rect = fitz.Rect(bbox)
-            except Exception:
-                continue
-            if line_rect.intersects(rect):
-                # Require a meaningful overlap with the match
-                overlap = line_rect & rect
-                if overlap.get_area() > 0.3 * rect.get_area():
-                    return line_rect
+    for line_rect in _cached_text_lines(page):
+        if line_rect.intersects(rect):
+            overlap = line_rect & rect
+            if overlap.get_area() > 0.3 * rect.get_area():
+                return line_rect
     return None
 
 
@@ -611,9 +651,7 @@ def render_issue_artifacts(
         max(crop_bbox.y0, crop_bbox.y1),
     )
 
-    mat = fitz.Matrix(2, 2)
-    pix = page.get_pixmap(matrix=mat, alpha=False)
-    image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    image = _cached_page_image(page, zoom=2.0)
 
     preview = image.copy()
     draw = ImageDraw.Draw(preview)

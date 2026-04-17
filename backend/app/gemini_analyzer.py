@@ -38,11 +38,22 @@ logger = logging.getLogger(__name__)
 
 
 def render_page_to_bytes(doc: fitz.Document, page_number: int, zoom: float = 2.0) -> bytes:
-    """Render a 1-based *page_number* to PNG bytes."""
+    """Render a 1-based *page_number* to PNG bytes. Cached per (page, zoom)
+    so the same page isn't re-rasterized for every vision check that
+    references it."""
     page = doc[page_number - 1]
+    cache_key = f"_qc_bytes_{zoom}"
+    cached = getattr(page, cache_key, None)
+    if cached is not None:
+        return cached
     mat = fitz.Matrix(zoom, zoom)
     pix = page.get_pixmap(matrix=mat, alpha=False)
-    return pix.tobytes("png")
+    data = pix.tobytes("png")
+    try:
+        setattr(page, cache_key, data)
+    except Exception:
+        pass
+    return data
 
 
 def render_page_preview(
@@ -52,13 +63,22 @@ def render_page_preview(
     run_dir: Path,
     zoom: float = 2.0,
 ) -> tuple[str | None, str | None]:
-    """Save a full-page preview PNG and return (snippet_path, preview_path)."""
+    """Save a full-page preview PNG and return (snippet_path, preview_path).
+
+    Reuses the cached page image when available to avoid re-rasterizing the
+    same page once per finding.
+    """
+    from .analyzer import _cached_page_image
     snippets_dir, previews_dir = ensure_dirs(run_dir)
     page = doc[page_number - 1]
-    mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat, alpha=False)
     preview_path = previews_dir / f"{issue_id}.png"
-    pix.save(str(preview_path))
+    try:
+        img = _cached_page_image(page, zoom=zoom)
+        img.save(str(preview_path))
+    except Exception:
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        pix.save(str(preview_path))
     return None, str(preview_path)
 
 
@@ -179,7 +199,9 @@ def _safe_gemini_call(func, *args, **kwargs) -> list[dict]:
 _TITLE_BLOCK_PROMPT = """\
 You are a QC engineer reviewing a solar PV planset drawing page.
 
-Examine the TITLE BLOCK area (usually bottom-right corner) of this engineering drawing page and check for the following items:
+Examine the TITLE BLOCK area (usually bottom-right corner, sometimes the
+right-side vertical strip on landscape D-size drawings) and check for the
+following items:
 
 1. **SOV** (Scope of Verification) present
 2. **Date** is shown
@@ -190,13 +212,28 @@ Examine the TITLE BLOCK area (usually bottom-right corner) of this engineering d
 7. **Project Name** is shown
 8. **Sheet Number** (e.g. E-001, E-100) is shown
 
+CRITICAL — LABEL vs VALUE:
+Title blocks are printed templates with fixed FIELD LABELS like
+"PROJECT NAME:", "DATE:", "DESIGNER:" etc. The actual VALUE is filled
+in next to, above, below, or within a bordered box below the label.
+- When a label and its value are BOTH visible, report the finding as
+  "found: true" and put the VALUE in the "value" field. NEVER put the
+  label text in the "value" field.
+- Only mark a field as "found: false" if the value cell is truly blank /
+  placeholder (e.g. literally shows "XXXX", "TBD", "---", or is empty).
+- Do NOT treat the presence of a label like "PROJECT NAME" as a defect
+  or placeholder. The label is expected template text.
+- Do NOT treat ALL-CAPS or stylized text (e.g. "WELLINGTON SOLAR") as
+  a placeholder just because of its formatting — it's almost certainly
+  the real project name.
+
 Return a JSON array of findings. Each finding:
 ```json
 [
   {
     "check": "title_block_item_name",
     "found": true/false,
-    "value": "the value you read or null",
+    "value": "the actual filled-in value, NOT the field label",
     "notes": "any observations"
   }
 ]
@@ -206,6 +243,21 @@ Only return the JSON array, no other text.
 
 _COVER_SHEET_PROMPT = """\
 You are a QC engineer reviewing the COVER SHEET of a solar PV planset.
+
+CRITICAL — LABEL vs VALUE:
+Cover sheets and the right-side vertical title-block strip contain FIELD
+LABELS printed as part of the template (e.g. "PROJECT NAME", "OWNER",
+"EPC", "EOR", "SHEET NUMBER"). The actual VALUE is filled in next to,
+above, below, or within a bordered box near the label.
+- A label is NOT a defect. Do NOT flag "PROJECT NAME" (or similar) as
+  missing/placeholder just because the capitalized label text appears.
+- When you report a value, put the FILLED-IN value in the "value" field,
+  NEVER the field label itself.
+- Only mark a field "found: false" if the value cell is genuinely empty
+  or contains an obvious placeholder ("XXXX", "TBD", "N/A", "---", or
+  the project-info row literally reads "Project Name" as its own value).
+- ALL-CAPS project names (e.g. "WELLINGTON SOLAR", "CAMP HALL 3") are
+  valid values, NOT placeholders.
 
 Extract and verify ALL of the following from this page:
 
@@ -1743,28 +1795,28 @@ def run_gemini_checks(
     def _deep(want: bool) -> bool:
         return bool(want and use_deep)
 
-    # Progress helper: each vision check bumps the bar between 40% and 88%
-    # so the UI doesn't appear frozen at 40% for the whole Gemini phase.
-    # Total is capped — extra checks just stay at 88% instead of overshooting.
-    _progress_state = {"done": 0, "total": 25}
+    import concurrent.futures as _cf
+    import os as _os
+
+    # Parallelize vision checks. Each call is independent and IO-bound (waiting
+    # on the OpenAI/Gemini API), so threads work fine. Cap concurrency to stay
+    # well inside provider rate limits and avoid local resource pressure.
+    _max_workers = int(_os.getenv("AI_PARALLELISM", "6"))
+    _pool = _cf.ThreadPoolExecutor(max_workers=_max_workers, thread_name_prefix="qc-vision")
+    _futures: list[tuple[Any, str]] = []
 
     def _safe_call(func, *args, **kwargs) -> list[dict]:
-        # Default label is the category name — it's the 7th positional arg
-        # for both _gemini_page_check and _gemini_multi_page_check
-        # (doc, page_or_pages, prompt, run_id, run_dir, category, ...).
+        """Submit the check to the thread pool and return immediately.
+
+        Returns an empty list so the call site's ``all_issues.extend(...)``
+        is a no-op; the real results are drained at the end of this
+        function. Call sites do NOT need to change.
+        """
         default_label = args[5] if len(args) > 5 and isinstance(args[5], str) else func.__name__
         label = kwargs.pop("_label", default_label)
-        if progress_cb is not None:
-            done = _progress_state["done"]
-            total = max(1, _progress_state["total"])
-            pct = int(40 + (48 * min(done, total) / total))
-            try:
-                progress_cb(f"AI vision: {label}", pct)
-            except Exception:
-                pass
-        result = _safe_gemini_call(func, *args, **kwargs)
-        _progress_state["done"] += 1
-        return result
+        fut = _pool.submit(_safe_gemini_call, func, *args, **kwargs)
+        _futures.append((fut, label))
+        return []
 
     all_issues: list[dict] = []
 
@@ -1811,6 +1863,16 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
    The only exception is the REQUIRED WARNING LABELS check (NEC 690.56,
    705.12, etc.) — those labels MUST physically appear on the equipment
    and on the placards/labels sheet.
+9. **Field LABELS vs VALUES.** Planset templates print fixed field labels
+   like "PROJECT NAME", "OWNER", "DATE", "EPC", "DESIGNER", "REVISION",
+   "SHEET NUMBER", etc. The filled-in value sits next to, above, or
+   below each label (often in a bordered cell). NEVER treat the presence
+   of a label as a defect or placeholder. NEVER put the label text into
+   the "value" field of a finding — put the FILLED-IN value there. Only
+   emit a "Fail"/"Needs Review" finding for a field if its value cell is
+   truly empty or contains an obvious placeholder (XXXX, TBD, ---, N/A).
+   All-caps project/owner names (e.g. "WELLINGTON SOLAR") are valid
+   values, not placeholders.
 """
 
     def _prompt(base: str) -> str:
@@ -1845,23 +1907,24 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     )
     if datasheet_pages:
         sysinfo_pages.extend(datasheet_pages[:2])
+    # System info uses the standard (mini) model — the 16 validation rules
+    # in the prompt are explicit math, not freeform reasoning, so deep mode
+    # is overkill and adds 60–90s per run for marginal accuracy gain.
     if len(sysinfo_pages) == 1:
         all_issues.extend(
             _safe_call(
                 _gemini_page_check, doc, 1, _prompt(_SYSTEM_INFO_PROMPT),
                 run_id, run_dir, "System Information Table", "ai_sysinfo",
                 "System Information Table",
-                deep=_deep(True),
             )
         )
     else:
         all_issues.extend(
             _safe_call(
-                _gemini_multi_page_check, doc, sysinfo_pages[:3],
+                _gemini_multi_page_check, doc, sysinfo_pages[:2],
                 _prompt(_SYSTEM_INFO_PROMPT),
                 run_id, run_dir, "System Information Table", "ai_sysinfo",
-                f"System Info + Datasheets ({len(sysinfo_pages[:3])} pages)",
-                deep=_deep(True),
+                f"System Info + Datasheet ({len(sysinfo_pages[:2])} pages)",
             )
         )
 
@@ -2213,5 +2276,28 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
                 deep=_deep(True),
             )
         )
+
+    # ── Drain all submitted vision checks ──
+    # Until this point every _safe_call(...) just queued the work and returned
+    # an empty list. Now wait for results and stream progress as they finish.
+    fmap = {fut: label for fut, label in _futures}
+    total = len(fmap)
+    done = 0
+    try:
+        for fut in _cf.as_completed(fmap):
+            done += 1
+            label = fmap[fut]
+            if progress_cb is not None:
+                pct = int(40 + (48 * min(done, total) / max(1, total)))
+                try:
+                    progress_cb(f"AI vision: {label} ({done}/{total})", pct)
+                except Exception:
+                    pass
+            try:
+                all_issues.extend(fut.result())
+            except Exception:
+                logger.exception("Parallel vision check '%s' failed", label)
+    finally:
+        _pool.shutdown(wait=True)
 
     return all_issues
