@@ -31,7 +31,6 @@ category_order:
 - E-601
 - E-900
 - Cross-Sheet
-- Other Electrical
 rules:
 - key: v4_ai_input_gate_bod_available_project_specific
   category: AI Input Gate
@@ -326,10 +325,16 @@ rules:
     just "NEC 2020" alone.
   source: IAEI research / AHJ website
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V4-NEW
   v4_row: 33
+  keywords:
+  - NEC 2017
+  - NEC 2020
+  - NEC 2023
+  min_matches: 1
+  search_scope: cover
 - key: v4_title_block_pe_stamp_watermark_correct_for_stage
   category: Title Block
   title: PE stamp / watermark correct for stage
@@ -460,10 +465,13 @@ rules:
   description: Present. Flexible stranding for tracker projects.
   source: NEC 690.31(E) / tracker manual
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 50
+  keywords:
+  - NEC 690.31(E)
+  min_matches: 1
 - key: v4_e_002_dc_conductor_color_convention
   category: E-002
   title: DC conductor color convention
@@ -661,10 +669,15 @@ rules:
     = 125/150 kV, 35kV = 150/200 kV.'
   source: IEEE/ANSI BIL tables / Checkers Handbook
   severity: high
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V4-NEW
   v4_row: 74
+  keywords:
+  - BIL
+  - BASIC IMPULSE
+  - GOAB
+  min_matches: 1
 - key: v4_e_050_kaic_correct_for_system_size
   category: E-050
   title: kAIC correct for system size
@@ -726,10 +739,13 @@ rules:
     before submittal.'
   source: XFMR submittal / Joe training Apr 2024
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V4-ENH
   v4_row: 81
+  keywords:
+  - X/R
+  min_matches: 1
 - key: v4_e_100_xfmr_internal_fuse_config_matches_shop_drawin
   category: E-100
   title: XFMR internal fuse config matches shop drawing
@@ -833,10 +849,14 @@ rules:
   description: CPT on E-100 when OEM wiring diagram shows one. Confirmed Kipp.
   source: OEM wiring diagram
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 91
+  keywords:
+  - CPT
+  - CONTROL POWER
+  min_matches: 1
 - key: v4_e_100_black_line_work_only_for_utility
   category: E-100
   title: Black line work only for utility
@@ -875,10 +895,14 @@ rules:
     3000AF/3000AT at 100% with LSI not shown. Must come from switchboard submittal.'
   source: Switchboard submittal / Joe training April 2023
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V4-NEW
   v4_row: 98
+  keywords:
+  - AF/AT
+  - AMPERE FRAME
+  min_matches: 1
 - key: v4_e_101_e_102_switchboard_bus_v_inverter_ac_output_v
   category: E-101/E-102
   title: Switchboard bus V = inverter AC output V
@@ -3128,10 +3152,16 @@ rules:
     befine'
   source: AHJ adoption / E-001 codes list
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 345
+  keywords:
+  - NEC 2017
+  - NEC 2020
+  - NEC 2023
+  min_matches: 1
+  search_scope: cover
 - key: v4_e_002_wire_stranding_note
   category: E-002
   title: Wire stranding note
@@ -3140,10 +3170,13 @@ rules:
     NOTE: another thing to chek is if ther is any conflicting info in the notes verus the client spec'
   source: NEC 690.31(E) / tracker manual
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 346
+  keywords:
+  - NEC 690.31(E)
+  min_matches: 1
 - key: v4_e_002_conductor_color_convention
   category: E-002
   title: Conductor color convention
@@ -3497,10 +3530,13 @@ rules:
   description: 'Nameplate: "GOAB Switch accessible to utility 24/7." Dual-lock provision noted.'
   source: Utility ESB 756 §5.1
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 384
+  keywords:
+  - GOAB
+  min_matches: 1
 - key: v4_e_011_meter_warning_label
   category: E-011
   title: Meter warning label
@@ -3758,20 +3794,27 @@ rules:
   description: '%Z and X/R on E-100 = approved submittal.'
   source: XFMR submittal
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 415
+  keywords:
+  - X/R
+  min_matches: 1
 - key: v4_e_100_xfmr_bil_hv_and_lv_shown
   category: E-100
   title: XFMR BIL (HV and LV) shown
   description: Primary BIL and secondary BIL = XFMR submittal.
   source: XFMR submittal
   severity: high
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 416
+  keywords:
+  - BIL
+  - BASIC IMPULSE
+  min_matches: 1
 - key: v4_e_100_xfmr_fla_calculated_and_shown
   category: E-100
   title: XFMR FLA calculated and shown
@@ -3876,10 +3919,14 @@ rules:
     CPT.
   source: OEM switchgear wiring diagram
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 426
+  keywords:
+  - CPT
+  - CONTROL POWER
+  min_matches: 1
 - key: v4_e_100_all_customer_poles_with_device_types_and_ids
   category: E-100
   title: All customer poles with device types and IDs
@@ -4027,10 +4074,14 @@ rules:
   description: CPT + downstream loads when OEM switchgear diagram shows CPT. Confirmed Kipp/CS Energy.
   source: OEM switchgear wiring diagram
   severity: medium
-  check_type: gemini_vision
+  check_type: keyword
   confidence: 0.75
   v4_status: V3
   v4_row: 442
+  keywords:
+  - CPT
+  - CONTROL POWER
+  min_matches: 1
 - key: v4_e_101_e_102_ac_lug_die_conductor_material_and_size
   category: E-101/E-102
   title: 'AC lug die: conductor material and size'

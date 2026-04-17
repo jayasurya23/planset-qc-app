@@ -482,9 +482,17 @@ def is_v4_ruleset(rules: list[Rule]) -> bool:
 
 
 def group_rules(rules: list[Rule]) -> dict[str, list[Rule]]:
-    """Bucket rules by category, preserving input order."""
+    """Bucket **gemini_vision** rules by category, preserving input order.
+
+    Rules tagged as ``keyword`` / ``electrical_calc`` / ``sheet_existence``
+    / etc. are handled by their dedicated legacy loops in ``analyzer.py``
+    and are deliberately excluded here so the V4 engine only ever dispatches
+    vision calls.
+    """
     out: dict[str, list[Rule]] = {}
     for r in rules:
+        if r.check_type and r.check_type != "gemini_vision":
+            continue
         out.setdefault(r.category, []).append(r)
     return out
 

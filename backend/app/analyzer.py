@@ -1336,24 +1336,37 @@ def analyze_pdf(
 
     def _get_scope_text(rule: Rule) -> tuple[str | None, int | None]:
         """Return (combined_upper_text, first_page_number) for a rule's
-        search_scope.  Returns (None, None) if scope pages aren't found."""
+        search_scope.
+
+        - ``search_scope: cover``   → cover text only.
+        - ``search_scope: all``     → every page joined.
+        - ``title_match`` provided  → pages whose sheet title contains the
+                                      given keywords.
+        - None of the above         → default to ALL pages joined (V4 rules
+                                      frequently have no narrowing scope).
+        """
         scope = rule.search_scope
         if scope == "cover":
             return cover_text.upper(), 1
+        if scope == "all":
+            combined = "\n".join(p.text for p in pages).upper()
+            return combined, (pages[0].number if pages else 1)
         title_kws = rule.title_match
-        if not title_kws:
-            return None, None
-        exclude = [e.upper() for e in rule.exclude_title]
-        matched = _find_all_pages_by_title(*title_kws)
-        if exclude:
-            matched = [
-                p for p in matched
-                if not any(ex in (p.sheet_title or "").upper() for ex in exclude)
-            ]
-        if not matched:
-            return None, None
-        combined = "\n".join(p.text for p in matched).upper()
-        return combined, matched[0].number
+        if title_kws:
+            exclude = [e.upper() for e in rule.exclude_title]
+            matched = _find_all_pages_by_title(*title_kws)
+            if exclude:
+                matched = [
+                    p for p in matched
+                    if not any(ex in (p.sheet_title or "").upper() for ex in exclude)
+                ]
+            if not matched:
+                return None, None
+            combined = "\n".join(p.text for p in matched).upper()
+            return combined, matched[0].number
+        # Fallback: search all pages (default for V4 keyword rules).
+        combined = "\n".join(p.text for p in pages).upper()
+        return combined, (pages[0].number if pages else 1)
 
     # --- sheet_existence rules ---
     for rule in get_rules_by_check_type("sheet_existence"):

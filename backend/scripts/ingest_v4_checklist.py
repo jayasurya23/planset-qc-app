@@ -131,6 +131,136 @@ def _guess_severity(text: str) -> str:
     return "medium"
 
 
+# Regex for code citations that make excellent keyword-search tokens.
+_CODE_CITATION_RE = re.compile(
+    r"\b(NEC|NFPA|IEEE|ANSI|ASTM|ASCE|IBC|UL|NEMA|OSHA)\s+"
+    r"(?:C?\d{2,4}(?:[.-]\d+)*(?:\([A-Za-z0-9]+\))?)",
+    re.IGNORECASE,
+)
+
+# Tokens that strongly suggest "this rule is a text-presence check that can
+# run as a keyword match instead of burning a vision call."
+_NOTE_PRESENCE_TOKENS = (
+    "note present", "note shown", "note stated", "note listed", "note cited",
+    "note referenced", "note populated", "note (", "notes present",
+    "code year note", "splice prohibition note", "stranding note",
+)
+
+
+# Specific electrical / structural tokens that are distinctive enough to
+# search for directly. Each maps to the search tokens we'll look for on
+# the drawing — typically the token itself plus close variants.
+_DISTINCT_TOKEN_RULES: list[tuple[re.Pattern, list[str]]] = [
+    (re.compile(r"\b%\s*z\b", re.I),             ["%Z", "% Z", "IMPEDANCE"]),
+    (re.compile(r"\bx\s*/\s*r\b", re.I),         ["X/R"]),
+    (re.compile(r"\bkAIC\b", re.I),              ["kAIC", "KA IC", "INTERRUPT"]),
+    (re.compile(r"\bMCOV\b"),                    ["MCOV"]),
+    (re.compile(r"\bBIL\b"),                     ["BIL", "BASIC IMPULSE"]),
+    (re.compile(r"\bAF\s*/\s*AT\b", re.I),       ["AF/AT", "AMPERE FRAME"]),
+    (re.compile(r"\bNMOT\b"),                    ["NMOT", "NOCT"]),
+    (re.compile(r"\b(T|tamb)\b.*\b(ashrae)\b", re.I),  ["ASHRAE", "TAMB"]),
+    (re.compile(r"\barc[-\s]?flash\s+labels?\b", re.I), ["ARC FLASH", "ARC-FLASH"]),
+    (re.compile(r"\bGOAB\b"),                    ["GOAB"]),
+    (re.compile(r"\bSOV\b"),                     ["SOV", "SCOPE OF"]),
+    (re.compile(r"\bC[CP]T\b"),                  ["CPT", "CONTROL POWER"]),
+]
+
+
+# Title verbs that indicate "presence" (as opposed to "calculation" or
+# "comparison"). When present alongside a distinctive token, the rule is
+# a keyword candidate.
+_PRESENCE_VERBS = (
+    "present", "shown", "stated", "listed", "cited", "noted", "populated",
+    "indicated", "called out", "annotated",
+)
+
+
+_COMPARE_TOKENS = (
+    "cross-sheet", "cross sheet", "propagation", "identical",
+    "consistent across", "six-document", "five-document", "four-document",
+    "= e-", "matches e-", "= submittal", " vs ", " versus ", "reconciled",
+    "character-identical", "exact match",
+)
+
+
+def _classify_check_type(title: str, verify: str, source: str | None) -> tuple[str, dict]:
+    """Pick a check_type for a V4 rule and return any extra fields it needs.
+
+    Conservative: most rules stay as ``gemini_vision`` (the default). Only
+    reclassify when we can extract a specific, deterministic search token.
+
+    Returns (check_type, extra_fields_dict).
+    """
+    text = f"{title}\n{verify}".strip()
+    lower = text.lower()
+
+    # ── Veto: comparison / cross-sheet rules stay vision ─────────────────
+    # These rules require READING multiple sources and comparing values;
+    # a text search for one side of the comparison would pass even when
+    # the other side says something different. Keep them as vision.
+    if any(tok in lower for tok in _COMPARE_TOKENS):
+        return "gemini_vision", {}
+
+    # ── 1. Code-citation-based keyword check ─────────────────────────────
+    # If the rule description contains a specific NEC/IEEE/etc. citation
+    # AND the rule is clearly about "a note is present on the drawing",
+    # convert it to a keyword search for that citation.
+    citations = _CODE_CITATION_RE.findall(text)
+    citation_matches = _CODE_CITATION_RE.finditer(text)
+    citation_strings = list({m.group(0).strip() for m in citation_matches})
+
+    is_note_presence = any(tok in lower for tok in _NOTE_PRESENCE_TOKENS)
+    # Also accept titles that explicitly end with " note" or begin with "Note"
+    if not is_note_presence and (
+        lower.endswith(" note") or lower.startswith("note ") or " note " in (" " + lower + " ")
+    ):
+        # Still require something specific to search for — otherwise vision
+        if citation_strings:
+            is_note_presence = True
+
+    if is_note_presence and citation_strings:
+        # Use the citations as keywords. Multiple citations → any match passes.
+        return "keyword", {
+            "keywords": citation_strings,
+            "min_matches": 1,
+            # No search_scope restriction — the note may live on any sheet.
+        }
+
+    # ── 2. NEC code year note (special case) ─────────────────────────────
+    # "NEC code year note matches E-001" — search the cover sheet for the
+    # adopted NEC year. We don't know which year up front so we list the
+    # plausible current set.
+    if "code year" in lower and "nec" in lower:
+        return "keyword", {
+            "keywords": ["NEC 2017", "NEC 2020", "NEC 2023"],
+            "min_matches": 1,
+            "search_scope": "cover",
+        }
+
+    # ── 3. Distinctive electrical tokens + presence verb ─────────────────
+    # e.g. "XFMR %Z and X/R shown (even at 30%)" → search for "%Z" / "X/R"
+    # Requires the title/description to mention the token AND some variant
+    # of "present/shown/listed/etc." — so we don't misclassify rules that
+    # say "calculate %Z" or "compare %Z against …".
+    has_presence_verb = any(v in lower for v in _PRESENCE_VERBS)
+    if has_presence_verb:
+        matched_tokens: list[str] = []
+        for rx, search_terms in _DISTINCT_TOKEN_RULES:
+            if rx.search(text):
+                matched_tokens.extend(search_terms)
+        if matched_tokens:
+            # Deduplicate while preserving order
+            seen_tok: set[str] = set()
+            unique = [t for t in matched_tokens if not (t in seen_tok or seen_tok.add(t))]
+            return "keyword", {
+                "keywords": unique,
+                "min_matches": 1,
+            }
+
+    # ── Default: leave as a vision check ─────────────────────────────────
+    return "gemini_vision", {}
+
+
 def _normalize_status(raw: str) -> str:
     """Collapse the V3→V4 column to a clean tag. Long free-form text is
     treated as 'annotation' (preserved separately)."""
@@ -240,19 +370,25 @@ def ingest(xlsx_path: Path) -> tuple[list[dict], dict[str, Any]]:
 
         rule_key = _make_rule_key(section or "misc", item, seen_keys)
         severity = _guess_severity(f"{item} {data['verify']}")
+        check_type, extras = _classify_check_type(item, data["verify"], data["source"])
+        row_counts[f"check_type:{check_type}"] += 1
 
-        out_rules.append({
+        rule_dict: dict[str, Any] = {
             "key": rule_key,
             "category": section or "Misc",
             "title": item,
             "description": description or item,
             "source": data["source"] or None,
             "severity": severity,
-            "check_type": "gemini_vision",
+            "check_type": check_type,
             "confidence": 0.75,
             "v4_status": primary_status,
             "v4_row": data["row"],
-        })
+        }
+        # Merge any extra fields (keywords, search_scope, min_matches, ...)
+        for k, v in extras.items():
+            rule_dict[k] = v
+        out_rules.append(rule_dict)
 
     summary = {
         "input_file": str(xlsx_path),
@@ -261,8 +397,8 @@ def ingest(xlsx_path: Path) -> tuple[list[dict], dict[str, Any]]:
         "warnings": warnings,
         "by_status": Counter(r["v4_status"] for r in out_rules),
         "by_severity": Counter(r["severity"] for r in out_rules),
+        "by_check_type": Counter(r["check_type"] for r in out_rules),
         "by_category": Counter(r["category"] for r in out_rules),
-        "rules_with_annotations": sum(1 for r in out_rules if r["description"] != (rules[(r["category"], r["title"])]["verify"] or r["title"])),
     }
     return out_rules, summary
 
@@ -318,6 +454,10 @@ def print_report(summary: dict, out_path: Path) -> None:
     print("By severity (heuristic):")
     for k, v in summary["by_severity"].most_common():
         print(f"  {k:<8} {v}")
+    print()
+    print("By check_type (classification result):")
+    for k, v in summary.get("by_check_type", Counter()).most_common():
+        print(f"  {k:<18} {v}")
     print()
     print("By category (top 10):")
     for k, v in summary["by_category"].most_common(10):
