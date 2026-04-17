@@ -183,16 +183,81 @@ _COMPARE_TOKENS = (
 )
 
 
-def _classify_check_type(title: str, verify: str, source: str | None) -> tuple[str, dict]:
+# Categories that are process gates — never calc / keyword candidates.
+_NON_CHECKABLE_CATEGORIES = {
+    "AI Input Gate",
+    "BOD / Due Diligence",
+}
+
+
+# Match the rule TITLE (not description) to an existing calc function.
+# Title-only matching keeps the classifier precise — descriptions often
+# reference other rules' formulas which would cause false positives.
+_CALC_TITLE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # E-120 string-voltage math
+    (re.compile(r"\b(voc[_ -]?cold|string\s+voc|vmp[_ -]?hot|string\s+vmp)\b", re.I),
+     "validate_stringing"),
+    # E-106 fuse sizing (NEC 690.9)
+    (re.compile(r"\b(fuse[:\s].*690\.?9|nec\s*690\.?9|string\s+fuse\s+(rating|sizing)|fuse\s+sizing)\b", re.I),
+     "validate_fuse_sizing"),
+    # Transformer kVA vs inverter output
+    (re.compile(r"\bxfmr\s+kva\s*>=\s*|transformer\s+kva\s*>=|aux\s+xfmr\s+kva\s*>=", re.I),
+     "validate_transformer"),
+    # MV conductor math — checked BEFORE generic "1.25 × FLA" so MV wins
+    (re.compile(r"\bmv\s+conductor\b|nec\s*310\.?60|nec\s*art\s*315", re.I),
+     "validate_mv_ampacity"),
+    # AC feeder conductor / breaker 1.25 * FLA (non-MV)
+    (re.compile(r"\b(feeder\s+(breaker|conductor).*1\.25|1\.25\s*[×x*]\s*fla(?!\s*\()|breaker\s*>=\s*1\.25)\b", re.I),
+     "validate_ac_ampacity"),
+    # Conduit fill
+    (re.compile(r"\bconduit\s+fill\s*(<=|≤|\bmax\b|40\s*%)", re.I),
+     "validate_conduit_fill"),
+    # NEC 110.26 working clearances
+    (re.compile(r"\bnec\s*110\.?26|working\s+(space|clearance)\b", re.I),
+     "validate_nec_clearances"),
+    # DC conductor ampacity (narrow pattern — don't match DAS/etc.)
+    (re.compile(r"\bdc\s+conductor\s+(ampacity|meets|per)|pv\s+wire\s+ampacity", re.I),
+     "validate_dc_ampacity"),
+    # EGC sizing (NEC 250.122)
+    (re.compile(r"\begc\s+(sized|sizing|upsized|per\s+nec\s*250\.?122)", re.I),
+     "validate_egc_sizing"),
+    # GEC sizing (NEC 250.66)
+    (re.compile(r"\b(gec\s+sized|grounding\s+electrode\s+conductor\s+(siz|per\s+nec\s*250\.?66))", re.I),
+     "validate_gec_sizing"),
+    # Voltage drop math (not the "VD workbook exists" input-gate rule)
+    (re.compile(r"\bvoltage\s+drop\b.*(limits?|meets|<=|≤|criteria)", re.I),
+     "validate_voltage_drop"),
+]
+
+
+def _classify_check_type(
+    title: str,
+    verify: str,
+    source: str | None,
+    category: str | None = None,
+) -> tuple[str, dict]:
     """Pick a check_type for a V4 rule and return any extra fields it needs.
 
     Conservative: most rules stay as ``gemini_vision`` (the default). Only
-    reclassify when we can extract a specific, deterministic search token.
+    reclassify when we can extract a specific, deterministic search token
+    or match a rule whose formula is implemented in ``electrical_calcs.py``.
 
     Returns (check_type, extra_fields_dict).
     """
     text = f"{title}\n{verify}".strip()
     lower = text.lower()
+
+    # ── Never reclassify process-gate categories ─────────────────────────
+    if category in _NON_CHECKABLE_CATEGORIES:
+        return "gemini_vision", {}
+
+    # ── Electrical calc — highest priority ───────────────────────────────
+    # If the TITLE matches a known formula pattern, delegate to the
+    # corresponding calc function. Title-only match avoids false positives
+    # from descriptions that cite other rules' formulas.
+    for rx, fn_name in _CALC_TITLE_PATTERNS:
+        if rx.search(title):
+            return "electrical_calc", {"calc_function": fn_name}
 
     # ── Veto: comparison / cross-sheet rules stay vision ─────────────────
     # These rules require READING multiple sources and comparing values;
@@ -370,7 +435,7 @@ def ingest(xlsx_path: Path) -> tuple[list[dict], dict[str, Any]]:
 
         rule_key = _make_rule_key(section or "misc", item, seen_keys)
         severity = _guess_severity(f"{item} {data['verify']}")
-        check_type, extras = _classify_check_type(item, data["verify"], data["source"])
+        check_type, extras = _classify_check_type(item, data["verify"], data["source"], section)
         row_counts[f"check_type:{check_type}"] += 1
 
         rule_dict: dict[str, Any] = {

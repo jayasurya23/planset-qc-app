@@ -698,10 +698,11 @@ rules:
   description: kVA >= sum of all inverter AC outputs served.
   source: Inverter × count vs XFMR submittal
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 76
+  calc_function: validate_transformer
 - key: v4_e_050_xfmr_primary_v_cesir
   category: E-050
   title: XFMR primary V = CESIR
@@ -797,10 +798,11 @@ rules:
     Without study, 1.25× applies.
   source: NEC 315.60(C)(12) / NEC 310.15(A)(3) / thermal study
   severity: high
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V4-ENH
   v4_row: 86
+  calc_function: validate_mv_ampacity
 - key: v4_e_100_mv_cable_shield_vs_cn_appropriateness
   category: E-100
   title: 'MV cable: shield vs CN appropriateness'
@@ -884,10 +886,11 @@ rules:
     EXPLICITLY state "100% rated." 80% default assumed otherwise.'
   source: NEC 705.12 / switchboard submittal / Manjil annotation
   severity: high
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V4-ENH
   v4_row: 97
+  calc_function: validate_ac_ampacity
 - key: v4_e_101_e_102_breaker_af_at_trip_type_shown
   category: E-101/E-102
   title: Breaker AF / AT / trip type shown
@@ -1098,10 +1101,11 @@ rules:
   description: 'Lower: >= 1.56 × Isc. Upper: <= module max series fuse. Both simultaneously.'
   source: Module datasheet / NEC 690.9
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 119
+  calc_function: validate_fuse_sizing
 - key: v4_e_106_string_module_count_pvcase
   category: E-106
   title: String module count = PVCase
@@ -1131,30 +1135,33 @@ rules:
     are consistent'
   source: Module submittal / ASHRAE / inverter submittal
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 123
+  calc_function: validate_stringing
 - key: v4_e_120_string_vmp_cold_inverter_max_mppt
   category: E-120
   title: String Vmp cold <= inverter max MPPT
   description: Vmp_cold = Vmp × [1+(TCoeff_Pmax/100)×(T_min−25)] × N. <= max MPPT.
   source: Module / ASHRAE / inverter submittal
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 124
+  calc_function: validate_stringing
 - key: v4_e_120_string_vmp_hot_inverter_min_mppt
   category: E-120
   title: String Vmp hot >= inverter min MPPT
   description: Vmp_hot = Vmp × [1+(TCoeff_Pmax/100)×(T_high−25)] × N. >= min MPPT.
   source: Module / ASHRAE / inverter submittal
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 125
+  calc_function: validate_stringing
 - key: v4_e_120_temperature_coefficients_approved_datasheet
   category: E-120
   title: Temperature coefficients = approved datasheet
@@ -1172,10 +1179,11 @@ rules:
     avg. NOT a combined check.'
   source: VD workbook / project tech spec VD limits
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V4-ENH
   v4_row: 128
+  calc_function: validate_dc_ampacity
 - key: v4_e_300_mv_conductor_ampacity_with_or_without_study
   category: E-300
   title: MV conductor ampacity (with or without study)
@@ -1183,10 +1191,11 @@ rules:
     × FLA per NEC Table 315.60(C)(12).'
   source: NEC 315.60(C)(12) / thermal study / NEC 310.15(A)(3)
   severity: high
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V4-ENH
   v4_row: 129
+  calc_function: validate_mv_ampacity
 - key: v4_e_300_mv_cable_four_element_description
   category: E-300
   title: MV cable four-element description
@@ -1247,10 +1256,11 @@ rules:
   description: Calculated per conduit, not estimated.
   source: NEC Ch 9
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 135
+  calc_function: validate_conduit_fill
 - key: v4_e_300_burial_depth_project_spec_nec_300_5
   category: E-300
   title: Burial depth = project spec + NEC 300.5
@@ -2169,10 +2179,11 @@ rules:
   description: Min 3ft per NEC 110.26(A)(1) at switchboard. Utility clearance at XFMR.
   source: NEC 110.26 / utility XFMR clearance
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 239
+  calc_function: validate_nec_clearances
 - key: v4_e_400_conduit_entry_equipment_manual
   category: E-400
   title: Conduit entry = equipment manual
@@ -3866,10 +3877,11 @@ rules:
     NOTE: the 1.25 can be omiited if the amapcity study is done'
   source: NEC 315.60(C)(12) / FLA×1.25 / E-300
   severity: high
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 421
+  calc_function: validate_mv_ampacity
 - key: v4_e_100_mv_conductor_description_includes_egc
   category: E-100
   title: MV conductor description includes EGC
@@ -3877,10 +3889,11 @@ rules:
     NEC 250.122 + Art 315.'
   source: NEC 250.122 + NEC Art 315
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 422
+  calc_function: validate_mv_ampacity
 - key: v4_e_100_ct_ratio_accuracy_class_burden
   category: E-100
   title: CT ratio, accuracy class, burden
@@ -4021,10 +4034,11 @@ rules:
     that'
   source: Inverter submittal / NEC 705.12 / switchboard submittal
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 436
+  calc_function: validate_ac_ampacity
 - key: v4_e_101_e_102_kaic_correct_for_system_size
   category: E-101/E-102
   title: kAIC correct for system size
@@ -4121,10 +4135,11 @@ rules:
   description: Sum all aux loads (tracker motors + DAS + controllers + UPS + GFCI outlets) + 25% margin.
   source: Tracker manual (motor FLA) + DAS submittal + all aux submittals
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 447
+  calc_function: validate_transformer
 - key: v4_e_101_e_102_string_count_and_mppt_pvcase
   category: E-101/E-102
   title: String count and MPPT = PVCase
@@ -4399,10 +4414,11 @@ rules:
   description: MV conductor from NEC Table 315.60(C)(12) >= 1.25 × XFMR FLA.
   source: NEC 315.60(C)(12) / XFMR FLA
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 550
+  calc_function: validate_mv_ampacity
 - key: v4_e_300_mv_cable_description_four_elements
   category: E-300
   title: 'MV cable description: four elements'
@@ -4420,20 +4436,22 @@ rules:
   description: 'When phase upsized for VD: EGC upsized proportionally per 250.122(B).'
   source: NEC 250.122(B)
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 552
+  calc_function: validate_egc_sizing
 - key: v4_e_300_conduit_fill_40_per_nec_ch_9
   category: E-300
   title: Conduit fill <= 40% per NEC Ch 9
   description: Sum conductor areas / conduit inside area <= 40% for 3+ conductors. Calculated per conduit.
   source: NEC Ch 9 Table 1 + Table 5 / conductor OD
   severity: medium
-  check_type: gemini_vision
+  check_type: electrical_calc
   confidence: 0.75
   v4_status: V3
   v4_row: 553
+  calc_function: validate_conduit_fill
 - key: v4_e_300_burial_depth_owner_spec_nec_300_5
   category: E-300
   title: Burial depth = owner spec + NEC 300.5
