@@ -49,6 +49,7 @@ CATEGORY_ORDER: list[str] = [
     "AI Input Gate",
     "BOD / Due Diligence",
     "Title Block",
+    "System Information Table",   # legacy-supplement, populated at runtime
     "E-001",
     "E-002",
     "E-010",
@@ -73,7 +74,13 @@ CATEGORY_ORDER: list[str] = [
     "E-500-E-504",
     "E-601",
     "E-900",
+    # ── legacy V3 supplement categories (populated at runtime, no yaml rules) ──
+    "PAD / Slab Details",
+    "Elevation Details",
+    "Equipment Area Feeder Plan",
+    "AUX SLD",
     "Cross-Sheet",
+    "Other Electrical",           # V4 engine catch-all for unmatched sheets
 ]
 
 

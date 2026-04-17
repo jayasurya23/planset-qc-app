@@ -259,39 +259,46 @@ You are a senior solar PV QC engineer auditing the sheets shown for the
 checks listed below. Each check has a unique rule key — report findings
 using that key so results can be tracked.
 
-READ the drawings carefully. For each numbered check decide ONE of:
+DEFAULT BEHAVIOR: emit exactly ONE finding for every rule in the CHECKS
+list — one of Pass, Fail, or Needs Review. The typical distribution is
+a mix of all three; empty or single-status responses almost always
+indicate the model skipped checks it should have evaluated.
+
 - **Pass** — the criterion is clearly met on the sheet(s) shown.
 - **Fail** — clearly violated. State the value you read and the value
-  required, with the math if applicable.
-- **Needs Review** — the check IS in scope for these sheets (the
-  sheet-under-review has fields that should contain the required value),
-  but the value is blurry, ambiguous, or you cannot verify without more
-  context.
+  required, with the math if applicable. PREFER FAIL OVER NEEDS REVIEW
+  when you can see the defect.
+- **Needs Review** — the sheet has the relevant area but you cannot
+  definitively verify the check (value blurry, depends on a cell not
+  shown, requires a document not uploaded, or you'd need to see an
+  adjacent sheet to be certain). Write a short "evidence" reason.
+  Needs Review IS valuable — it tells the reviewer what to double-check
+  manually. Do not hide uncertain findings by skipping them.
 
-**SKIP entirely (emit NO finding)** when:
-- The rule targets a document or sheet that is NOT in view
-  (e.g. a check that says "E-300 cable schedule" when you are only
-  shown E-100; a check that says "compare to inverter submittal" when
-  no submittal is provided).
-- The rule requires an external workbook (PVSyst, ampacity study, CAB
-  calcs, stringing export, short-circuit study) unless its values are
-  also in a Supporting Documents evidence block appended to this
-  prompt.
-- The rule asks you to check a physical property only visible with site
-  access (existing pole locations, as-built conditions).
+SKIP (emit NO object) ONLY in these narrow cases:
+- The rule's category is clearly not the sheet you are looking at
+  (e.g. an E-500 grounding-plan rule when you are looking at a
+  title-block-only page).
+- The rule explicitly requires a document upload that is not listed in
+  the AVAILABLE EVIDENCE block (this was already filtered out — you
+  should not normally see these).
 
-Better to skip than to spam "Needs Review". Only emit findings for rules
-you could actually evaluate against what is shown above.
+For every other case you should emit a Pass / Fail / NR finding. Do NOT
+hedge by skipping rules just because you're uncertain — that's what
+"Needs Review" is for.
 
-Do NOT invent values. Only emit one finding per rule key.
+Do NOT invent values. One finding per rule key. Maximum one skip in a
+normal category — if you're skipping many rules, you are being too
+conservative.
 """
 
 
 _PROMPT_OUTPUT_FORMAT = """\
 
-Return ONLY a JSON array. Emit one object PER RULE YOU EVALUATED
-(Pass, Fail, or Needs Review). **Omit rules you skipped** — do not emit
-an object for out-of-scope rules.
+Return ONLY a JSON array. Emit one object PER RULE in the CHECKS list —
+Pass, Fail, or Needs Review. The array length should match the number
+of checks unless a few were genuinely out-of-scope (see SKIP criteria
+above; skipping should be rare).
 
 [
   {
@@ -299,15 +306,15 @@ an object for out-of-scope rules.
     "status": "Pass" | "Fail" | "Needs Review",
     "severity": "low" | "medium" | "high",
     "value": "the value you read on the drawing (short)",
-    "evidence": "one-sentence explanation showing the math/comparison",
+    "evidence": "one-sentence explanation showing the math/comparison "
+                "(or a short reason for NR)",
     "location": "table/row/sheet where you found it",
     "location_text": "short literal searchable excerpt (3-30 chars)"
   }
 ]
 
 The "check" field MUST match one of the rule keys from the CHECKS list
-above exactly. Do not invent new keys. Every emitted finding must be
-something you could actually see on the provided sheet(s).
+above exactly. Do not invent new keys.
 """
 
 

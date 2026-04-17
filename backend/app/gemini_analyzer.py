@@ -1943,7 +1943,90 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
             run_dir=run_dir,
             supporting_docs=supporting_docs,
         )
-        # Drain the futures submitted by the engine and return early —
+
+        # ── Legacy supplement ──────────────────────────────────────────
+        # Fill coverage gaps where the V4 workbook taxonomy has no direct
+        # equivalent to a V3 category with tuned hardcoded prompts. These
+        # run alongside the V4 engine so their findings are additive.
+        #
+        # System Information Table — V3 hardcoded prompt targets cover +
+        # datasheets with an atomic Pass/Fail per spec field. V4's E-001
+        # category has some overlap but the V4 prompt emits fewer findings
+        # per run.
+        sysinfo_pages = [1]
+        _datasheet_pages = [
+            p.number for p in pages
+            if any(kw in (p.sheet_title or "").upper() for kw in
+                   ("DATASHEET", "DATA SHEET", "SPEC SHEET", "SPECIFICATION",
+                    "SUBMITTAL", "CUT SHEET"))
+        ]
+        if _datasheet_pages:
+            sysinfo_pages.extend(_datasheet_pages[:1])
+        if len(sysinfo_pages) == 1:
+            _safe_call(
+                _gemini_page_check, doc, 1, _prompt(_SYSTEM_INFO_PROMPT),
+                run_id, run_dir, "System Information Table",
+                "ai_sysinfo_legacy", "System Information Table",
+            )
+        else:
+            _safe_call(
+                _gemini_multi_page_check, doc, sysinfo_pages[:2],
+                _prompt(_SYSTEM_INFO_PROMPT),
+                run_id, run_dir, "System Information Table",
+                "ai_sysinfo_legacy",
+                f"System Info + Datasheet ({len(sysinfo_pages[:2])} pages)",
+            )
+
+        # Helper: run a legacy V3 prompt on the first page matching any of
+        # the given title keywords. No-op when no page matches.
+        def _run_legacy_prompt(
+            prompt_text: str, category: str, item_key: str, display_title: str,
+            *title_keywords: str,
+        ) -> None:
+            for p in pages:
+                title_up = (p.sheet_title or "").upper()
+                if any(kw in title_up for kw in (k.upper() for k in title_keywords)):
+                    _safe_call(
+                        _gemini_page_check, doc, p.number, _prompt(prompt_text),
+                        run_id, run_dir, category, item_key, display_title,
+                    )
+                    return
+
+        # AUX SLD / AUX power — Hillsboro has "AUXILIARY LOADS" in the
+        # title without an explicit "SLD" keyword, so match broadly.
+        _run_legacy_prompt(
+            _AUX_SLD_PROMPT, "AUX SLD", "ai_aux_legacy",
+            "Auxiliary SLD / Aux Power Review",
+            "AUX", "AUXILIARY",
+        )
+
+        # Elevation Details — V3 prompt catches pile depth/type/spacing,
+        # CAB sweep/bend, weather-sensor placement, equipment clearances.
+        # V4 has no dedicated category for this.
+        _run_legacy_prompt(
+            _ELEVATION_PROMPT, "Elevation Details", "ai_elev_legacy",
+            "Elevation Details Review",
+            "ELEVATION", "EQUIPMENT DETAIL", "EQUIPMENT ELEVATION",
+        )
+
+        # PAD / Slab Details — rebar, anchor bolts, concrete specs,
+        # grounding connection, drainage, edge details.
+        _run_legacy_prompt(
+            _PAD_SLAB_PROMPT, "PAD / Slab Details", "ai_pad_legacy",
+            "PAD / Slab Details Review",
+            "PAD DETAIL", "SLAB DETAIL", "CONCRETE PAD",
+            "EQUIPMENT PAD", "FOUNDATION DETAIL",
+        )
+
+        # Equipment Area Feeder Plan — pile details, clearances,
+        # NEC 110.26 zone.
+        _run_legacy_prompt(
+            _EQUIP_AREA_FEEDER_PROMPT, "Equipment Area Feeder Plan",
+            "ai_eaf_legacy", "Equipment Area Feeder Plan Review",
+            "EQUIPMENT AREA", "EQUIPMENT PAD", "PAD FEEDER", "EQUIPMENT FEEDER",
+        )
+
+        # Drain the futures submitted by the engine and supplement —
         # skip the legacy hard-coded dispatches below.
         fmap = {fut: label for fut, label in _futures}
         total = len(fmap)
