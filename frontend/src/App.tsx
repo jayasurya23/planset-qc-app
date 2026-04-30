@@ -306,6 +306,21 @@ export default function App() {
   const [showManual, setShowManual] = useState(false);
   const [progressPct, setProgressPct] = useState(0);
   const [expandedEv, setExpandedEv] = useState<string | null>(null);
+  // Per-card preview expansion. When a finding has no bbox the inline
+  // thumbnail is just a full-page render with no highlighted region —
+  // basically noise — so it's collapsed by default. The reviewer can
+  // click "Show preview" to expand it inline if they actually want it.
+  const [expandedPreview, setExpandedPreview] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const togglePreview = useCallback((id: string) => {
+    setExpandedPreview((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const [sideOpen, setSideOpen] = useState(true);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [showProjDetails, setShowProjDetails] = useState(false);
@@ -2235,10 +2250,15 @@ export default function App() {
                           <div className="card-desc">{issue.description}</div>
                         )}
 
-                        {/* Inline preview thumbnail — clickable to open
-                            the full-resolution modal. Saves a click vs
-                            using the eye-icon button for the common case. */}
-                        {hasPreview && (
+                        {/* Inline preview thumbnail.
+                            When there IS a bbox, the snippet is a focused
+                            crop with the highlight — actually useful
+                            inline, so it's shown by default.
+                            When there is NO bbox, the "snippet" is just a
+                            full-page image with no highlighted region —
+                            noisy and not informative — so it's collapsed
+                            behind a "Show preview" button. */}
+                        {hasPreview && (issue.bbox || expandedPreview.has(issue.id)) ? (
                           <button
                             className="card-thumb"
                             onClick={() => setSel(issue)}
@@ -2253,7 +2273,16 @@ export default function App() {
                               loading="lazy"
                             />
                           </button>
-                        )}
+                        ) : hasPreview ? (
+                          <button
+                            className="card-thumb-toggle"
+                            onClick={() => togglePreview(issue.id)}
+                            type="button"
+                            title="No specific location for this finding — click to show the full page anyway"
+                          >
+                            ▸ Show full-page preview
+                          </button>
+                        ) : null}
 
                         {/* Row 3: AI findings / evidence — always visible */}
                         {issue.evidence && (
