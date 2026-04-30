@@ -271,7 +271,12 @@ function StatusBtn({
 
 export default function App() {
   const [runs, setRuns] = useState<RunData[]>([]);
-  const [runId, setRunId] = useState<string | null>(null);
+  // Read ``?run=<id>`` from the URL on first render so deep links like
+  // ``http://host:5173/?run=abc123`` open straight to that run.
+  const [runId, setRunId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("run");
+  });
   const [cat, setCat] = useState("All");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sel, setSel] = useState<Issue | null>(null);
@@ -398,10 +403,29 @@ export default function App() {
     const r = await fetch(`${API}/api/runs`);
     const d = await r.json();
     setRuns(d);
-    if (d.length && !runId) {
-      const first = d[0];
-      setRunId(first.id);
+    // If the URL named a run that exists, keep it. Otherwise default to
+    // the most recent run (the API returns runs newest-first).
+    if (d.length) {
+      const requested = runId && d.some((x: RunData) => x.id === runId);
+      if (!requested) {
+        setRunId(d[0].id);
+      }
     }
+  }, [runId]);
+
+  // Keep the URL's ``?run`` query param in sync with the selected run so
+  // browser refresh, copy-link, and shared links all land on the same run.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (runId) {
+      url.searchParams.set("run", runId);
+    } else {
+      url.searchParams.delete("run");
+    }
+    // ``replaceState`` (not pushState) — selecting a run shouldn't pollute
+    // the back/forward stack with every click.
+    window.history.replaceState({}, "", url.toString());
   }, [runId]);
 
   const refresh = useCallback(async (id: string) => {
@@ -1647,9 +1671,10 @@ export default function App() {
                   &middot;{" "}
                   <code
                     className="run-id"
-                    title={`Run ID: ${run.id} (click to copy)`}
+                    title={`Run ID: ${run.id}\nClick to copy a shareable link to this run.`}
                     onClick={() => {
-                      navigator.clipboard?.writeText(run.id);
+                      const link = `${window.location.origin}${window.location.pathname}?run=${run.id}`;
+                      navigator.clipboard?.writeText(link);
                     }}
                   >
                     run {run.id.slice(0, 8)}
