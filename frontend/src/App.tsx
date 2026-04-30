@@ -2382,6 +2382,8 @@ export default function App() {
                         .slice(0, 30)
                         .map((r) => (
                           <option key={r.id} value={r.id}>
+                            {r.project_name || "(no project name)"}
+                            {" — "}
                             {r.original_filename}
                             {" · "}
                             {new Date(r.created_at).toLocaleDateString()}
