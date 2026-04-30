@@ -14,7 +14,16 @@ const STATUSES: Status[] = [
   "Pass",
   "Fail",
   "Needs Review",
+  "Deferred",
   "Overridden / Accepted by QC Engineer",
+];
+const DESIGN_STAGES: Array<{ value: string; label: string }> = [
+  { value: "", label: "All stages (no gating)" },
+  { value: "30", label: "30%" },
+  { value: "60", label: "60% / IFP" },
+  { value: "90", label: "90%" },
+  { value: "IFC", label: "IFC" },
+  { value: "AsBuilt", label: "As-Built" },
 ];
 const CATEGORIES = [
   "Drawing Index",
@@ -75,12 +84,14 @@ const SL: Record<string, string> = {
   Pass: "Pass",
   Fail: "Fail",
   "Needs Review": "Review",
+  Deferred: "Deferred",
   "Overridden / Accepted by QC Engineer": "Accepted",
 };
 const SV: Record<string, string> = { high: "HIGH", medium: "MED", low: "LOW" };
-function catHealth(c: CategorySummary): "pass" | "fail" | "review" {
+function catHealth(c: CategorySummary): "pass" | "fail" | "review" | "deferred" {
   if ((c.Fail ?? 0) > 0) return "fail";
   if ((c["Needs Review"] ?? 0) > 0) return "review";
+  if ((c.Pass ?? 0) === 0 && (c.Deferred ?? 0) > 0) return "deferred";
   return "pass";
 }
 function catPct(c: CategorySummary) {
@@ -174,12 +185,21 @@ function GeminiBar({
   u,
   durationSeconds,
   deepMode,
+  designStage,
 }: {
   u?: GeminiUsage;
   durationSeconds?: number | null;
   deepMode?: boolean | null;
+  designStage?: string | null;
 }) {
   if (!u || !u.api_calls) return null;
+  const stageLabel: Record<string, string> = {
+    "30": "30%",
+    "60": "60%",
+    "90": "90%",
+    IFC: "IFC",
+    AsBuilt: "As-Built",
+  };
   return (
     <div className="gem">
       <span className="gem-dot" />
@@ -205,6 +225,17 @@ function GeminiBar({
           <span className="gem-sep">&middot;</span>
           <span className={`mode-pill ${deepMode ? "mode-deep" : "mode-mini"}`}>
             {deepMode ? "Deep" : "Mini"}
+          </span>
+        </>
+      )}
+      {designStage && (
+        <>
+          <span className="gem-sep">&middot;</span>
+          <span
+            className="mode-pill stage-pill"
+            title="Design stage used for rule gating. Rules requiring later stages were deferred."
+          >
+            Stage: {stageLabel[designStage] ?? designStage}
           </span>
         </>
       )}
@@ -272,6 +303,7 @@ export default function App() {
   const [parsing, setParsing] = useState(false);
   const [parseMsg, setParseMsg] = useState("");
   const [deepMode, setDeepMode] = useState(true);
+  const [designStage, setDesignStage] = useState<string>("");
   const [supportingDocs, setSupportingDocs] = useState<SupportingDoc[]>([]);
   const [supportingLoading, setSupportingLoading] = useState(false);
   const [supportingMsg, setSupportingMsg] = useState("");
@@ -397,6 +429,8 @@ export default function App() {
       list = list.filter((i) => i.status === "Needs Review");
     else if (statusFilter === "pass")
       list = list.filter((i) => i.status === "Pass");
+    else if (statusFilter === "deferred")
+      list = list.filter((i) => i.status === "Deferred");
     else if (statusFilter === "override")
       list = list.filter(
         (i) => i.status === "Overridden / Accepted by QC Engineer",
@@ -405,6 +439,7 @@ export default function App() {
       list = list.filter(
         (i) =>
           i.status !== "Pass" &&
+          i.status !== "Deferred" &&
           i.status !== "Overridden / Accepted by QC Engineer",
       );
     return list;
@@ -417,6 +452,7 @@ export default function App() {
         Pass: 0,
         Fail: 0,
         "Needs Review": 0,
+        Deferred: 0,
         "Overridden / Accepted by QC Engineer": 0,
       };
     const all = run.issues ?? [];
@@ -424,6 +460,7 @@ export default function App() {
       Pass: all.filter((i) => i.status === "Pass").length,
       Fail: all.filter((i) => i.status === "Fail").length,
       "Needs Review": all.filter((i) => i.status === "Needs Review").length,
+      Deferred: all.filter((i) => i.status === "Deferred").length,
       "Overridden / Accepted by QC Engineer": all.filter(
         (i) => i.status === "Overridden / Accepted by QC Engineer",
       ).length,
@@ -443,6 +480,7 @@ export default function App() {
           Pass: 0,
           Fail: 0,
           "Needs Review": 0,
+          Deferred: 0,
           "Overridden / Accepted by QC Engineer": 0,
         };
       }
@@ -452,6 +490,8 @@ export default function App() {
       else if (issue.status === "Fail") c.Fail = (c.Fail ?? 0) + 1;
       else if (issue.status === "Needs Review")
         c["Needs Review"] = (c["Needs Review"] ?? 0) + 1;
+      else if (issue.status === "Deferred")
+        c.Deferred = (c.Deferred ?? 0) + 1;
       else if (issue.status === "Overridden / Accepted by QC Engineer")
         c["Overridden / Accepted by QC Engineer"] =
           (c["Overridden / Accepted by QC Engineer"] ?? 0) + 1;
@@ -461,7 +501,7 @@ export default function App() {
   }, [run]);
 
   const counts = useMemo(() => {
-    if (!run) return { p: 0, f: 0, r: 0, o: 0, t: 0 };
+    if (!run) return { p: 0, f: 0, r: 0, d: 0, o: 0, t: 0 };
     const all =
       cat === "All"
         ? (run.issues ?? [])
@@ -470,6 +510,7 @@ export default function App() {
       p: all.filter((i) => i.status === "Pass").length,
       f: all.filter((i) => i.status === "Fail").length,
       r: all.filter((i) => i.status === "Needs Review").length,
+      d: all.filter((i) => i.status === "Deferred").length,
       o: all.filter((i) => i.status === "Overridden / Accepted by QC Engineer")
         .length,
       t: all.length,
@@ -523,6 +564,7 @@ export default function App() {
     if (projName.trim()) fd.append("project_name", projName.trim());
     if (pdHasValues) fd.append("project_details", JSON.stringify(pd));
     fd.append("use_deep", deepMode ? "true" : "false");
+    if (designStage) fd.append("design_stage", designStage);
     if (supportingDocs.length > 0) {
       fd.append("supporting_docs", JSON.stringify(supportingDocs));
     }
@@ -739,6 +781,23 @@ export default function App() {
                   onChange={(e) => setDeepMode(e.target.checked)}
                 />
                 <span>Deep mode {deepMode ? "(hybrid)" : "(mini only)"}</span>
+              </label>
+              <label
+                className="stage-select"
+                title="Design stage — rules requiring later-stage sheets will be deferred (shown as N/A for this stage). Lenient: if a later-stage sheet is actually in the PDF, its rules still fire."
+              >
+                <span className="stage-label">Design stage</span>
+                <select
+                  value={designStage}
+                  onChange={(e) => setDesignStage(e.target.value)}
+                  className="si"
+                >
+                  {DESIGN_STAGES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <div className="sd-box">
                 <div className="sd-label">
@@ -1590,7 +1649,42 @@ export default function App() {
                   u={run.summary.gemini_usage}
                   durationSeconds={run.summary.duration_seconds}
                   deepMode={run.summary.deep_mode}
+                  designStage={run.summary.design_stage}
                 />
+                {run.summary.call_timings && run.summary.call_timings.length > 0 && (
+                  <details className="timing-details">
+                    <summary>
+                      Slowest AI calls: {run.summary.call_timings
+                        .slice(0, 3)
+                        .map((t) => `${t.label.replace(/\s*\(\d+ pages\)$/, "")} ${t.duration_s.toFixed(0)}s`)
+                        .join(" · ")}
+                    </summary>
+                    <table className="timing-table">
+                      <thead>
+                        <tr>
+                          <th>Category / dispatch</th>
+                          <th>Model</th>
+                          <th style={{ textAlign: "right" }}>Duration</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {run.summary.call_timings.slice(0, 10).map((t, i) => (
+                          <tr key={i}>
+                            <td>{t.label}</td>
+                            <td>
+                              <span className={`mode-pill ${t.deep ? "mode-deep" : "mode-mini"}`}>
+                                {t.deep ? "Deep" : "Mini"}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {t.duration_s.toFixed(1)}s
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </details>
+                )}
                 {run.summary.supporting_docs &&
                   run.summary.supporting_docs.length > 0 && (
                     <div className="evidence-bar">
@@ -1642,9 +1736,21 @@ export default function App() {
 
             {/* ── Score cards ── */}
             <div className="scores">
-              <div className="sc sc-total">
+              <div
+                className="sc sc-total"
+                title="Total findings emitted (Pass + Fail + Needs Review + Deferred + Accepted)"
+              >
                 <div className="sc-val">{(run.issues ?? []).length}</div>
                 <div className="sc-lab">Total Checks</div>
+              </div>
+              <div
+                className="sc sc-actual"
+                title="Checks actually evaluated (Deferred excluded — those couldn't be run with the available evidence)"
+              >
+                <div className="sc-val">
+                  {(run.issues ?? []).length - liveStatusCounts.Deferred}
+                </div>
+                <div className="sc-lab">Actual Checks</div>
               </div>
               <div
                 className="sc sc-pass"
@@ -1676,18 +1782,37 @@ export default function App() {
                 <div className="sc-val">{liveStatusCounts["Needs Review"]}</div>
                 <div className="sc-lab">Review</div>
               </div>
+              {liveStatusCounts.Deferred > 0 && (
+                <div
+                  className="sc sc-deferred"
+                  onClick={() => {
+                    setCat("All");
+                    setStatusFilter("deferred");
+                  }}
+                  title="N/A at this stage OR requires evidence not in this run"
+                >
+                  <div className="sc-val">{liveStatusCounts.Deferred}</div>
+                  <div className="sc-lab">Deferred</div>
+                </div>
+              )}
               <div className="sc">
                 <div className="sc-val">{run.summary.pdf_page_count}</div>
                 <div className="sc-lab">Pages</div>
               </div>
-              <div className="sc">
+              <div
+                className="sc"
+                title="Pass rate among evaluable checks (Deferred excluded — those weren't runnable with the evidence provided)"
+              >
                 <div className="sc-val">
                   {Math.round(
                     ((liveStatusCounts.Pass +
                       liveStatusCounts[
                         "Overridden / Accepted by QC Engineer"
                       ]) /
-                      Math.max((run.issues ?? []).length, 1)) *
+                      Math.max(
+                        (run.issues ?? []).length - liveStatusCounts.Deferred,
+                        1,
+                      )) *
                       100,
                   )}
                   %
@@ -1769,6 +1894,7 @@ export default function App() {
                         ["pass", "Pass", counts.p],
                         ["fail", "Fail", counts.f],
                         ["review", "Review", counts.r],
+                        ["deferred", "Deferred", counts.d],
                         ["override", "Accepted", counts.o],
                       ] as [string, string, number][]
                     ).map(([k, l, n]) =>
@@ -1874,7 +2000,7 @@ export default function App() {
                         {/* Row 1: header with status, title, actions */}
                         <div className="card-row">
                           <span
-                            className={`badge badge-${issue.status === "Overridden / Accepted by QC Engineer" ? "ok" : issue.status === "Pass" ? "pass" : issue.status === "Fail" ? "fail" : "review"}`}
+                            className={`badge badge-${issue.status === "Overridden / Accepted by QC Engineer" ? "ok" : issue.status === "Pass" ? "pass" : issue.status === "Fail" ? "fail" : issue.status === "Deferred" ? "deferred" : "review"}`}
                           >
                             {SL[issue.status] ?? issue.status}
                           </span>
@@ -2080,7 +2206,7 @@ export default function App() {
                 <h2 className="detail-title">{sel.title}</h2>
                 <div className="detail-tags">
                   <span
-                    className={`badge badge-${sel.status === "Pass" ? "pass" : sel.status === "Fail" ? "fail" : sel.status === "Needs Review" ? "review" : "ok"}`}
+                    className={`badge badge-${sel.status === "Pass" ? "pass" : sel.status === "Fail" ? "fail" : sel.status === "Needs Review" ? "review" : sel.status === "Deferred" ? "deferred" : "ok"}`}
                   >
                     {SL[sel.status]}
                   </span>

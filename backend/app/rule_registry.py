@@ -19,6 +19,24 @@ import yaml
 log = logging.getLogger(__name__)
 
 _DEFAULT_RULES_FILE = "rules.yaml"
+_STAGE_OVERRIDES_FILE = "stage_overrides.yaml"
+
+# Ordered from earliest to latest; anything left of the chosen stage also fires.
+STAGE_ORDER: tuple[str, ...] = ("30", "60", "90", "IFC", "AsBuilt")
+
+
+def stage_index(stage: str | None) -> int:
+    """Return the position of ``stage`` in STAGE_ORDER, or -1 if unknown/None.
+
+    An unknown value (including None) is treated as "no gating" — every rule
+    fires — by returning a value >= len(STAGE_ORDER) so comparisons succeed.
+    """
+    if not stage:
+        return len(STAGE_ORDER)  # no stage selected = don't gate anything
+    try:
+        return STAGE_ORDER.index(stage)
+    except ValueError:
+        return len(STAGE_ORDER)
 
 
 def _resolve_rules_path() -> Path:
@@ -65,6 +83,10 @@ class Rule:
     v4_status: str | None = None
     v4_row: int | None = None
 
+    # Stage-gating: earliest design stage at which this rule should fire.
+    # Populated from stage_overrides.yaml (category default + per-rule override).
+    min_stage: str | None = None
+
     # keyword check fields
     keywords: list[Any] = field(default_factory=list)
     min_matches: int = 1
@@ -89,16 +111,53 @@ def _load_raw() -> dict:
 
 
 @functools.lru_cache(maxsize=1)
+def _load_stage_overrides() -> tuple[dict[str, str], dict[str, str], set[str]]:
+    """Return (category_min_stage, rule_overrides, disabled_rules).
+
+    Reads ``stage_overrides.yaml``. Missing file is not an error — stage gating
+    becomes a no-op and no rules are disabled.
+    """
+    path = Path(__file__).resolve().parent / _STAGE_OVERRIDES_FILE
+    if not path.exists():
+        log.info("stage_overrides.yaml not present — stage gating disabled")
+        return {}, {}, set()
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    cat = {str(k): str(v) for k, v in (raw.get("category_min_stage") or {}).items()}
+    rule = {str(k): str(v) for k, v in (raw.get("rule_overrides") or {}).items()}
+    disabled = {str(k) for k in (raw.get("disabled_rules") or [])}
+    log.info(
+        "Loaded overrides: %d categor%s, %d rule-level, %d disabled",
+        len(cat), "y" if len(cat) == 1 else "ies",
+        len(rule), len(disabled),
+    )
+    return cat, rule, disabled
+
+
+@functools.lru_cache(maxsize=1)
 def load_rules() -> tuple[list[Rule], list[str]]:
-    """Return (rules_list, category_order) from the YAML registry."""
+    """Return (rules_list, category_order) from the YAML registry.
+
+    Stage gating: every rule receives a ``min_stage`` from the rule-level
+    override if present, else the category default, else None (= always fires).
+    """
     raw = _load_raw()
     category_order: list[str] = raw.get("category_order", [])
+    cat_stage, rule_stage, disabled = _load_stage_overrides()
+    skipped = 0
     rules: list[Rule] = []
     for entry in raw.get("rules", []):
-        rules.append(Rule(**{
-            k: v for k, v in entry.items()
-            if k in Rule.__dataclass_fields__
-        }))
+        fields = {k: v for k, v in entry.items() if k in Rule.__dataclass_fields__}
+        if fields.get("key") in disabled:
+            skipped += 1
+            continue
+        if fields.get("min_stage") is None:
+            key = fields.get("key") or ""
+            cat = fields.get("category") or ""
+            fields["min_stage"] = rule_stage.get(key) or cat_stage.get(cat)
+        rules.append(Rule(**fields))
+    if skipped:
+        log.info("Registry: suppressed %d disabled rule(s)", skipped)
     return rules, category_order
 
 

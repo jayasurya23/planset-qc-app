@@ -226,6 +226,7 @@ STATUS_FILL = {
     "Pass": "E6F4EA",
     "Fail": "FCE8E6",
     "Needs Review": "FFF4CC",
+    "Deferred": "EFF8FF",
     "Overridden / Accepted by QC Engineer": "E8F0FE",
 }
 
@@ -271,6 +272,7 @@ def build_workbook(run: dict) -> Workbook:
         ("Pass", run["status_counts"].get("Pass", 0)),
         ("Fail", run["status_counts"].get("Fail", 0)),
         ("Needs Review", run["status_counts"].get("Needs Review", 0)),
+        ("Deferred", run["status_counts"].get("Deferred", 0)),
         (
             "Overridden / Accepted by QC Engineer",
             run["status_counts"].get("Overridden / Accepted by QC Engineer", 0),
@@ -285,8 +287,9 @@ def build_workbook(run: dict) -> Workbook:
     ws_summary["F3"] = "Pass"
     ws_summary["G3"] = "Fail"
     ws_summary["H3"] = "Needs Review"
-    ws_summary["I3"] = "Overridden"
-    for cell in ws_summary["D3:I3"][0]:
+    ws_summary["I3"] = "Deferred"
+    ws_summary["J3"] = "Overridden"
+    for cell in ws_summary["D3:J3"][0]:
         cell.fill = header_fill
         cell.font = header_font
 
@@ -296,7 +299,8 @@ def build_workbook(run: dict) -> Workbook:
         ws_summary[f"F{idx}"] = category.get("Pass", 0)
         ws_summary[f"G{idx}"] = category.get("Fail", 0)
         ws_summary[f"H{idx}"] = category.get("Needs Review", 0)
-        ws_summary[f"I{idx}"] = category.get("Overridden / Accepted by QC Engineer", 0)
+        ws_summary[f"I{idx}"] = category.get("Deferred", 0)
+        ws_summary[f"J{idx}"] = category.get("Overridden / Accepted by QC Engineer", 0)
 
     autosize_columns(ws_summary)
 

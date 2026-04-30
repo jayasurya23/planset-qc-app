@@ -1570,6 +1570,7 @@ def _gemini_page_check(
     findings = _extract_json(raw)
 
     issues: list[dict] = []
+    seen_keys: set[str] = set()
     for i, finding in enumerate(findings):
         check_name = finding.get("check") or finding.get(
             "field") or f"item_{i}"
@@ -1604,6 +1605,31 @@ def _gemini_page_check(
             parts.append(f"Value: {value}")
         full_evidence = " | ".join(parts) if parts else ""
 
+        # Demote evidence-less "Needs Review" findings to "Deferred" so they
+        # no longer count as EXTRA noise in the regression scorecard. An NR
+        # with no location/value/notes is unreviewable anyway.
+        if status == "Needs Review" and not full_evidence:
+            status = "Deferred"
+            full_evidence = (
+                "Deferred: Gemini flagged a potential issue but returned no "
+                "location, value, or evidence text — unreviewable without a "
+                "second look."
+            )
+
+        # Avoid the double-prefix rule_key bug: if the model already emitted a
+        # fully-qualified check name (e.g. "gen_placeholders") that starts with
+        # the category prefix, use it as-is.
+        if check_name.startswith(item_key_prefix):
+            item_key = check_name
+        else:
+            item_key = f"{item_key_prefix}_{check_name}"
+
+        # Per-call dedup: Gemini sometimes emits the same finding multiple
+        # times in a single response (e.g. 3x "gen_placeholders" on one page).
+        if item_key in seen_keys:
+            continue
+        seen_keys.add(item_key)
+
         title = _pretty_title_for(check_name)
         issue_id = str(uuid.uuid4())
 
@@ -1628,7 +1654,7 @@ def _gemini_page_check(
         issues.append(
             make_issue(
                 run_id=run_id,
-                item_key=f"{item_key_prefix}_{check_name}",
+                item_key=item_key,
                 category=category,
                 title=title,
                 description=f"[AI] {default_title}: {title}",
@@ -1677,6 +1703,7 @@ def _gemini_multi_page_check(
     findings = _extract_json(raw)
 
     issues: list[dict] = []
+    seen_keys: set[str] = set()
     for i, finding in enumerate(findings):
         check_name = finding.get("check") or finding.get(
             "field") or f"item_{i}"
@@ -1709,6 +1736,27 @@ def _gemini_multi_page_check(
         if value and isinstance(value, str):
             parts.append(f"Value: {value}")
         full_evidence = " | ".join(parts) if parts else ""
+
+        # Cross-Sheet-safe NR-without-evidence gate: demote to Deferred so it
+        # stops firing as EXTRA noise in the regression scorecard.
+        if status == "Needs Review" and not full_evidence:
+            status = "Deferred"
+            full_evidence = (
+                "Deferred: Gemini flagged a potential cross-sheet issue but "
+                "returned no location, value, or evidence text — "
+                "unreviewable without a second look."
+            )
+
+        # Avoid the double-prefix rule_key bug.
+        if check_name.startswith(item_key_prefix):
+            item_key = check_name
+        else:
+            item_key = f"{item_key_prefix}_{check_name}"
+
+        # Per-call dedup.
+        if item_key in seen_keys:
+            continue
+        seen_keys.add(item_key)
 
         title = _pretty_title_for(check_name)
         issue_id = str(uuid.uuid4())
@@ -1751,7 +1799,7 @@ def _gemini_multi_page_check(
         issues.append(
             make_issue(
                 run_id=run_id,
-                item_key=f"{item_key_prefix}_{check_name}",
+                item_key=item_key,
                 category=category,
                 title=title,
                 description=f"[AI] {default_title}: {title}",
@@ -1849,7 +1897,9 @@ def run_gemini_checks(
     project_details: dict | None = None,
     use_deep: bool = True,
     supporting_docs: list[dict] | None = None,
+    design_stage: str | None = None,
     progress_cb: Any = None,
+    out_timings: list[dict] | None = None,
 ) -> list[dict]:
     """Run all Gemini-powered deep checks.  Returns a list of issue dicts.
 
@@ -1881,16 +1931,38 @@ def run_gemini_checks(
     _pool = _cf.ThreadPoolExecutor(max_workers=_max_workers, thread_name_prefix="qc-vision")
     _futures: list[tuple[Any, str]] = []
 
+    import time as _time
+
     def _safe_call(func, *args, **kwargs) -> list[dict]:
         """Submit the check to the thread pool and return immediately.
 
         Returns an empty list so the call site's ``all_issues.extend(...)``
         is a no-op; the real results are drained at the end of this
         function. Call sites do NOT need to change.
+
+        When ``out_timings`` is provided, each dispatched call's wall-time
+        (label + duration in seconds + deep flag) is appended to it. Used
+        by the analyzer to surface per-category timing in the run summary.
         """
         default_label = args[5] if len(args) > 5 and isinstance(args[5], str) else func.__name__
         label = kwargs.pop("_label", default_label)
-        fut = _pool.submit(_safe_gemini_call, func, *args, **kwargs)
+        deep_flag = bool(kwargs.get("deep", False))
+
+        if out_timings is None:
+            fut = _pool.submit(_safe_gemini_call, func, *args, **kwargs)
+        else:
+            def _timed(*a, **kw):
+                t0 = _time.monotonic()
+                try:
+                    return _safe_gemini_call(*a, **kw)
+                finally:
+                    out_timings.append({
+                        "label": label,
+                        "duration_s": round(_time.monotonic() - t0, 2),
+                        "deep": deep_flag,
+                    })
+            fut = _pool.submit(_timed, func, *args, **kwargs)
+
         _futures.append((fut, label))
         return []
 
@@ -1971,7 +2043,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
 
     if v4_engine.is_v4_ruleset(_all_rules):
         logger.info("V4 engine active (%d rules loaded)", len(_all_rules))
-        v4_engine.run_v4_checks(
+        _deferred = v4_engine.run_v4_checks(
             doc=doc,
             pages=pages,
             rules=_all_rules,
@@ -1983,7 +2055,10 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
             run_id=run_id,
             run_dir=run_dir,
             supporting_docs=supporting_docs,
+            design_stage=design_stage,
         )
+        if _deferred:
+            all_issues.extend(_deferred)
 
         # ── Legacy supplement ──────────────────────────────────────────
         # Fill coverage gaps where the V4 workbook taxonomy has no direct

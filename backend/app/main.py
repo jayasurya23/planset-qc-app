@@ -377,6 +377,7 @@ def _run_analysis_bg(
     upload_id: str, pdf_path: Path, project_name: str | None,
     original_filename: str, pd: dict | None, use_deep: bool = True,
     supporting_docs: list[dict] | None = None,
+    design_stage: str | None = None,
 ) -> None:
     """Run analysis in a background thread, updating progress along the way."""
     try:
@@ -391,6 +392,7 @@ def _run_analysis_bg(
             project_details=pd,
             use_deep=use_deep,
             supporting_docs=supporting_docs,
+            design_stage=design_stage,
         )
 
         set_progress(upload_id, "saving", "Saving results...", 95)
@@ -407,12 +409,16 @@ def _run_analysis_bg(
             _analysis_results[upload_id] = {"error": str(exc)}
 
 
+_VALID_STAGES = {"30", "60", "90", "IFC", "AsBuilt"}
+
+
 @app.post("/api/analyze")
 async def api_analyze(
     project_name: str | None = Form(None),
     project_details: str | None = Form(None),
     use_deep: str | None = Form("true"),
     supporting_docs: str | None = Form(None),
+    design_stage: str | None = Form(None),
     file: UploadFile = File(...),
 ) -> dict:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -449,15 +455,25 @@ async def api_analyze(
 
     deep_flag = (use_deep or "true").strip().lower() not in ("false", "0", "no", "off")
 
+    stage = (design_stage or "").strip() or None
+    if stage and stage not in _VALID_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid design_stage {stage!r}; expected one of {sorted(_VALID_STAGES)}",
+        )
+
     # Launch in background thread — return upload_id immediately
     t = threading.Thread(
         target=_run_analysis_bg,
-        args=(upload_id, pdf_path, project_name, file.filename, pd, deep_flag, sd),
+        args=(upload_id, pdf_path, project_name, file.filename, pd, deep_flag, sd, stage),
         daemon=True,
     )
     t.start()
 
-    return {"upload_id": upload_id, "status": "running", "deep_mode": deep_flag}
+    return {
+        "upload_id": upload_id, "status": "running",
+        "deep_mode": deep_flag, "design_stage": stage,
+    }
 
 
 @app.get("/api/result/{upload_id}")

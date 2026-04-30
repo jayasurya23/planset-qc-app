@@ -27,8 +27,8 @@ import logging
 import re
 from typing import Any, Callable
 
-from .analyzer import PageInfo
-from .rule_registry import Rule
+from .analyzer import PageInfo, make_issue
+from .rule_registry import Rule, stage_index
 
 logger = logging.getLogger(__name__)
 
@@ -567,6 +567,173 @@ def group_rules(rules: list[Rule]) -> dict[str, list[Rule]]:
     return out
 
 
+def _defer_issue(
+    run_id: str,
+    rule: Rule,
+    planset_stage: str,
+    reason_override: str | None = None,
+    key_prefix: str = "stage_deferred",
+) -> dict:
+    """Build a 'Deferred' issue record — shown as N/A in the UI.
+
+    Called in two scenarios:
+    1. Stage gating (min_stage > selected stage, sheet absent).
+    2. Cross-ref filter (rule needs sheets/docs we don't have).
+
+    ``reason_override`` lets callers customize the human-readable evidence.
+    """
+    if reason_override:
+        evidence = f"Deferred: {reason_override}."
+    else:
+        evidence = (
+            f"Deferred: this check applies at stage {rule.min_stage}+ "
+            f"(selected stage: {planset_stage}). Target sheet not present in "
+            f"the planset, so the rule was not evaluated."
+        )
+    return make_issue(
+        run_id=run_id,
+        item_key=f"{key_prefix}_{rule.key}",
+        category=rule.category,
+        title=rule.title,
+        description=rule.description,
+        status="Deferred",
+        severity=rule.severity or "low",
+        evidence=evidence,
+        confidence=1.0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cross-reference filter — rules whose description demands sheets/docs that
+# aren't available cannot be evaluated, and the vision model tends to emit
+# "Needs Review: other sheet not in view" instead of skipping. Better to
+# defer them at the engine level before they ever reach the prompt.
+# ---------------------------------------------------------------------------
+
+
+_RULE_SHEET_CODE_RE = re.compile(r"\b([EC]-\d{2,3}[A-Z]?)\b", re.I)
+
+# Phrases in a rule title/description that signal a dependency on a specific
+# external engineering document. Tags match the keys produced by
+# ``available_doc_types``.
+_CROSS_DOC_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bcab\s+(calc|weight)", re.I), "cab_calcs"),
+    (re.compile(r"\bstringing\s+(calc|export|file)\b|\bpvcase\b", re.I), "stringing"),
+    (re.compile(r"\bciv(?:il)?\s*x-?prop\b|\bx-?prop\s+civil", re.I), "civil_xprop"),
+    (re.compile(r"\bmatch(?:es)?\s+cesir\b|\bper\s+cesir\b|\bcesir\s+impact\b", re.I), "cesir"),
+    (re.compile(r"\b(?:matches?|per)\s+pvsyst\b", re.I), "pvsyst"),
+    (re.compile(r"\b(?:matches?|per)\s+transmittal\b", re.I), "transmittal"),
+    (re.compile(r"\b(?:matches?|per)\s+bod\b", re.I), "bod"),
+    (re.compile(r"\b(?:matches?|per)\s+(?:contract|legal\s+name|permit)\b", re.I), "contract"),
+    (re.compile(r"\bmatches?\s+(submittal|datasheet|cut\s?sheet|shop\s?drawing)\b", re.I), "datasheet"),
+    (re.compile(r"\b(?:ampacity|neher-?mcgrath)\s+(table|calc)", re.I), "ampacity"),
+    # BOD / tech spec language
+    (re.compile(r"\b(per|from)\s+(project|tech(?:nical)?)\s+(spec|criteria)\b|\bproject[-\s]specific\b", re.I), "bod"),
+    # Owner criteria
+    (re.compile(r"\bowner\s+(criteria|spec)\b|\b(per|from)\s+owner\b", re.I), "bod"),
+    # Castillo SOP — treated as uploadable; rules referencing it defer unless
+    # the SOP doc is supplied with the run.
+    (re.compile(r"\b(per|from)\s+SOP\b|\bCastillo\s+SOP\b", re.I), "sop"),
+    # Geotech / site-condition-dependent rules
+    (re.compile(r"\bsite\s+conditions\b|\bgeotech\b|\bcorrosion\s+report\b", re.I), "geotech"),
+    # Civil plans — access roads, grading, X-Prop drawings
+    (re.compile(r"\bcivil\s+plan\b|\b(access\s+road|road)\s+(widths?|dim).*\bciv(il)?\b", re.I), "civil_plan"),
+    # USACE wetland delineation
+    (re.compile(r"\bUSACE\b|\bwetland\s+delineation\b", re.I), "usace"),
+    # FEMA flood zone / BFE (base flood elevation)
+    (re.compile(r"\bFEMA\b|\bBFE\b|\bflood\s+(zone|study|map)\b", re.I), "fema"),
+    # 811 utility locate tickets
+    (re.compile(r"\b811\s+locate\b|\butility\s+locate\b", re.I), "utility_locate"),
+    # Pipeline / drain-tile crossing agreements
+    (re.compile(r"\bcrossing\s+agreement\b|\bpipeline\s+crossing\b|\bdrain\s+tile\b", re.I), "crossing_agreement"),
+    # Owner's formula (e.g. MET station count formula from BOD)
+    (re.compile(r"\bowner'?s?\s+formula\b|\bowner\s+formula\b", re.I), "bod"),
+]
+
+# Phrases indicating the rule demands 2+ independent sources in view at once.
+_MULTI_SOURCE_PATTERN = re.compile(
+    r"\b(?:six|five|four|seven|eight)[-\s]?(?:document|source)\b|"
+    r"\bcross[-\s]?propagation\b|"
+    r"\bconsisten\w*\s+across\s+(?:the\s+)?set\b|"
+    r"\bfield[-\s]?by[-\s]?field\b",
+    re.I,
+)
+
+_DOC_FRIENDLY_NAMES: dict[str, str] = {
+    "datasheet":   "equipment submittal",
+    "cesir":       "CESIR",
+    "pvsyst":      "PVSyst export",
+    "transmittal": "transmittal",
+    "bod":         "BOD / project tech spec",
+    "contract":    "contract / permit doc",
+    "cab_calcs":   "CAB calcs",
+    "stringing":   "stringing calcs",
+    "civil_xprop": "civil X-Prop",
+    "ampacity":    "ampacity table",
+    "sop":                "Castillo SOP reference",
+    "geotech":            "geotech / site-conditions report",
+    "civil_plan":         "civil plan set",
+    "usace":              "USACE wetland delineation",
+    "fema":               "FEMA flood map / BFE",
+    "utility_locate":     "811 utility locate",
+    "crossing_agreement": "pipeline / drain-tile crossing agreement",
+}
+
+
+def _required_sheets(rule: Rule) -> set[str]:
+    """Sheet codes the rule depends on, excluding its own category sheet(s)."""
+    text = f"{rule.title or ''} {rule.description or ''}"
+    codes = {
+        _normalize_sheet_code(m.group(1).upper())
+        for m in _RULE_SHEET_CODE_RE.finditer(text)
+    }
+    codes -= set(_expand_code_range(rule.category))
+    return codes
+
+
+def _required_docs(rule: Rule) -> set[str]:
+    text = f"{rule.title or ''} {rule.description or ''}"
+    return {tag for rx, tag in _CROSS_DOC_PATTERNS if rx.search(text)}
+
+
+def rule_cross_ref_unavailable(
+    rule: Rule,
+    planset_sheets: set[str],
+    available_docs: set[str],
+) -> str | None:
+    """If this rule needs evidence we don't have, return a deferral reason.
+
+    Returns ``None`` when the rule is evaluable as dispatched.
+    """
+    # Missing sheet cross-refs — defer when 2+ external sheets are named and
+    # at least one is absent from the planset. A single stray code may be a
+    # passing reference rather than a comparison target.
+    required_sheets = _required_sheets(rule)
+    missing_sheets = required_sheets - planset_sheets
+    if missing_sheets and len(required_sheets) >= 2:
+        codes = sorted(missing_sheets)
+        label = ", ".join(codes[:3]) + ("…" if len(codes) > 3 else "")
+        return f"Requires sheet(s) {label} not present in the planset"
+
+    # Missing external-doc cross-refs.
+    required_docs = _required_docs(rule)
+    missing_docs = required_docs - available_docs
+    if missing_docs:
+        names = [_DOC_FRIENDLY_NAMES.get(d, d) for d in sorted(missing_docs)]
+        label = " / ".join(names)
+        return f"Requires {label} — not uploaded"
+
+    # "six-document match" / "cross-propagation" / "consistent across set" —
+    # need 2+ cross-ref sources actually in view (sheets-in-planset + docs).
+    text = f"{rule.title or ''} {rule.description or ''}"
+    if _MULTI_SOURCE_PATTERN.search(text):
+        external_refs = len(required_sheets & planset_sheets) + len(available_docs)
+        if external_refs < 2:
+            return "Requires multiple cross-reference sources — only partial evidence available"
+
+    return None
+
+
 def run_v4_checks(
     *,
     doc,
@@ -580,7 +747,8 @@ def run_v4_checks(
     run_id: str,
     run_dir,
     supporting_docs: list[dict] | None = None,
-) -> None:
+    design_stage: str | None = None,
+) -> list[dict]:
     """Queue one vision call per category with its dynamic prompt.
 
     Parameters
@@ -590,10 +758,30 @@ def run_v4_checks(
     deep_for(cat)   : returns True when this category should use the deep model
     page_check      : existing ``_gemini_page_check`` callable
     multi_page_check: existing ``_gemini_multi_page_check`` callable
+    design_stage    : "30" / "60" / "90" / "IFC" / "AsBuilt". When set, rules
+                      whose ``min_stage`` is later than this stage are deferred
+                      UNLESS the target sheet is actually present in the PDF.
+
+    Returns
+    -------
+    A list of "Deferred" issue dicts for rules that were gated out. The
+    vision-dispatched findings flow back through ``submit`` / ``_futures``
+    as before; only the synthetic deferred records are returned directly.
     """
+    deferred_issues: list[dict] = []
+    stage_cutoff = stage_index(design_stage)
+
     grouped = group_rules(rules)
     available = available_doc_types(supporting_docs)
     sources_note = summarize_available_sources(supporting_docs)
+
+    # Sheets actually present in the uploaded planset — used by the cross-ref
+    # filter to decide which rules can be evaluated at all.
+    planset_sheets: set[str] = {
+        _normalize_sheet_code(p.sheet_number or "")
+        for p in pages if p.sheet_number
+    }
+    planset_sheets.discard("")
     if available:
         logger.info("V4 engine: available supporting-doc types = %s",
                     sorted(available))
@@ -631,6 +819,62 @@ def run_v4_checks(
             target_pages = _pages_for_cross_sheet(pages)
         else:
             target_pages = find_pages_for_category(pages, category)
+
+        # ── Stage gating (lenient) ────────────────────────────────────────
+        # If a rule's min_stage is later than the selected design stage, we
+        # normally defer it. BUT if the target sheet is actually present in
+        # the PDF (target_pages non-empty for sheet-code categories), we let
+        # it run anyway — content is there, check it.
+        if design_stage:
+            sheet_is_present = bool(target_pages) and category not in (
+                "Title Block", "Cross-Sheet"
+            )
+            gated = []
+            for r in kept:
+                rule_cutoff = stage_index(r.min_stage)
+                if rule_cutoff <= stage_cutoff or sheet_is_present:
+                    gated.append(r)
+                else:
+                    deferred_issues.append(_defer_issue(run_id, r, design_stage))
+            deferred_count = len(kept) - len(gated)
+            if deferred_count:
+                logger.info(
+                    "V4 engine: %s — %d/%d rule(s) deferred (stage=%s, "
+                    "sheet_present=%s)",
+                    category, deferred_count, len(kept), design_stage,
+                    sheet_is_present,
+                )
+            kept = gated
+            if not kept:
+                continue
+
+        # ── Cross-reference filter ────────────────────────────────────────
+        # Rules whose title/description references sheets or external docs
+        # we don't have cannot be evaluated; the vision model consistently
+        # emits "Needs Review: other sheet not in view" for these. Defer
+        # them at the engine level so they render as "N/A" with a precise
+        # "Requires X" reason, instead of polluting the NR bucket.
+        evaluable: list[Rule] = []
+        xref_deferred = 0
+        for r in kept:
+            reason = rule_cross_ref_unavailable(r, planset_sheets, available)
+            if reason:
+                deferred_issues.append(_defer_issue(
+                    run_id, r, design_stage or "",
+                    reason_override=reason,
+                    key_prefix="xref_deferred",
+                ))
+                xref_deferred += 1
+            else:
+                evaluable.append(r)
+        if xref_deferred:
+            logger.info(
+                "V4 engine: %s — %d/%d rule(s) deferred (cross-ref evidence missing)",
+                category, xref_deferred, len(kept),
+            )
+        kept = evaluable
+        if not kept:
+            continue
 
         if not target_pages:
             logger.info(
@@ -704,6 +948,13 @@ def run_v4_checks(
                 f"Sheet {sheet_id}",
                 deep=False,  # generic review doesn't need the deep model
             )
+
+    if deferred_issues:
+        logger.info(
+            "V4 engine: %d rule(s) deferred for stage=%s",
+            len(deferred_issues), design_stage,
+        )
+    return deferred_issues
 
 
 # ---------------------------------------------------------------------------

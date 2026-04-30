@@ -1,0 +1,94 @@
+# Stage-gating overlay for QC rules.
+#
+# Every rule has a "min_stage" — the earliest design stage at which it should
+# fire. Stages are ordered: 30 < 60 < 90 < IFC < AsBuilt. When a user selects
+# stage X, any rule with min_stage <= X fires normally; rules with a higher
+# min_stage are either DEFERRED (emitted as status "Deferred" with a "N/A at
+# this stage" note) OR evaluated anyway if the corresponding sheet is actually
+# present in the PDF (lenient bypass).
+#
+# Values below are derived empirically from Castillo sample plansets at each
+# stage. See backend/scripts/extract_stage_sheets.py.
+#
+# Edit this file — not rule_registry.py — to adjust stage requirements.
+# Re-ingesting V4 rules from Excel will NOT overwrite these.
+
+# Category → minimum stage.
+#
+# The category's min_stage is the default for every rule in that category.
+# Individual rules can override via the `rule_overrides` section below.
+category_min_stage:
+  # ── Always required (30% and beyond) ──
+  "AI Input Gate":     "30"
+  "BOD / Due Diligence": "30"
+  "Title Block":       "30"
+  "E-001":             "30"
+  "E-002":             "30"
+  "E-010":             "30"
+  "E-050":             "30"
+  "E-100":             "30"
+  "E-101/E-102":       "30"
+  "E-900":             "30"
+
+  # ── 60% (IFP / permit set) ──
+  "E-120":             "60"   # grounding plan
+  "E-130":             "60"   # lightning protection
+  "E-140":             "60"   # trenching details
+  "E-200":             "60"   # electrical detail
+  "E-300":             "60"   # AC single-line
+  "E-450":             "60"   # PV harness layout
+  "E-500-E-504":       "60"   # schedules / feeder
+  # (Specs sheet E-800 isn't in the V4 category list — no entry needed)
+
+  # ── 90% ──
+  "E-011":             "90"   # reference / BOD sheet
+  "E-103/E-104":       "90"   # AC details
+  "E-110":             "90"   # stringing plan
+  "E-210":             "90"   # electrical detail (sub-family)
+  "E-400":             "90"   # AC one-line
+  # (BOM sheet E-901 not in V4 categories — no entry needed)
+
+  # ── IFC only ──
+  "E-106":             "IFC"
+  "E-107":             "IFC"
+  "E-214-E-217":       "IFC"  # structural/mechanical interface details
+  "E-420-E-422":       "IFC"  # arc flash + protection coordination
+  "E-601":             "IFC"  # transmittal / cover summary
+  "Cross-Sheet":       "IFC"  # needs full set to cross-reference
+
+# Rule-level overrides. Keyed by rule.key. Wins over category_min_stage.
+#
+# Use for outliers inside an otherwise-common category:
+#   e.g. Title Block is "30" overall, but "PE wet stamp" is IFC-only.
+#
+# Seed list only — add more as incorrect gating surfaces in review.
+rule_overrides: {}
+# Example (uncomment and adapt after you've confirmed the exact rule keys):
+#   v4_title_block_pe_stamp_signed_sealed: "IFC"
+#   v4_title_block_revision_block_populated: "60"
+
+
+# Rules that should be suppressed entirely — not emitted as Pass/Fail/NR/Deferred,
+# not dispatched to the vision model. Use for confirmed duplicates where the same
+# check exists in a more appropriate category (e.g. a Cross-Sheet version beats a
+# sheet-specific one). Survives re-ingest from Excel.
+#
+# Each entry is the rule.key + an inline comment explaining the dupe resolution.
+disabled_rules:
+  # "FLA: character-identical E-100 = E-101 = E-103" — Cross-Sheet version kept
+  - v4_e_100_fla_character_identical_e_100_e_101_e_103
+  # "XFMR primary V: six-document match" — Cross-Sheet version kept
+  - v4_e_100_xfmr_primary_v_six_document_match
+  # "Scale annotation = scale bar" — Title Block version kept
+  - v4_e_010_scale_annotation_scale_bar
+  # "Conduit sizes = E-210 routing" — Cross-Sheet version kept
+  - v4_e_300_conduit_sizes_e_210_routing
+  # "Conduit sizes = E-210 routing annotations" — same check, Cross-Sheet version kept
+  - v4_e_300_conduit_sizes_e_210_routing_annotations
+  # "Conduit fill <= 40%" — NEC-cited variant kept for traceability
+  - v4_e_300_conduit_fill_40
+  # "Feeder breaker >= 1.25× FLA" — longer variant with "(or 100% if documented)" kept
+  - v4_e_101_e_102_feeder_breaker_1_25_fla
+  # "Utility 24/7 access note" — the "...present" variant in E-010 kept
+  - v4_e_010_utility_24_7_access_note
+  - v4_e_011_utility_24_7_access_note

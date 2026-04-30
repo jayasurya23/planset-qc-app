@@ -1,4 +1,6 @@
-export type Status = 'Pass' | 'Fail' | 'Needs Review' | 'Overridden / Accepted by QC Engineer'
+export type Status = 'Pass' | 'Fail' | 'Needs Review' | 'Deferred' | 'Overridden / Accepted by QC Engineer'
+
+export type DesignStage = '30' | '60' | '90' | 'IFC' | 'AsBuilt'
 
 export interface CategorySummary {
   name: string
@@ -6,6 +8,7 @@ export interface CategorySummary {
   Pass?: number
   Fail?: number
   'Needs Review'?: number
+  Deferred?: number
   'Overridden / Accepted by QC Engineer'?: number
 }
 
@@ -136,6 +139,12 @@ export interface SupportingDoc {
   source_pages?: number[]
 }
 
+export interface CallTiming {
+  label: string
+  duration_s: number
+  deep: boolean
+}
+
 export interface RunSummary {
   indexed_sheet_count: number
   actual_sheet_count: number
@@ -146,7 +155,9 @@ export interface RunSummary {
   page_sheet_map?: Record<string, string>
   duration_seconds?: number
   deep_mode?: boolean
+  design_stage?: string | null
   supporting_docs?: SupportingDoc[]
+  call_timings?: CallTiming[]
 }
 
 export interface RunData {
