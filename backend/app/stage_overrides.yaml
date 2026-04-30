@@ -111,3 +111,7 @@ disabled_rules:
   - v4_bod_due_diligence_nec_edition_with_documented_basis  # word-for-word duplicate of v4_e_001_nec_year_jurisdiction_qualifier_format
   # v4_e_001_nec_and_ibc_editions_ahj is KEPT — it adds the IBC building-code
   # check which the new jurisdiction-qualifier rule does not cover.
+  # XFMR %Z and X/R — V4-ENH variant (xfmr_z_and_x_r_shown_even_at_30) is kept;
+  # it adds the early-stage requirement and Joe-training reasoning. The plain
+  # V3 variant below is the same check without the extra context.
+  - v4_e_100_xfmr_z_and_x_r_shown
