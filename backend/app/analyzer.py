@@ -880,6 +880,27 @@ the authoritative source of truth for the project values.
    60% rev (610W) and 90% rev (615W), use the 90%/latest. Datasheet's
    nameplate may differ — TRUST THE COVER for as-designed wattage.
 
+7. TRANSFORMER %Z AND X/R RATIO (REQUIRED EVEN AT 30% — common omission)
+   The step-up transformer's percent impedance (%Z) AND X/R ratio are
+   essential design values that should be on the cover system-info table
+   (or at least on the E-100 SLD) — Joe Jancauskas explicitly flags these
+   as a "really bad trend" of recent omissions.
+   * transformer_impedance is the %Z value, typically 5.5–5.75 % for
+     750–2500 kVA distribution transformers. Look for labels like "Z%",
+     "Impedance", "%Z", "Imp.", or "Zps" near the transformer specs.
+     Common values: 5.0, 5.5, 5.75, 6.0, 6.5 (percent).
+   * transformer_xr_ratio is the X-to-R ratio, typically 4–10 for
+     distribution-class transformers. Look for "X/R", "XR ratio". This
+     value rarely appears on the nameplate — the cover sheet/SLD is
+     usually the only place it shows up. Omit if not visible; the
+     downstream calc rule will flag the gap.
+   * transformer_bil is the Basic Insulation Level in kV — for 15 kV
+     class typically 95 or 110 kV BIL; for 25 kV class 125 or 150 kV;
+     for 35 kV class 150 or 200 kV.
+   If any of these three are absent from the cover, the calc rule will
+   surface the omission separately — your job is to extract them faithfully
+   when they ARE present, not to flag missing ones at the extraction step.
+
 Return ONLY a JSON object with the values you can find. OMIT fields you
 cannot find with high confidence. Use EXACTLY these field names:
 
@@ -909,8 +930,9 @@ cannot find with high confidence. Use EXACTLY these field names:
   "transformer_total_kva": "total transformer capacity if stated explicitly (e.g. 'Total: 5000 kVA'). Otherwise omit and the calc will multiply per-unit × count.",
   "transformer_primary_voltage": "primary voltage in V",
   "transformer_secondary_voltage": "secondary voltage in V",
-  "transformer_impedance": "Z percent",
-  "transformer_bil": "BIL in kV",
+  "transformer_impedance": "Z percent (typical 5.5-5.75 for 750-2500 kVA)",
+  "transformer_xr_ratio": "X/R ratio (typical 4-10 for distribution class)",
+  "transformer_bil": "BIL in kV (15 kV class: 95 or 110; 25 kV: 125 or 150; 35 kV: 150 or 200)",
   "poi_voltage": "POI voltage in V",
   "design_temp_low_c": "lowest design temp in C",
   "design_temp_high_c": "highest design temp in C"

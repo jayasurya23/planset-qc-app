@@ -485,8 +485,26 @@ rules:
 - key: v4_e_002_voltage_notation_convention
   category: E-002
   title: Voltage notation convention
-  description: '3-phase: line-to-line first (480/277V, not 277/480V). Single-phase: 120/240V. Equipment
-    voltage = actual rating (240V not 208V for disconnects, 600V not 480V).'
+  description: 'Voltages must follow ANSI C84.1 conventions exactly.
+
+    Three-phase format — HIGHEST voltage written FIRST: 480Y/277V, 208Y/120V (the
+    "Y" denotes wye-connected; full form is correct, dropping it is acceptable).
+
+    Single-phase format — LOWEST voltage written FIRST: 120/240V. The reversed
+    "240/120V" is INCORRECT for single-phase — that notation specifically means
+    three-phase delta with a center-tapped winding (largely obsolete).
+
+    Old motor ratings on system-voltage drawings are FAILS: 110V, 115V, 220V,
+    230V, 440V, 460V are MOTOR nameplate ratings, NOT system voltages. Drawings
+    should show the system voltage (120, 208, 240, 277, 480, 600).
+
+    Equipment ratings on the SLD must be the ACTUAL procurable equipment rating,
+    not the nominal system voltage. A 480V system needs a 600V-rated disconnect
+    switch (208V/480V disconnects don''t exist; vendors only make 120V/240V/600V).
+
+    Abbreviations: kW (NOT KW or Kw), kV (NOT KV), kcmil (NOT MCM — old usage),
+    Hz (NOT HZ). The expression kW·h is the correct abbreviation for energy;
+    kWh is widely used informally.'
   source: EC&M Voltage Variations article / Checkers Handbook
   severity: medium
   check_type: gemini_vision
@@ -1638,7 +1656,14 @@ rules:
 - key: v4_e_110_trip_delays_and_time_dials
   category: E-110
   title: Trip delays and time dials
-  description: Shown for all time-OC and V/F elements.
+  description: 'Shown for all time-OC and V/F elements. Typical defaults: U4
+    "very inverse" curve (the 99.9% default), Time Dial 2.5 (NOT 0.5 — the bare
+    minimum dial frequently fails to coordinate with transformer inrush, 1.0×
+    to 10× FLA). Per IEEE Std 242 ("Buff Book"), maintain ≥0.3 s (18 cycles)
+    separation between Customer and upstream Utility TCC curves across the
+    entire fault current range. An instantaneous (50) element should also be
+    set so the Difference-Calculator output confirms no curve crossings at any
+    fault level.'
   source: Protection coordination study
   severity: medium
   check_type: gemini_vision
@@ -5132,3 +5157,174 @@ rules:
   check_type: electrical_calc
   calc_function: validate_dc_ac_ratio
   confidence: 0.88
+
+# ─────────────────────────────────────────────────────────────────────────
+# MANUAL SUPPLEMENT — rules derived from Joe Jancauskas training docs
+# (2026-04 reference set). Each rule cites the source training email.
+# When re-ingesting the V4 Excel, re-append this block OR add to source.
+# ─────────────────────────────────────────────────────────────────────────
+
+- key: v4_e_010_disconnect_rating_is_procurable
+  category: E-010
+  title: Disconnect switch rating is a procurable value
+  description: 'Disconnect switch voltage rating MUST be a value that vendors
+    actually manufacture. Standard ratings: 120 V, 240 V, 600 V (and emerging
+    630 V / 800 V for new inverter platforms). 208 V and 480 V disconnect
+    switches do NOT exist — for a 480 V system, specify a 600 V disconnect.
+    Standard ampacities: 30 A, 60 A, 100 A, 200 A, 400 A, 600 A, 800 A, 1200 A.
+    NON-standard: 20 A, 25 A, 50 A, 75 A. Flag any disconnect that names a
+    voltage or amperage not on these lists. Source: Joe Jancauskas — "Equipment
+    BIL and Other Ratings" (May 2023) and "Disconnect Switch Certifications"
+    (July 2023).'
+  source: Equipment catalogs (Square D / Eaton) — system voltage vs equipment
+    rating. See Checker''s Reference Handbook.
+  severity: medium
+  check_type: gemini_vision
+  min_stage: '60'
+  confidence: 0.80
+
+- key: v4_e_010_mv_breaker_rating_is_procurable
+  category: E-010
+  title: MV breaker / recloser amperage is a procurable rating
+  description: 'Medium-voltage (15 kV / 25 kV / 35 kV class) circuit breakers
+    and reclosers are only manufactured in a limited set of amperage ratings:
+    600 A, 800 A, 1200 A, 2000 A, 3000 A. Smaller amperages do NOT exist for
+    MV equipment. A spec showing "400 A 15 kV breaker" is not procurable. For
+    GOAB switches, ratings trend toward 600 A, 800 A, 900 A. Flag any MV
+    breaker / recloser / GOAB amperage outside these standard values. Source:
+    Joe Jancauskas — "Equipment BIL and Other Ratings" (May 2023) and
+    "Reclosers — Ratings on SLD" (June 2023).'
+  source: MV equipment vendor catalogs (Eaton/Cooper, G&W, Tavrida, S&C)
+  severity: medium
+  check_type: gemini_vision
+  min_stage: '60'
+  confidence: 0.80
+
+- key: v4_e_010_arrester_no_ka_rating_required
+  category: E-010
+  title: Surge arrester kA rating is unnecessary (flag if shown)
+  description: 'Per IEEE C62.11-2020, the only required surge arrester rating
+    is MCOV. The "duty cycle" rating is OBSOLETE and the "kA" rating that
+    sometimes appears does NOT relate to system fault currents — it is a
+    lightning short-circuit-failure test value that has nothing to do with
+    PV interconnection design. If the arrester spec on the drawing includes
+    a kA rating (e.g. "9 kV / 7.65 MCOV / 40 kA") flag it as Needs Review:
+    the kA rating is unnecessary spec clutter and should be removed unless
+    the utility specifically demanded it. Source: Joe Jancauskas — "Surge
+    Arresters Master Class" (June 2023) and "MV Surge Arrester Selection
+    Simplified — is a kA rating needed?" (July 2023).'
+  source: IEEE C62.11-2020 / IEEE C62.22 / NEMA arrester selection
+  severity: low
+  check_type: gemini_vision
+  confidence: 0.75
+
+- key: v4_e_300_aux_xfmr_cable_appears_on_cable_schedule
+  category: E-300
+  title: Aux transformer primary + secondary cables on cable schedule
+  description: 'Common Castillo defect (per Joe — "lately if I want to find
+    a design error, I can focus on the lowly auxiliary power transformer"):
+    the aux transformer''s primary AND secondary feeder cables are missing
+    from the cable schedule on E-300. Both cables MUST appear as separate
+    rows with their conductor sizes, conduit, and length. Flag if either
+    cable is absent. Cross-reference with the aux XFMR shown on E-100 / E-101
+    / E-102 SLDs — every aux XFMR depicted on a SLD must have its primary
+    and secondary feeders scheduled. Source: Joe Jancauskas — "Auxiliary
+    Power Transformers" (Oct 2023) and "Submittal Reviews — Switchboard +
+    aux power" (June 2024).'
+  source: E-300 cable schedule + E-100 / E-101 / E-102 SLDs
+  severity: high
+  check_type: gemini_vision
+  confidence: 0.80
+
+- key: v4_e_001_nec_year_jurisdiction_qualifier_format
+  category: E-001
+  title: NEC year stated with explicit jurisdiction qualifier
+  description: 'Cover sheet must state the NEC year AND the jurisdiction
+    basis using one of four explicit formats: (1) "NEC YYYY – State adopted",
+    (2) "NEC YYYY – County adopted", (3) "NEC YYYY – City adopted", (4) "NEC
+    YYYY – Castillo design preference given lack of city, county, or recent
+    state guidance". The bare phrase "NEC 2020" without a qualifier is a Fail
+    — the qualifier documents the due-diligence reasoning. Additionally, when
+    Castillo is exercising design preference, the year MUST be within 4 years
+    of today (so 2020 or 2023 is fine; 2017 is not). Source: Joe Jancauskas —
+    "Training: NEC Design Version" (Sep 2023) and "NEC Design Version for
+    Illinois Projects" (Sep 2023).'
+  source: NEC + jurisdiction (IAEI website lookup)
+  severity: medium
+  check_type: gemini_vision
+  confidence: 0.78
+
+- key: v4_e_110_customer_settings_have_margin_vs_utility
+  category: E-110
+  title: Customer relay settings have coordination margin vs utility upstream
+  description: 'Customer 50 / 51 / 51P / 50P pickup and time-dial settings
+    must NOT exactly match the utility upstream device''s settings — exact
+    matches do not coordinate by definition (the utility will trip first or
+    simultaneously, taking out the entire feeder). Per IEEE Std 242 ("Buff
+    Book"), maintain ≥0.3 s (18 cycles) gap on the TCC curves across the full
+    fault current range. If the CESIR / utility study lists upstream relay
+    pickup / TD values, the Customer values must show meaningful margin:
+    typically a different time-dial (often 2.5 vs the utility''s 1.5) and an
+    instantaneous setting that confirms no curve crossings. Source: Joe
+    Jancauskas — "EasyPower MV Relay Coordination Example" (May 2024) and
+    "Distributed Energy — Kosa — Utility Upstream Coordination" (Oct 2024).'
+  source: CESIR upstream relay settings + customer relay settings on E-110
+  severity: high
+  check_type: gemini_vision
+  confidence: 0.78
+
+- key: v4_e_103_e_104_recloser_ct_above_fla
+  category: E-103/E-104
+  title: Recloser CT primary > line FLA (next standard step)
+  description: 'CT primary turns ratio for the recloser MUST be the next
+    available standard step ABOVE the line FLA. Standard CT primaries:
+    100, 200, 300, 400, 600, 800, 1000, 1200, 1500, 2000, 3000. If line
+    FLA is 198 A, CT must be ≥200:5 (typically 200:5 or 300:5). A CT
+    selected at or below FLA produces saturation under fault and relay
+    misoperation. For modern reclosers with LEA (Low Energy Analog) sensors
+    instead of conventional VTs, document the effective ratio (e.g.
+    8375:1) clearly on the SLD even though it is internal to the device.
+    Source: Joe Jancauskas — "Relay Setting XLS tables + CT and VT ratio
+    references" (Aug 2023) and "Relay TCC Example" (Oct 2024).'
+  source: Recloser CT ratio + line FLA on three-line diagram
+  severity: medium
+  check_type: gemini_vision
+  confidence: 0.80
+
+- key: v4_e_010_arc_flash_labels_not_on_drawings
+  category: E-010
+  title: Arc-flash labels are NOT on the drawing set
+  description: 'Per current drawing-hygiene practice, the per-equipment
+    arc-flash labels (showing incident energy / PPE category / approach
+    boundaries) should NOT appear on the drawing sheets — they are issued
+    as a separate label PDF for field application. Older drawings often
+    have an arc-flash label table that includes a kA fault current value;
+    those labels are non-compliant with the latest signage standard (kA
+    is no longer required on the label). Flag if any arc-flash label
+    table is embedded in the drawing set, especially if it includes kA
+    values. Source: Joe Jancauskas — "Purpose of Arc Flash Labels — and
+    when to ask for a scope change" (June 2024) and "PV Fence Warning
+    Signs — delete Arc Flash Labels from the drawings" (May 2023).'
+  source: Drawing-hygiene practice / current arc-flash labeling standards
+  severity: medium
+  check_type: gemini_vision
+  min_stage: '90'
+  confidence: 0.75
+
+- key: v4_e_011_3ld_present_when_utility_3ld_exists
+  category: E-011
+  title: Three-line diagram (E-105) generated when utility provides one
+  description: 'When the utility CESIR / interconnection package includes
+    a three-line diagram (3LD) of their side, the Castillo design set MUST
+    include a corresponding 3LD on sheet E-105 covering the customer side.
+    Many utilities are dropping 3LD requirements for simple radial PV (the
+    SLD carries all the protection info), but if the utility drew one and
+    we don''t reciprocate, the comment "where is your 3LD?" is guaranteed.
+    Flag if (a) the CESIR contains a 3LD AND (b) sheet E-105 is missing
+    from the drawing index. Source: Joe Jancauskas — "Initial 30%% Drawing
+    Sets — Algonquin Canton drawing edits needed" (Sep 2023).'
+  source: CESIR 3LD + drawing index
+  severity: medium
+  check_type: gemini_vision
+  confidence: 0.78
+
