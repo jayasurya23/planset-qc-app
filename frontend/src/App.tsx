@@ -1644,6 +1644,16 @@ export default function App() {
                 <div className="hdr-meta">
                   {run.original_filename} &middot; {run.page_count} pages
                   &middot; {new Date(run.created_at).toLocaleDateString()}
+                  &middot;{" "}
+                  <code
+                    className="run-id"
+                    title={`Run ID: ${run.id} (click to copy)`}
+                    onClick={() => {
+                      navigator.clipboard?.writeText(run.id);
+                    }}
+                  >
+                    run {run.id.slice(0, 8)}
+                  </code>
                 </div>
                 <GeminiBar
                   u={run.summary.gemini_usage}
