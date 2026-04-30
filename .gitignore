@@ -1,6 +1,7 @@
 # Python
 backend/.venv/
-backend/__pycache__/
+**/__pycache__/
+*.pyc
 
 # Secrets
 backend/.env
@@ -14,3 +15,6 @@ backend/data/exports/
 backend/data/runs/
 backend/data/*.sqlite3
 backend/data/*.db
+
+# Local Claude Code scheduling state
+.claude/scheduled_tasks.lock
