@@ -239,6 +239,130 @@ def _safe_gemini_call(func, *args, **kwargs) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Bbox rescue — second-pass deep-model call when text search + AI bbox fail
+# ---------------------------------------------------------------------------
+
+
+_BBOX_RESCUE_PROMPT_TEMPLATE = """\
+You are looking at a single page from a solar PV planset. Below is a list of
+QC findings that the previous pass identified on this page but for which it
+did NOT return a usable location. For each finding, return a bounding box
+(in normalized 0–1000 coordinates, top-left origin, y grows down) of where
+the relevant area is — OR where it SHOULD be if the item is missing from
+the drawing.
+
+For values that are PRESENT on the page, return a tight bbox around the
+cell, callout, or table row.
+
+For values that are MISSING / NOT SHOWN, return the bbox of the empty area
+where they SHOULD have been drawn — e.g. the empty schedule row, the blank
+field next to a label, the SLD region where the missing equipment symbol
+belongs. Do NOT return a generic full-page or full-half-page box; pick the
+most specific empty region you can.
+
+Findings to locate:
+
+{findings_block}
+
+Return ONLY a JSON array, one object per finding, in the same order:
+
+[
+  {{ "id": "<the id from the input>", "bbox_norm": [y0, x0, y1, x1] }}
+]
+
+Use the same id strings the input gives you. If a finding genuinely has no
+sensible location on this page, omit it from the output array (do not
+return a placeholder).
+"""
+
+
+def _rescue_missing_bboxes(
+    doc,
+    page_number: int,
+    rescue_targets: list[dict],
+) -> dict[str, dict]:
+    """Second-pass Gemini call to fetch bboxes for findings that came back
+    without one.
+
+    Each ``rescue_targets`` entry is a dict with at least ``id``, ``check``,
+    ``status``, ``location`` (the AI's human-readable description), and
+    optionally ``value`` / ``evidence``. Returns a mapping
+    ``id → {"bbox": fitz.Rect, "raw": [y0,x0,y1,x1]}`` for findings the
+    rescue call could place.
+
+    Costs one extra deep-model call per page that has any rescue targets;
+    runs after the main per-category pass so it sees the rule context. On
+    any failure (parse error, no targets, API error) returns an empty dict
+    and the caller falls through to the full-page-preview path that was
+    used before this rescue existed.
+    """
+    if not rescue_targets:
+        return {}
+
+    # Build the findings block. Keep it compact — Gemini is good at this and
+    # we want the prompt cheap. Cap each entry to 240 chars including the
+    # location text so a verbose finding can't crowd the others.
+    lines: list[str] = []
+    for idx, t in enumerate(rescue_targets):
+        loc = (t.get("location") or "").strip().replace("\n", " ")[:120]
+        val = (t.get("value") or "").strip().replace("\n", " ")[:60]
+        ev  = (t.get("evidence") or "").strip().replace("\n", " ")[:120]
+        # Tag id is just the index — short and stable, avoids needing to
+        # echo the full check name.
+        bits = [f"  ID {idx}: [{t.get('status', '?')}] {t.get('check', '?')}"]
+        if loc:
+            bits.append(f"    location: {loc}")
+        if val:
+            bits.append(f"    value: {val}")
+        if ev:
+            bits.append(f"    evidence: {ev[:120]}")
+        lines.append("\n".join(bits))
+    findings_block = "\n\n".join(lines)
+    prompt = _BBOX_RESCUE_PROMPT_TEMPLATE.format(findings_block=findings_block)
+
+    try:
+        from .gemini_client import analyze_page_image
+        image_bytes = render_page_to_bytes(doc, page_number)
+        # Deep model — this is a vision-grounding task and the mini model is
+        # noticeably worse at returning consistent normalized coordinates.
+        raw = analyze_page_image(image_bytes, prompt, deep=True)
+    except Exception:
+        logger.exception(
+            "Bbox rescue: page %d image / Gemini call failed", page_number,
+        )
+        return {}
+
+    parsed = _extract_json(raw) or []
+    page = doc[page_number - 1]
+    out: dict[str, dict] = {}
+    for entry in parsed:
+        if not isinstance(entry, dict):
+            continue
+        eid = entry.get("id")
+        # Accept either int (matching our index tags) or stringified int.
+        try:
+            idx = int(eid)
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx >= len(rescue_targets):
+            continue
+        rect = parse_ai_bbox(entry.get("bbox_norm") or entry.get("bbox"), page)
+        if rect is None:
+            continue
+        target_id = rescue_targets[idx].get("id")
+        if target_id is None:
+            continue
+        out[str(target_id)] = {"bbox": rect, "raw": entry.get("bbox_norm")}
+
+    if out:
+        logger.info(
+            "Bbox rescue: page %d — recovered %d/%d missing locations",
+            page_number, len(out), len(rescue_targets),
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Prompt templates
 # ---------------------------------------------------------------------------
 
@@ -1582,6 +1706,10 @@ def _gemini_page_check(
 
     issues: list[dict] = []
     seen_keys: set[str] = set()
+    # Findings that came back with status Fail/NR but no usable bbox after
+    # text search + AI-supplied bbox. Each entry remembers what's needed to
+    # re-render its issue once the rescue pass returns a location.
+    rescue_pending: list[dict] = []
     for i, finding in enumerate(findings):
         check_name = finding.get("check") or finding.get(
             "field") or f"item_{i}"
@@ -1648,6 +1776,7 @@ def _gemini_page_check(
         # literal text excerpt the model returned so the reviewer can see the
         # exact callouts that triggered the finding.
         snippet_path, preview_path, bbox_dict = None, None, None
+        needs_rescue = False
         if status in ("Fail", "Needs Review"):
             hints = _extract_location_hints(finding)
             # AI-supplied normalized bbox — used as ``fallback_bbox`` so the
@@ -1665,30 +1794,67 @@ def _gemini_page_check(
                     target_texts=hints,
                     fallback_bbox=ai_bbox,
                 )
-            if not preview_path:
-                # Fall back to full-page preview when we have no searchable
-                # literal text — still better than nothing.
-                _, preview_path = render_page_preview(
-                    doc, page_number, issue_id, run_dir
-                )
+            if bbox_dict is None:
+                # Mark for second-pass deep-model rescue. Don't render the
+                # full-page preview yet — if the rescue succeeds, we want
+                # the focused highlight rendered instead.
+                needs_rescue = True
 
-        issues.append(
-            make_issue(
-                run_id=run_id,
-                item_key=item_key,
-                category=category,
-                title=title,
-                description=f"[AI] {default_title}: {title}",
-                status=status,
-                severity=severity,
-                page_number=page_number,
-                evidence=full_evidence,
-                confidence=0.72,
-                snippet_path=snippet_path,
-                page_preview_path=preview_path,
-                bbox=bbox_dict,
-            )
+        new_issue = make_issue(
+            run_id=run_id,
+            item_key=item_key,
+            category=category,
+            title=title,
+            description=f"[AI] {default_title}: {title}",
+            status=status,
+            severity=severity,
+            page_number=page_number,
+            evidence=full_evidence,
+            confidence=0.72,
+            snippet_path=snippet_path,
+            page_preview_path=preview_path,
+            bbox=bbox_dict,
         )
+        issues.append(new_issue)
+        if needs_rescue:
+            rescue_pending.append({
+                "id": new_issue["id"],
+                "issue_idx": len(issues) - 1,
+                "issue_id_str": new_issue["id"],
+                "check": check_name,
+                "status": status,
+                "location": location,
+                "value": value if isinstance(value, str) else "",
+                "evidence": evidence if isinstance(evidence, str) else "",
+                "hints": hints if status in ("Fail", "Needs Review") else [],
+            })
+
+    # Second-pass bbox rescue. One deep-model call per page, batching all
+    # findings that came back without a usable bbox. Re-renders the issue
+    # artifacts and patches the issue records in place.
+    if rescue_pending:
+        rescued = _rescue_missing_bboxes(doc, page_number, rescue_pending)
+        for entry in rescue_pending:
+            issue_idx = entry["issue_idx"]
+            issue = issues[issue_idx]
+            recovered = rescued.get(entry["id"])
+            if recovered:
+                sp, pp, bd = render_issue_artifacts(
+                    doc, issue["id"], page_number, run_dir,
+                    target_texts=entry["hints"],
+                    fallback_bbox=recovered["bbox"],
+                )
+                issue["snippet_path"] = sp
+                issue["page_preview_path"] = pp
+                issue["bbox"] = bd
+            elif issue["page_preview_path"] is None:
+                # Rescue couldn't place this finding — still render a plain
+                # full-page preview so the reviewer at least gets the page.
+                _, pp = render_page_preview(
+                    doc, page_number, issue["id"], run_dir,
+                )
+                issue["page_preview_path"] = pp
+
     return issues
 
 
@@ -1725,6 +1891,9 @@ def _gemini_multi_page_check(
 
     issues: list[dict] = []
     seen_keys: set[str] = set()
+    # Multi-page rescue is bucketed by page number — one Gemini call per page
+    # that has any rescue candidates, batching all findings for that page.
+    rescue_by_page: dict[int, list[dict]] = {}
     for i, finding in enumerate(findings):
         check_name = finding.get("check") or finding.get(
             "field") or f"item_{i}"
@@ -1829,29 +1998,59 @@ def _gemini_multi_page_check(
                         fallback_bbox=ai_bbox,
                     )
 
-            if not preview_path:
-                ref_page = preferred_page or page_numbers[0]
-                _, preview_path = render_page_preview(
-                    doc, ref_page, issue_id, run_dir
-                )
+            # Defer fallback full-page preview — if we'll do a rescue pass,
+            # we want the focused highlight rendered instead.
 
-        issues.append(
-            make_issue(
-                run_id=run_id,
-                item_key=item_key,
-                category=category,
-                title=title,
-                description=f"[AI] {default_title}: {title}",
-                status=status,
-                severity=severity,
-                page_number=ref_page,
-                evidence=full_evidence,
-                confidence=0.72,
-                snippet_path=snippet_path,
-                page_preview_path=preview_path,
-                bbox=bbox_dict,
-            )
+        new_issue = make_issue(
+            run_id=run_id,
+            item_key=item_key,
+            category=category,
+            title=title,
+            description=f"[AI] {default_title}: {title}",
+            status=status,
+            severity=severity,
+            page_number=ref_page,
+            evidence=full_evidence,
+            confidence=0.72,
+            snippet_path=snippet_path,
+            page_preview_path=preview_path,
+            bbox=bbox_dict,
         )
+        issues.append(new_issue)
+        if status in ("Fail", "Needs Review") and bbox_dict is None:
+            rescue_by_page.setdefault(ref_page, []).append({
+                "id": new_issue["id"],
+                "issue_idx": len(issues) - 1,
+                "check": check_name,
+                "status": status,
+                "location": location,
+                "value": value if isinstance(value, str) else "",
+                "evidence": evidence if isinstance(evidence, str) else "",
+                "hints": _extract_location_hints(finding),
+            })
+
+    # Per-page rescue pass. One deep-model call per page that has any
+    # bbox-less Fail/NR findings, batching all findings for that page.
+    for page_num, targets in rescue_by_page.items():
+        rescued = _rescue_missing_bboxes(doc, page_num, targets)
+        for entry in targets:
+            issue = issues[entry["issue_idx"]]
+            recovered = rescued.get(entry["id"])
+            if recovered:
+                sp, pp, bd = render_issue_artifacts(
+                    doc, issue["id"], page_num, run_dir,
+                    target_texts=entry["hints"],
+                    fallback_bbox=recovered["bbox"],
+                )
+                issue["snippet_path"] = sp
+                issue["page_preview_path"] = pp
+                issue["bbox"] = bd
+            elif issue["page_preview_path"] is None:
+                _, pp = render_page_preview(
+                    doc, page_num, issue["id"], run_dir,
+                )
+                issue["page_preview_path"] = pp
+
     return issues
 
 
