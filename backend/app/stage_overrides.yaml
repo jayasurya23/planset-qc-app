@@ -99,3 +99,15 @@ disabled_rules:
   # "Utility 24/7 access note" — the "...present" variant in E-010 kept
   - v4_e_010_utility_24_7_access_note
   - v4_e_011_utility_24_7_access_note
+  # NEC code year duplicates — v4_e_001_nec_year_jurisdiction_qualifier_format
+  # (the new rule from training-doc synthesis) is the comprehensive cover-sheet
+  # vision check; the three below are legacy keyword/cross-ref variants that
+  # repeated the same finding on multiple categories.
+  # User annotation on the E-002 note rule: "We don't need to do a detailed
+  # checking of notes. As long as this is latest version we should be fine."
+  - v4_title_block_nec_code_year_with_documented_basis  # duplicate of v4_e_001_nec_year_jurisdiction_qualifier_format
+  - v4_e_002_nec_code_year_note_e_001  # cross-ref subsumed by cover-sheet vision check
+  - v4_e_002_nec_code_year_note  # detail-of-notes check (user said not needed)
+  - v4_bod_due_diligence_nec_edition_with_documented_basis  # word-for-word duplicate of v4_e_001_nec_year_jurisdiction_qualifier_format
+  # v4_e_001_nec_and_ibc_editions_ahj is KEPT — it adds the IBC building-code
+  # check which the new jurisdiction-qualifier rule does not cover.
