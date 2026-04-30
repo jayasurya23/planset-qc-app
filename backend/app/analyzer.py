@@ -350,6 +350,76 @@ def rect_to_dict(rect: fitz.Rect | None) -> dict | None:
     return {"x0": rect.x0, "y0": rect.y0, "x1": rect.x1, "y1": rect.y1}
 
 
+def parse_ai_bbox(value: Any, page: fitz.Page) -> fitz.Rect | None:
+    """Convert an AI-supplied normalized bounding box to a PDF-coordinate
+    fitz.Rect.
+
+    Accepts either a list ``[y0, x0, y1, x1]`` (the order Gemini 2.0 returns)
+    or a dict-shaped ``{"y0": ..., "x0": ..., "y1": ..., "x1": ...}``. Values
+    are accepted as either 0-1000 integers (Gemini default) or 0-1.0 floats.
+    Returns ``None`` for missing, malformed, zero-area, or out-of-bounds
+    inputs — caller falls back to other anchoring.
+
+    Used as the bbox source-of-last-resort: when ``location_text`` doesn't
+    match the PDF text layer (paraphrase, scanned PDF, mismatched table-cell
+    layout) AND the value is missing from the drawing entirely (so there is
+    no string to search for), this gives a focused highlight pointing at
+    where the AI thinks the relevant region is — including where a missing
+    item *should* have been drawn.
+    """
+    if not value:
+        return None
+    if isinstance(value, dict):
+        try:
+            coords = [
+                float(value["y0"]), float(value["x0"]),
+                float(value["y1"]), float(value["x1"]),
+            ]
+        except (KeyError, ValueError, TypeError):
+            return None
+    elif isinstance(value, (list, tuple)) and len(value) == 4:
+        try:
+            coords = [float(c) for c in value]
+        except (TypeError, ValueError):
+            return None
+    else:
+        return None
+
+    # Normalize to 0-1.0 floats. Gemini returns 0-1000 ints by default; some
+    # SDKs return 0-1.0 floats. Detect by max value: anything >1.0 is treated
+    # as the 0-1000 range. Anything obviously out of range bails.
+    if any(c < 0 for c in coords):
+        return None
+    max_c = max(coords)
+    if max_c <= 1.0:
+        scale = 1.0
+    elif max_c <= 1000.0:
+        scale = 1000.0
+    elif max_c <= 100.0:
+        # 0-100 percent scale (some prompts return this); rare but cheap to handle
+        scale = 100.0
+    else:
+        return None
+    norm = [c / scale for c in coords]
+
+    page_w = page.rect.width
+    page_h = page.rect.height
+    y0, x0, y1, x1 = norm
+    # Clamp to [0, 1] in case the model rounded slightly outside.
+    x0c = max(0.0, min(1.0, x0))
+    y0c = max(0.0, min(1.0, y0))
+    x1c = max(0.0, min(1.0, x1))
+    y1c = max(0.0, min(1.0, y1))
+    rect = fitz.Rect(
+        x0c * page_w, y0c * page_h,
+        x1c * page_w, y1c * page_h,
+    )
+    rect.normalize()  # fix any (x0 > x1) / (y0 > y1)
+    if rect.width < 1 or rect.height < 1:
+        return None  # zero-area — useless
+    return rect
+
+
 _NUM_WITH_UNIT = re.compile(
     r"\d[\d,]*(?:\.\d+)?\s*"
     r"(?:kV|V|kA|A|MVA|kVA|kW|MWp|kWp|MW|W|ft|in|°|deg|%|Hz|VA)",

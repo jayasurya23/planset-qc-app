@@ -27,6 +27,7 @@ from .analyzer import (
     ensure_dirs,
     expanded_rect,
     make_issue,
+    parse_ai_bbox,
     rect_to_dict,
     render_issue_artifacts,
 )
@@ -1649,10 +1650,20 @@ def _gemini_page_check(
         snippet_path, preview_path, bbox_dict = None, None, None
         if status in ("Fail", "Needs Review"):
             hints = _extract_location_hints(finding)
-            if hints:
+            # AI-supplied normalized bbox — used as ``fallback_bbox`` so the
+            # renderer prefers literal-text matches but always has a focused
+            # region to draw when text search fails (paraphrased excerpts,
+            # scanned PDFs, missing-item findings).
+            ai_bbox = parse_ai_bbox(
+                finding.get("location_bbox_norm")
+                or finding.get("location_bbox"),
+                doc[page_number - 1],
+            )
+            if hints or ai_bbox:
                 snippet_path, preview_path, bbox_dict = render_issue_artifacts(
                     doc, issue_id, page_number, run_dir,
                     target_texts=hints,
+                    fallback_bbox=ai_bbox,
                 )
             if not preview_path:
                 # Fall back to full-page preview when we have no searchable
@@ -1799,6 +1810,24 @@ def _gemini_multi_page_check(
                             snippet_path, preview_path, bbox_dict = sp, pp, bb
                             ref_page = pn
                             break
+
+            # AI-supplied bbox fallback. Same logic as single-page check —
+            # used when no hint matched and (especially) for findings about
+            # missing items that have no text to search for. Anchor to the
+            # preferred page if the model hinted one, else first page.
+            if not preview_path:
+                ref_page = preferred_page or page_numbers[0]
+                ai_bbox = parse_ai_bbox(
+                    finding.get("location_bbox_norm")
+                    or finding.get("location_bbox"),
+                    doc[ref_page - 1],
+                )
+                if ai_bbox:
+                    snippet_path, preview_path, bbox_dict = render_issue_artifacts(
+                        doc, issue_id, ref_page, run_dir,
+                        target_texts=hints,
+                        fallback_bbox=ai_bbox,
+                    )
 
             if not preview_path:
                 ref_page = preferred_page or page_numbers[0]
@@ -2031,6 +2060,35 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
    truly empty or contains an obvious placeholder (XXXX, TBD, ---, N/A).
    All-caps project/owner names (e.g. "WELLINGTON SOLAR") are valid
    values, not placeholders.
+
+10. **BBOX COORDINATES — required on every Fail / Needs Review finding.**
+    Include a "location_bbox_norm" field as a 4-element list of integers
+    [y0, x0, y1, x1] giving the bounding box of the relevant area on the
+    page, normalized to a 0–1000 scale (top-left origin, y grows down,
+    x grows right). The image you are looking at may be rendered at any
+    DPI, so use NORMALIZED coordinates not pixels.
+
+    For a value that IS present on the page, the bbox should tightly
+    enclose the cell, table, or callout containing the value. For a
+    value that is MISSING / NOT SHOWN, return the bbox of where it
+    SHOULD appear — e.g. the empty cell in the schedule, the empty area
+    next to the label that has no value, the section of the SLD where
+    the missing equipment symbol should be drawn. When location_text
+    cannot be matched on the page text layer (paraphrased excerpt,
+    scanned PDF, table cell layout), this bbox is the only way the
+    reviewer gets a focused highlight, so it is REQUIRED for every Fail
+    and Needs Review finding. Pass findings can omit it.
+
+    For findings comparing two values on the same page, return both
+    bboxes via "location_bboxes_norm": [ [y0,x0,y1,x1], [y0,x0,y1,x1] ].
+    For multi-page findings (Cross-Sheet etc.), include a "location_page"
+    field naming the sheet code (e.g. "E-100") that the bbox refers to.
+
+    Example (a missing aux-XFMR cable on the cable schedule):
+      "location": "E-300 cable schedule, between rows 8 and 9 (where the
+                   aux feeder should be listed)",
+      "location_text": "AUX FEEDER",     // may not match — that's why bbox
+      "location_bbox_norm": [620, 50, 680, 950]  // narrow horizontal band
 """
 
     def _prompt(base: str) -> str:

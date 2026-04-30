@@ -348,12 +348,23 @@ may be well below the number of checks.
     "evidence": "one-sentence explanation showing the math/comparison "
                 "(or a short reason for NR)",
     "location": "table/row/sheet where you found it",
-    "location_text": "short literal searchable excerpt (3-30 chars)"
+    "location_text": "short literal searchable excerpt (3-30 chars)",
+    "location_bbox_norm": [y0, x0, y1, x1]
   }
 ]
 
 The "check" field MUST match one of the rule keys from the CHECKS list
 above exactly. Do not invent new keys.
+
+The "location_bbox_norm" field is REQUIRED on every Fail and Needs Review
+finding. It is a 4-integer list giving the bounding box of the relevant
+area on the page, normalized 0–1000 (top-left origin, y grows down).
+For values that ARE present, return the tight cell/callout bbox. For
+values that are MISSING / NOT SHOWN, return the bbox of where it SHOULD
+appear (the empty cell, the blank area next to a label, the SLD region
+where the missing symbol belongs). This is what the reviewer sees as a
+highlighted region — without it, missing-thing findings have no visual
+anchor. Pass findings may omit it.
 """
 
 
