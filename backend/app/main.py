@@ -442,6 +442,25 @@ async def api_analyze(
             raise HTTPException(
                 status_code=400, detail="Invalid supporting_docs JSON")
 
+    # Auto-merge datasheet-extracted specs into project_details. User-entered
+    # values WIN — this only fills gaps. Lets calc rules (validate_stringing,
+    # validate_fuse_sizing, validate_transformer, …) stop deferring when the
+    # module/inverter/transformer datasheets are uploaded but the user hasn't
+    # manually typed every spec.
+    if sd:
+        from .supporting_docs import project_details_from_supporting_docs
+        auto_pd = project_details_from_supporting_docs(sd)
+        if auto_pd:
+            merged = dict(auto_pd)
+            if pd:
+                merged.update(pd)  # user's own values override the auto-extract
+            pd = merged
+            logging.getLogger(__name__).info(
+                "Auto-merged %d project_details fields from datasheet uploads "
+                "(%d kept from user input).",
+                len(auto_pd), len(set(pd.keys()) & set(auto_pd.keys())),
+            )
+
     upload_id = str(uuid.uuid4())
     run_dir = RUNS_DIR / upload_id
     run_dir.mkdir(parents=True, exist_ok=True)

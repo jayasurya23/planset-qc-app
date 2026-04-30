@@ -29,13 +29,17 @@ log = logging.getLogger(__name__)
 
 
 SUPPORTED_DOC_TYPES = (
-    "cesr",         # Interconnection survey / CESIR / impact study
-    "pvsyst",       # PVSyst report
-    "ampacity",     # Cable ampacity / sizing study
-    "relay",        # Relay / protection coordination study
-    "structural",   # Wind / snow / seismic / pile calcs
-    "datasheet",    # Manufacturer cut sheet
-    "generic",      # Anything else — still kept as free-text evidence
+    "cesr",                 # Interconnection survey / CESIR / impact study
+    "pvsyst",               # PVSyst report
+    "ampacity",             # Cable ampacity / sizing study
+    "relay",                # Relay / protection coordination study
+    "structural",           # Wind / snow / seismic / pile calcs
+    "datasheet",            # Generic manufacturer cut sheet
+    "module_datasheet",     # PV module datasheet — populates module_voc/vmp/isc/...
+    "inverter_datasheet",   # Inverter datasheet — populates inverter_kva/max_vdc/mppt...
+    "transformer_datasheet",# Transformer datasheet — populates xfmr_kva/primary_v/...
+    "bod",                  # Owner BOD / tech spec / Exhibit / required-docs checklist
+    "generic",              # Anything else — still kept as free-text evidence
 )
 
 
@@ -101,6 +105,37 @@ def _read_xlsx(data: bytes, max_sheets: int = 8) -> str:
     return "\n".join(parts)
 
 
+def _read_docx(data: bytes) -> str:
+    """Extract text from a .docx file (paragraphs + table cells, in order)."""
+    try:
+        from io import BytesIO
+        from docx import Document
+    except ImportError:
+        log.warning("python-docx not installed — docx files will be skipped")
+        return ""
+    try:
+        doc = Document(BytesIO(data))
+    except Exception:
+        log.exception("Failed to open docx")
+        return ""
+    parts: list[str] = []
+    # Body iteration via the document XML preserves the paragraph/table
+    # order; python-docx's Document.paragraphs misses cells inside tables
+    # which is where most of an Exhibit V's spec data lives.
+    for para in doc.paragraphs:
+        t = (para.text or "").strip()
+        if t:
+            parts.append(t)
+    for table in doc.tables:
+        parts.append("=== TABLE ===")
+        for row in table.rows:
+            cells = []
+            for cell in row.cells:
+                cells.append(" ".join((p.text or "").strip() for p in cell.paragraphs).strip())
+            parts.append("\t".join(cells))
+    return "\n".join(parts)
+
+
 def _read_any(filename: str, data: bytes) -> tuple[str, list[bytes], int]:
     """Return (text, images, page_count) for any file format."""
     ext = Path(filename).suffix.lower()
@@ -108,6 +143,8 @@ def _read_any(filename: str, data: bytes) -> tuple[str, list[bytes], int]:
         return _read_pdf(data)
     if ext in (".xlsx", ".xls"):
         return _read_xlsx(data), [], 0
+    if ext == ".docx":
+        return _read_docx(data), [], 0
     if ext in (".txt", ".eml", ".msg", ".csv"):
         return data.decode("utf-8", errors="replace")[:80000], [], 0
     # Last resort — try as text
@@ -122,36 +159,120 @@ def _read_any(filename: str, data: bytes) -> tuple[str, list[bytes], int]:
 # ---------------------------------------------------------------------------
 
 
+# Filename hints — order matters: more-specific patterns first so they win
+# against the broader generic-utility "interconnect" pattern in cesr.
 _FILENAME_HINTS = [
-    (re.compile(r"cesr|cesir|interconnect|impact.*study|host.*capacity", re.I), "cesr"),
+    # BOD-class docs: owner spec / contract exhibit / required-docs checklist
+    (re.compile(r"\bexhibit\b|tech(?:nical)?[_\s-]*spec|owner[_\s-]*spec|"
+                r"\bbod\b|design[_\s-]*parameters|required[_\s-]*documents",
+                re.I), "bod"),
     (re.compile(r"pvsyst|pv[_\s-]*syst|yield.*report|energy.*model", re.I), "pvsyst"),
-    (re.compile(r"ampacity|cable.*siz|conductor.*siz", re.I), "ampacity"),
+    (re.compile(r"ampacity|cable.*siz|conductor.*siz|neher", re.I), "ampacity"),
     (re.compile(r"relay|protect.*coord|coord.*study", re.I), "relay"),
     (re.compile(r"struct|wind.*load|snow.*load|seism|pile|foundation", re.I), "structural"),
-    (re.compile(r"data.*sheet|cut.*sheet|spec.*sheet|submittal", re.I), "datasheet"),
+    (re.compile(r"data.*sheet|cut.*sheet|spec.*sheet|submittal|application[_\s-]*note",
+                re.I), "datasheet"),
+    # CESR last among the specific patterns — broader trigger
+    (re.compile(r"cesr|cesir|sis[_\s-]*report|impact.*study|host.*capacity|"
+                r"\biagreement\b|\bia[_\s-]\d|interconnect", re.I), "cesr"),
 ]
 
 
+# Content hints — also order-matters; bod content patterns are matched first
+# so an Exhibit V tech spec doesn't hit the broad "customer" cesr pattern.
 _CONTENT_HINTS = [
-    (re.compile(r"\b(CESR|CESIR|host capacity|impact study|interconnection (?:agreement|application)|customer)\b", re.I), "cesr"),
-    (re.compile(r"\b(PVsyst|Pnom|specific production|performance ratio|loss diagram)\b", re.I), "pvsyst"),
-    (re.compile(r"\b(ampacity|NEC 310\.16|NEC 310\.60|ambient adjustment|conduit fill)\b", re.I), "ampacity"),
-    (re.compile(r"\b(TCC curve|pickup setting|time dial|50/51|relay setting|protection coordination)\b", re.I), "relay"),
-    (re.compile(r"\b(ASCE|wind speed|snow load|seismic|pile capacity|overturning moment|uplift)\b", re.I), "structural"),
-    (re.compile(r"\b(datasheet|cut sheet|submittal|mechanical specifications)\b", re.I), "datasheet"),
+    (re.compile(r"\b(basis of design|owner.{0,3}spec|owner.{0,3}criteria|"
+                r"technical specification|exhibit [a-z]{1,3}|"
+                r"required documents?)\b", re.I), "bod"),
+    (re.compile(r"\b(PVsyst|Pnom|specific production|performance ratio|loss diagram)\b",
+                re.I), "pvsyst"),
+    (re.compile(r"\b(ampacity|NEC 310\.16|NEC 310\.60|ambient adjustment|conduit fill)\b",
+                re.I), "ampacity"),
+    (re.compile(r"\b(TCC curve|pickup setting|time dial|50/51|relay setting|"
+                r"protection coordination)\b", re.I), "relay"),
+    (re.compile(r"\b(ASCE|wind speed|snow load|seismic|pile capacity|"
+                r"overturning moment|uplift)\b", re.I), "structural"),
+    (re.compile(r"\b(datasheet|cut sheet|submittal|mechanical specifications)\b",
+                re.I), "datasheet"),
+    (re.compile(r"\b(CESR|CESIR|host capacity|impact study|"
+                r"interconnection (?:agreement|application))\b", re.I), "cesr"),
 ]
+
+
+_DATASHEET_SUBTYPE_HINTS: list[tuple[re.Pattern, str]] = [
+    # Module — strongly implied by Voc/Vmp/Isc/Imp + STC ratings, or by
+    # known module-vendor model-number patterns.
+    (re.compile(
+        r"\b(monocrystalline|polycrystalline|bifacial|cell technology|"
+        r"PERC|TOPCon|HJT|n-type|p-type)\b|"
+        r"\b(Voc|Vmp|Isc|Imp)\b.*\b(STC|standard test conditions)\b|"
+        r"\b(JKM\d|JAM\d|CS\d|REC\d|Q\.PEAK|TSM-|LR\d|CHSM|VSUN|"
+        r"SunPower|LONGi|Trina|Canadian Solar)\b",
+        re.I | re.S),
+     "module_datasheet"),
+    # Inverter — vendor model numbers, MPPT/kVA AC output language.
+    (re.compile(
+        r"\b(string inverter|central inverter|MPPT range|max DC input|"
+        r"DC input voltage|AC output|nominal AC|AC nominal voltage)\b|"
+        r"\b(XGI[ -]?\d|SG\d+|CPS\d+|SMA[- ]|Sungrow|Yaskawa Solectria|"
+        r"ABB|Power Electronics|Chint|TBEA)\b",
+        re.I),
+     "inverter_datasheet"),
+    # Transformer — kVA + primary/secondary windings + impedance/BIL.
+    (re.compile(
+        r"\b(pad[\s-]?mount|step[\s-]?up transformer|primary winding|"
+        r"secondary winding|impedance.*%|%Z|BIL|tap changer|delta[\s-]?wye|"
+        r"wye[\s-]?delta|HV winding|LV winding)\b",
+        re.I),
+     "transformer_datasheet"),
+]
+
+
+def _subclassify_datasheet(filename: str, text: str) -> str:
+    """If a doc has been classified as 'datasheet', try to narrow to a
+    specific equipment type so we can pull the right project_details fields.
+
+    Returns one of:
+      module_datasheet | inverter_datasheet | transformer_datasheet | datasheet
+    """
+    fn = (filename or "").lower()
+    if "module" in fn or "panel" in fn:
+        return "module_datasheet"
+    if "inverter" in fn:
+        return "inverter_datasheet"
+    if "transformer" in fn or "xfmr" in fn or "xfm" in fn:
+        return "transformer_datasheet"
+
+    head = (text or "")[:8000]
+    for rx, kind in _DATASHEET_SUBTYPE_HINTS:
+        if rx.search(head):
+            return kind
+    return "datasheet"  # generic fallback
 
 
 def classify(filename: str, text: str) -> str:
-    """Best-effort doc-type classifier. Filename first, then content keywords."""
+    """Best-effort doc-type classifier. Filename first, then content keywords.
+
+    For documents classified as 'datasheet', a second-pass sub-classifier
+    narrows to module/inverter/transformer when possible — this is what
+    lets us auto-populate project_details fields downstream.
+    """
+    matched = None
     for rx, kind in _FILENAME_HINTS:
         if rx.search(filename):
-            return kind
-    head = (text or "")[:6000]
-    for rx, kind in _CONTENT_HINTS:
-        if rx.search(head):
-            return kind
-    return "generic"
+            matched = kind
+            break
+    if matched is None:
+        head = (text or "")[:6000]
+        for rx, kind in _CONTENT_HINTS:
+            if rx.search(head):
+                matched = kind
+                break
+    if matched is None:
+        matched = "generic"
+    if matched == "datasheet":
+        matched = _subclassify_datasheet(filename, text)
+    return matched
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +455,139 @@ You are reading structural calculations for a solar PV plant.
 """ + _COMMON_TAIL
 
 
+_MODULE_DS_PROMPT = """\
+You are reading a PV module datasheet. Extract ONLY the electrical and
+thermal characteristics under STC (Standard Test Conditions, 1000 W/m²,
+25 °C, AM1.5). These values feed deterministic stringing/fuse calculations
+and must match the project's project_details exactly.
+
+Field names below are project_details schema keys — use them verbatim so
+they auto-merge.
+
+```json
+{
+  "doc_type": "module_datasheet",
+  "module_make": "manufacturer name",
+  "module_model": "model / part number — exactly as printed on the datasheet",
+  "module_stc_watts": "STC nameplate Pmax in W (numeric only, no unit)",
+  "module_voc": "open-circuit voltage at STC in V (numeric)",
+  "module_vmp": "max-power voltage at STC in V (numeric)",
+  "module_isc": "short-circuit current at STC in A (numeric)",
+  "module_imp": "max-power current at STC in A (numeric)",
+  "module_temp_coeff_voc": "TCoeff_Voc in %/°C — typically negative, e.g. -0.27",
+  "module_temp_coeff_isc": "TCoeff_Isc in %/°C",
+  "module_temp_coeff_pmax": "TCoeff_Pmax in %/°C",
+  "is_bifacial": "yes/no",
+  "summary": "one sentence describing the module",
+  "source_pages": []
+}
+```
+""" + _COMMON_TAIL
+
+
+_INVERTER_DS_PROMPT = """\
+You are reading an inverter datasheet (string or central inverter).
+Extract the electrical specs that drive sizing/stringing/grounding rules.
+
+Field names below are project_details schema keys — use them verbatim.
+
+```json
+{
+  "doc_type": "inverter_datasheet",
+  "inverter_make": "manufacturer",
+  "inverter_model": "exact model / part number",
+  "inverter_kva": "AC nameplate kVA (numeric, no unit)",
+  "inverter_kw": "AC nameplate kW (numeric)",
+  "inverter_max_vdc": "max DC input voltage in V (numeric — used for cold-Voc check)",
+  "inverter_mppt_range": "MPPT range as 'min-max V' string, e.g. '200-1000V'",
+  "inverter_max_dc_input_isc": "max DC input current per MPPT in A (numeric)",
+  "inverter_ac_voltage": "AC nominal voltage in V (numeric)",
+  "inverter_max_short_circuit_amps": "AC short-circuit contribution in A (numeric)",
+  "inverter_efficiency_pct": "max CEC or Euro efficiency in %",
+  "summary": "one sentence",
+  "source_pages": []
+}
+```
+""" + _COMMON_TAIL
+
+
+_TRANSFORMER_DS_PROMPT = """\
+You are reading a transformer datasheet / shop drawing — typically the
+medium-voltage step-up between inverter AC bus and the utility POI.
+Extract specs that drive sizing, BIL, and grounding rules.
+
+Field names below are project_details schema keys.
+
+```json
+{
+  "doc_type": "transformer_datasheet",
+  "transformer_kva": "per-unit nameplate kVA (numeric — what's printed on this datasheet)",
+  "transformer_quantity": "count of step-ups in this project. Often shown as '(2) 2500 kVA'. Defaults to 1 if not stated.",
+  "transformer_primary_voltage": "primary L-L voltage in V (numeric, e.g. 13200)",
+  "transformer_secondary_voltage": "secondary L-L voltage in V (numeric, e.g. 600)",
+  "transformer_winding_config": "e.g. 'Delta-Wye-grounded', 'Wye-grounded-Wye-grounded'",
+  "transformer_impedance": "%Z, e.g. 5.75",
+  "transformer_bil": "BIL in kV, e.g. 95",
+  "transformer_cooling_class": "ONAN / ONAN-ONAF / etc.",
+  "transformer_taps": "tap changer description, e.g. '+/-2 x 2.5%'",
+  "summary": "one sentence",
+  "source_pages": []
+}
+```
+""" + _COMMON_TAIL
+
+
+_BOD_PROMPT = """\
+You are reading a project's Basis of Design (BOD) / owner technical
+specification / contract Exhibit / required-documents checklist for a
+solar PV plant. Extract ONLY the authoritative project-specific
+parameters and procurement/spec requirements that the planset must
+conform to. These are the values planset rules tagged "per project
+spec / owner criteria / per BOD" depend on.
+
+Pull whatever is present — fields with no information should be omitted.
+
+```json
+{
+  "doc_type": "bod",
+  "owner_name": "",
+  "epc_name": "",
+  "project_size_mwac": "",
+  "project_size_mwdc": "",
+  "module_make_model": "approved or required module",
+  "inverter_make_model": "",
+  "transformer_kva_each": "",
+  "transformer_winding_config": "",
+  "fence_spec": "type/height/post material/gate width — e.g. '7ft fixed-knot, metal posts, 12ft swing gates'",
+  "fence_grounding_threshold": "ft from array, per SOP",
+  "ground_ring_burial_depth": "",
+  "grounding_material": "copper/CCS/steel — per geotech",
+  "access_road_width_tier1_ft": "",
+  "access_road_width_tier2_ft": "",
+  "fire_access_width_ft": "",
+  "laydown_size_tier": "",
+  "met_station_count_formula": "e.g. '2 min + 1 per 20MWdc above 40MWdc'",
+  "monitoring_backup_hours": "",
+  "voltage_drop_max_pct": "",
+  "design_temp_low_c": "",
+  "design_temp_high_c": "",
+  "ambient_temp_c": "",
+  "wind_speed_mph": "",
+  "snow_load_psf": "",
+  "racking_make_model": "",
+  "racking_type": "fixed/tracker",
+  "tracker_rotation_range_deg": "",
+  "approved_equipment_list": "list — e.g. 'XGI-1500, Generac genset, ABB SCADA'",
+  "required_studies": "e.g. 'arc flash study, short-circuit study, ground grid study'",
+  "deliverable_stages": "list — e.g. ['30%','60%','90%','IFC','As-Built']",
+  "special_conditions": "non-standard requirements unique to this project",
+  "summary": "one sentence describing what this BOD covers",
+  "source_pages": []
+}
+```
+""" + _COMMON_TAIL
+
+
 _GENERIC_PROMPT = """\
 Summarize this engineering document. Return ONLY JSON:
 
@@ -356,8 +610,52 @@ _PROMPTS = {
     "relay": _RELAY_PROMPT,
     "structural": _STRUCTURAL_PROMPT,
     "datasheet": _GENERIC_PROMPT,
+    "module_datasheet": _MODULE_DS_PROMPT,
+    "inverter_datasheet": _INVERTER_DS_PROMPT,
+    "transformer_datasheet": _TRANSFORMER_DS_PROMPT,
+    "bod": _BOD_PROMPT,
     "generic": _GENERIC_PROMPT,
 }
+
+
+# Datasheet sub-types whose extracted specs use project_details schema keys
+# directly. Their specs can be merged into the analysis call's
+# ``project_details`` so calc rules (validate_stringing, validate_fuse_sizing,
+# etc.) stop deferring on "Missing module_voc" / "Missing inverter_kva".
+_AUTO_MERGE_DATASHEET_TYPES = {
+    "module_datasheet",
+    "inverter_datasheet",
+    "transformer_datasheet",
+}
+
+
+def project_details_from_supporting_docs(
+    supporting_docs: list[dict] | None,
+) -> dict[str, str]:
+    """Aggregate auto-extractable project_details fields from uploaded
+    datasheets. The caller (typically /api/analyze) merges this with the
+    user's own project_details — user-entered values WIN to preserve any
+    manual overrides.
+    """
+    if not supporting_docs:
+        return {}
+    merged: dict[str, str] = {}
+    for d in supporting_docs:
+        if d.get("doc_type") not in _AUTO_MERGE_DATASHEET_TYPES:
+            continue
+        specs = d.get("specs") or {}
+        for k, v in specs.items():
+            if v is None:
+                continue
+            sv = str(v).strip()
+            if not sv:
+                continue
+            # First non-empty value wins. If a user uploads two module
+            # datasheets, the first one's values stand — keep it
+            # deterministic and let the user resolve conflicts manually.
+            if k not in merged:
+                merged[k] = sv
+    return merged
 
 
 # ---------------------------------------------------------------------------
