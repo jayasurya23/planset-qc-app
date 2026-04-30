@@ -392,28 +392,94 @@ def _search_variants(needle: str) -> list[str]:
     return variants
 
 
+_TOKEN_SPLIT_RE = re.compile(r"[\s,;:()/\\\[\]{}\"']+")
+# Tokens that are too generic to highlight on their own (would match every row).
+_TOKEN_STOPLIST = {
+    "the", "and", "or", "of", "to", "for", "with", "on", "at", "in",
+    "row", "column", "table", "list", "see", "shown", "is", "are",
+    "value", "field", "cell", "number", "label", "text",
+}
+
+
+def _split_into_tokens(needle: str) -> list[str]:
+    """Break a needle like 'Row 12 (PT)' into ['Row 12', 'PT', '12'].
+
+    Used as a last-ditch fallback when the full needle doesn't match the PDF
+    text layer. Returns tokens long enough to be useful and rare enough not
+    to flood the page with matches. Original phrase is NOT included — caller
+    has already tried it.
+    """
+    raw_tokens = [t for t in _TOKEN_SPLIT_RE.split(needle) if t]
+    tokens: list[str] = []
+    seen: set[str] = set()
+    # Pair of adjacent tokens first (e.g. "Row 12") — more specific than singles.
+    for i in range(len(raw_tokens) - 1):
+        pair = f"{raw_tokens[i]} {raw_tokens[i+1]}"
+        if 3 <= len(pair) <= 30 and pair not in seen:
+            seen.add(pair)
+            tokens.append(pair)
+    # Then single tokens, skipping stoplist + too-short.
+    for t in raw_tokens:
+        tl = t.strip().lower()
+        if not tl or tl in _TOKEN_STOPLIST:
+            continue
+        if len(t) < 2 or len(t) > 30:
+            continue
+        if t in seen:
+            continue
+        seen.add(t)
+        tokens.append(t)
+    return tokens
+
+
 def _search_page_multi(page: fitz.Page, needles: list[str]) -> list[fitz.Rect]:
     """Search a page for each needle, return all match rectangles (deduped).
 
     Uses several fuzzy variants per needle so tiny text-layer differences
-    (commas, unit spacing) don't cause silent misses.
+    (commas, unit spacing) don't cause silent misses. When NO full-needle
+    match is found anywhere, falls back to token-level matching: pairs of
+    adjacent words first ("Row 12"), then individual tokens (skipping
+    generic stoplist words like "the"/"row"/"value"). The token fallback
+    keeps Fail/NR findings visually anchored to *some* spot on the page
+    even when the AI returned a paraphrase rather than a verbatim excerpt.
     """
     rects: list[fitz.Rect] = []
     seen: set[tuple[float, float, float, float]] = set()
+
+    def _add_matches(term: str) -> bool:
+        """Append all matches for ``term`` (deduped). Return True if any added."""
+        try:
+            matches = page.search_for(term, quads=False)
+        except Exception:
+            matches = []
+        added = False
+        for r in matches:
+            key = (round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1))
+            if key in seen:
+                continue
+            seen.add(key)
+            rects.append(r)
+            added = True
+        return added
+
+    # Pass 1 — full needle + fuzzy variants. First match wins per needle.
     for needle in needles:
         for term in _search_variants(needle):
-            try:
-                matches = page.search_for(term, quads=False)
-            except Exception:
-                matches = []
-            if matches:
-                for r in matches:
-                    key = (round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    rects.append(r)
+            if _add_matches(term):
                 break
+
+    # Pass 2 — token fallback, only if pass 1 found nothing across all needles.
+    # Cap to ~4 tokens per needle to avoid flooding the page with generic
+    # matches when the AI's hint is verbose. Stop as soon as ANY token
+    # produces a hit so we don't accumulate scattered noise.
+    if not rects:
+        for needle in needles:
+            for token in _split_into_tokens(needle)[:4]:
+                if _add_matches(token):
+                    break
+            if rects:
+                break
+
     return rects
 
 

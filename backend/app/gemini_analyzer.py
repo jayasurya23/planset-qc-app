@@ -180,6 +180,16 @@ def _extract_location_hints(finding: dict) -> list[str]:
     if isinstance(val, str) and 3 <= len(val.strip()) <= 40:
         _add(val)
 
+    # The ``location`` field is human-readable (e.g. "AC Schedule, Row 3
+    # (INV-1 to SWBD), FLA column"). It rarely matches verbatim, but the
+    # token-level search fallback in analyzer._search_page_multi can still
+    # use parts of it ("INV-1", "Row 3", "FLA") to anchor a bbox when
+    # nothing else hits. Pass it through as an extra hint — the search
+    # pipeline filters generic words.
+    loc = finding.get("location")
+    if isinstance(loc, str) and 5 <= len(loc.strip()) <= 120:
+        _add(loc.strip())
+
     return hints
 
 
