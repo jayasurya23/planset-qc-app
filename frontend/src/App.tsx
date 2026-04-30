@@ -279,7 +279,15 @@ export default function App() {
   });
   const [cat, setCat] = useState("All");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("default");
   const [sel, setSel] = useState<Issue | null>(null);
+  // Modal preview zoom state. "fit" scales to modal width (default), "actual"
+  // shows native pixels and overflows the modal so the user can scroll/pan.
+  // Reset to "fit" whenever a new finding is opened.
+  const [selZoom, setSelZoom] = useState<"fit" | "actual">("fit");
+  useEffect(() => {
+    setSelZoom("fit");
+  }, [sel?.id]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState("");
   const [projName, setProjName] = useState("");
@@ -466,8 +474,44 @@ export default function App() {
           i.status !== "Deferred" &&
           i.status !== "Overridden / Accepted by QC Engineer",
       );
+
+    // Sort. Default = registration order (don't mutate the input). All other
+    // sorts use stable secondary keys so equal-primary findings stay grouped
+    // by category + page so the list still reads coherently.
+    if (sortBy !== "default") {
+      const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+      const STATUS_RANK: Record<string, number> = {
+        Fail: 0,
+        "Needs Review": 1,
+        Pass: 2,
+        Deferred: 3,
+        "Overridden / Accepted by QC Engineer": 4,
+      };
+      list = [...list].sort((a, b) => {
+        let primary = 0;
+        if (sortBy === "severity") {
+          primary = (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9);
+        } else if (sortBy === "status") {
+          primary = (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9);
+        } else if (sortBy === "category") {
+          primary = (a.category || "").localeCompare(b.category || "");
+        } else if (sortBy === "page") {
+          primary = (a.page_number ?? 9999) - (b.page_number ?? 9999);
+        } else if (sortBy === "confidence") {
+          // Low-confidence first — those need more reviewer attention.
+          primary = (a.confidence ?? 0) - (b.confidence ?? 0);
+        }
+        if (primary !== 0) return primary;
+        // Stable secondary: category, then page, then title.
+        const c = (a.category || "").localeCompare(b.category || "");
+        if (c !== 0) return c;
+        const p = (a.page_number ?? 9999) - (b.page_number ?? 9999);
+        if (p !== 0) return p;
+        return (a.title || "").localeCompare(b.title || "");
+      });
+    }
     return list;
-  }, [run, cat, statusFilter, issuesOnly]);
+  }, [run, cat, statusFilter, issuesOnly, sortBy]);
 
   // Live status counts computed from actual issues (updates when statuses change)
   const liveStatusCounts = useMemo(() => {
@@ -1883,6 +1927,16 @@ export default function App() {
                 {liveCategories.map((c) => {
                   const h = catHealth(c);
                   const pct = catPct(c);
+                  // Per-status click handler \u2014 picking a count drills into
+                  // category + status in one click instead of two.
+                  const drill = (
+                    e: React.MouseEvent,
+                    statusKey: string,
+                  ) => {
+                    e.stopPropagation();
+                    setCat(c.name);
+                    setStatusFilter(statusKey);
+                  };
                   return (
                     <button
                       key={c.name}
@@ -1909,9 +1963,34 @@ export default function App() {
                         </div>
                       </div>
                       <span className="cat-nums">
-                        <span className="cn-p">{c.Pass ?? 0}</span>
-                        <span className="cn-f">{c.Fail ?? 0}</span>
-                        <span className="cn-r">{c["Needs Review"] ?? 0}</span>
+                        <span
+                          className={`cn-f ${(c.Fail ?? 0) === 0 ? "cn-zero" : ""}`}
+                          onClick={(e) => drill(e, "fail")}
+                          title={`${c.Fail ?? 0} Fail`}
+                        >
+                          {c.Fail ?? 0}
+                        </span>
+                        <span
+                          className={`cn-r ${(c["Needs Review"] ?? 0) === 0 ? "cn-zero" : ""}`}
+                          onClick={(e) => drill(e, "review")}
+                          title={`${c["Needs Review"] ?? 0} Needs Review`}
+                        >
+                          {c["Needs Review"] ?? 0}
+                        </span>
+                        <span
+                          className={`cn-p ${(c.Pass ?? 0) === 0 ? "cn-zero" : ""}`}
+                          onClick={(e) => drill(e, "pass")}
+                          title={`${c.Pass ?? 0} Pass`}
+                        >
+                          {c.Pass ?? 0}
+                        </span>
+                        <span
+                          className={`cn-d ${(c.Deferred ?? 0) === 0 ? "cn-zero" : ""}`}
+                          onClick={(e) => drill(e, "deferred")}
+                          title={`${c.Deferred ?? 0} Deferred`}
+                        >
+                          {c.Deferred ?? 0}
+                        </span>
                       </span>
                     </button>
                   );
@@ -1944,6 +2023,21 @@ export default function App() {
                       ) : null,
                     )}
                   </div>
+                  <label className="toolbar-sort">
+                    <span className="toolbar-sort-label">Sort</span>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      title="Order findings by severity, status, category, page, or confidence"
+                    >
+                      <option value="default">Default</option>
+                      <option value="severity">Severity (high → low)</option>
+                      <option value="status">Status (Fail → Pass)</option>
+                      <option value="category">Category (A → Z)</option>
+                      <option value="page">Page (low → high)</option>
+                      <option value="confidence">Confidence (low → high)</option>
+                    </select>
+                  </label>
                   <button
                     className="btn-add"
                     onClick={() => setShowManual(!showManual)}
@@ -2141,6 +2235,26 @@ export default function App() {
                           <div className="card-desc">{issue.description}</div>
                         )}
 
+                        {/* Inline preview thumbnail — clickable to open
+                            the full-resolution modal. Saves a click vs
+                            using the eye-icon button for the common case. */}
+                        {hasPreview && (
+                          <button
+                            className="card-thumb"
+                            onClick={() => setSel(issue)}
+                            title="Click to open full-resolution preview"
+                            type="button"
+                          >
+                            <img
+                              src={artifactUrl(
+                                issue.snippet_path || issue.page_preview_path,
+                              )}
+                              alt={`${issue.title} preview`}
+                              loading="lazy"
+                            />
+                          </button>
+                        )}
+
                         {/* Row 3: AI findings / evidence — always visible */}
                         {issue.evidence && (
                           <div
@@ -2279,11 +2393,26 @@ export default function App() {
               </button>
             </div>
             {sel.page_preview_path || sel.snippet_path ? (
-              <img
-                className="detail-img"
-                src={artifactUrl(sel.page_preview_path || sel.snippet_path)}
-                alt={sel.title}
-              />
+              <div
+                className={`detail-img-wrap detail-img-${selZoom}`}
+                onClick={() =>
+                  setSelZoom(selZoom === "fit" ? "actual" : "fit")
+                }
+                title={
+                  selZoom === "fit"
+                    ? "Click to zoom in to actual size"
+                    : "Click to fit to window"
+                }
+              >
+                <img
+                  className="detail-img"
+                  src={artifactUrl(sel.page_preview_path || sel.snippet_path)}
+                  alt={sel.title}
+                />
+                <span className="detail-zoom-hint">
+                  {selZoom === "fit" ? "Click to zoom in" : "Click to fit"}
+                </span>
+              </div>
             ) : (
               <div className="dim" style={{padding:"3rem",textAlign:"center"}}>
                 No preview available

@@ -152,8 +152,14 @@ a { color: inherit; text-decoration: none; }
 .cat-bar { height: 3px; border-radius: 2px; background: var(--bg); margin-top: 4px; overflow: hidden; }
 .cat-bar-fill { height: 100%; border-radius: 2px; background: var(--green); transition: width .3s; }
 .cat-count { font-size: 12px; font-weight: 700; color: var(--text3); flex-shrink: 0; }
-.cat-nums { display: flex; gap: 2px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
-.cn-p { color: var(--green); } .cn-f { color: var(--red); } .cn-r { color: var(--amber); }
+.cat-nums { display: flex; gap: 4px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.cat-nums > span { padding: 1px 5px; border-radius: 3px; min-width: 18px; text-align: center; cursor: pointer; transition: background-color .12s, transform .1s; }
+.cat-nums > span:hover:not(.cn-zero) { transform: scale(1.15); }
+.cn-p { color: var(--green-fg); background: var(--green-bg); }
+.cn-f { color: var(--red-fg); background: var(--red-bg); }
+.cn-r { color: var(--amber-fg); background: var(--amber-bg); }
+.cn-d { color: var(--blue-fg); background: var(--blue-bg); }
+.cat-nums > span.cn-zero { color: var(--text3); background: transparent; opacity: 0.4; cursor: default; }
 
 /* ════ Issue panel ════ */
 .issue-panel { display: flex; flex-direction: column; gap: 0; min-width: 0; }
@@ -172,6 +178,10 @@ a { color: inherit; text-decoration: none; }
 .fb-override.fb-on { background: var(--purple); border-color: var(--purple); }
 .fb strong { margin-left: 2px; }
 
+.toolbar-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); margin-left: auto; }
+.toolbar-sort-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3); }
+.toolbar-sort select { font-size: 12px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); cursor: pointer; }
+.toolbar-sort select:hover { border-color: var(--border2); }
 .btn-add { background: var(--brand); color: #fff; border: 0; border-radius: var(--r); padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .12s; white-space: nowrap; }
 .btn-add:hover { background: var(--brand-dk); }
 .btn-add:disabled { opacity: .5; }
@@ -251,7 +261,16 @@ a { color: inherit; text-decoration: none; }
 .detail-tags { display: flex; gap: 6px; margin-top: 10px; }
 .detail-close { background: none; border: 0; font-size: 24px; cursor: pointer; color: var(--text3); padding: 4px 8px; border-radius: 8px; line-height: 1; }
 .detail-close:hover { background: var(--bg); color: var(--text); }
+.detail-img-wrap { position: relative; cursor: zoom-in; }
+.detail-img-wrap.detail-img-actual { cursor: zoom-out; max-height: 75vh; overflow: auto; }
+.detail-img-fit .detail-img { width: 100%; display: block; border-top: 1px solid var(--bg); border-bottom: 1px solid var(--bg); }
+.detail-img-actual .detail-img { width: auto; max-width: none; display: block; border-top: 1px solid var(--bg); border-bottom: 1px solid var(--bg); }
+.detail-zoom-hint { position: absolute; right: 12px; bottom: 12px; padding: 4px 10px; font-size: 11px; font-weight: 600; background: rgba(16,24,40,.78); color: #fff; border-radius: 4px; pointer-events: none; opacity: 0; transition: opacity .12s; letter-spacing: 0.02em; }
+.detail-img-wrap:hover .detail-zoom-hint { opacity: 1; }
 .detail-img { width: 100%; border-top: 1px solid var(--bg); border-bottom: 1px solid var(--bg); }
+.card-thumb { display: block; width: calc(100% - 24px); margin: 0 12px 8px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); cursor: zoom-in; overflow: hidden; transition: border-color .12s, box-shadow .12s; }
+.card-thumb:hover { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
+.card-thumb img { display: block; width: 100%; max-height: 220px; object-fit: contain; background: #fff; }
 .detail-evidence { padding: 20px 24px; border-bottom: 1px solid var(--bg); }
 .detail-evidence strong { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); display: block; margin-bottom: 6px; }
 .detail-evidence p { font-size: 14px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
