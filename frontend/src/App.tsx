@@ -342,6 +342,40 @@ export default function App() {
   // j/k handlers below; visualized via .card-focused CSS.
   const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
   const [showShortcuts, setShowShortcuts] = useState<boolean>(false);
+  // Compare-mode state. When ``compareRunId`` is set we fetch that run
+  // and render a diff against the currently-selected run. URL-synced
+  // so a "before/after" view can be shared via deep link.
+  const [compareRunId, setCompareRunId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("compare");
+  });
+  const [compareRun, setCompareRun] = useState<RunData | null>(null);
+  useEffect(() => {
+    if (!compareRunId) {
+      setCompareRun(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API}/api/runs/${compareRunId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setCompareRun(d);
+      })
+      .catch(() => {
+        if (!cancelled) setCompareRun(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [compareRunId]);
+  // Mirror compareRunId into the URL.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (compareRunId) url.searchParams.set("compare", compareRunId);
+    else url.searchParams.delete("compare");
+    window.history.replaceState({}, "", url.toString());
+  }, [compareRunId]);
   const [sideOpen, setSideOpen] = useState(true);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [showProjDetails, setShowProjDetails] = useState(false);
@@ -548,6 +582,85 @@ export default function App() {
     }
     return list;
   }, [run, cat, statusFilter, issuesOnly, sortBy]);
+
+  // Compare-mode diff. Match findings between the two runs by item_key
+  // (the rule identifier) — same rule on the same planset should
+  // produce the same key. Bucket by transition type so reviewers can
+  // answer "did the designer fix the comments?" at a glance.
+  type DiffEntry = {
+    key: string;
+    title: string;
+    category: string;
+    severity: string;
+    before: Issue | null;
+    after: Issue | null;
+  };
+  const isProblemStatus = (s: Status | string | undefined) =>
+    s === "Fail" || s === "Needs Review";
+  const diff = useMemo<{
+    fixed: DiffEntry[];
+    newly: DiffEntry[];
+    drift: DiffEntry[];
+    same: DiffEntry[];
+    removed: DiffEntry[];
+  } | null>(() => {
+    if (!run || !compareRun) return null;
+    const beforeMap = new Map<string, Issue>();
+    for (const i of compareRun.issues ?? []) {
+      // Strip stage_deferred / xref_deferred prefixes so the same rule
+      // matches whether it deferred at engine level or actually ran.
+      const k = i.item_key
+        .replace(/^stage_deferred_/, "")
+        .replace(/^xref_deferred_/, "");
+      beforeMap.set(k, i);
+    }
+    const afterKeys = new Set<string>();
+    const fixed: DiffEntry[] = [];
+    const newly: DiffEntry[] = [];
+    const drift: DiffEntry[] = [];
+    const same: DiffEntry[] = [];
+    for (const after of run.issues ?? []) {
+      const k = after.item_key
+        .replace(/^stage_deferred_/, "")
+        .replace(/^xref_deferred_/, "");
+      afterKeys.add(k);
+      const before = beforeMap.get(k) ?? null;
+      const entry: DiffEntry = {
+        key: k,
+        title: after.title,
+        category: after.category,
+        severity: after.severity,
+        before,
+        after,
+      };
+      if (before == null) {
+        if (isProblemStatus(after.status)) newly.push(entry);
+        // else: new but Pass/Deferred — not interesting in diff
+      } else {
+        const wasProblem = isProblemStatus(before.status);
+        const isProblem = isProblemStatus(after.status);
+        if (wasProblem && !isProblem) fixed.push(entry);
+        else if (!wasProblem && isProblem) newly.push(entry);
+        else if (before.status !== after.status) drift.push(entry);
+        else same.push(entry);
+      }
+    }
+    // Rules in before but not after (removed / disabled / didn't fire).
+    const removed: DiffEntry[] = [];
+    for (const [k, before] of beforeMap) {
+      if (!afterKeys.has(k) && isProblemStatus(before.status)) {
+        removed.push({
+          key: k,
+          title: before.title,
+          category: before.category,
+          severity: before.severity,
+          before,
+          after: null,
+        });
+      }
+    }
+    return { fixed, newly, drift, same, removed };
+  }, [run, compareRun]);
 
   // Group findings by rule for the issue list. Same rule firing on
   // multiple pages (e.g. "TBD in equipment list" on Row 11, 12, 14)
@@ -2209,6 +2322,77 @@ export default function App() {
 
               {/* ── Issue list ── */}
               <section className="issue-panel">
+                {/* Compare-mode banner. Visible whenever ``compareRun`` is
+                    loaded — replaces the regular list with a diff view. */}
+                {compareRun && diff && (
+                  <div className="compare-banner">
+                    <div className="compare-banner-text">
+                      <strong>Diff mode</strong> · comparing{" "}
+                      <code>{compareRun.id.slice(0, 8)}</code> →{" "}
+                      <code>{run.id.slice(0, 8)}</code>
+                      {run.original_filename === compareRun.original_filename ? (
+                        <> · same file ({run.original_filename})</>
+                      ) : (
+                        <> · <em>different files — diff may be misleading</em></>
+                      )}
+                    </div>
+                    <div className="compare-banner-actions">
+                      <button
+                        className="ib"
+                        onClick={() => {
+                          // Swap: make the comparison run the current,
+                          // and the current run the comparison.
+                          const oldCmp = compareRunId;
+                          if (oldCmp) {
+                            setCompareRunId(runId);
+                            setRunId(oldCmp);
+                          }
+                        }}
+                        title="Swap before/after"
+                      >
+                        ⇄
+                      </button>
+                      <button
+                        className="ib"
+                        onClick={() => setCompareRunId(null)}
+                        title="Exit compare mode"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Compare-mode controls (above the regular toolbar) — show
+                    a "Compare with…" picker when not in compare mode, or
+                    nothing when we are (banner above handles closing). */}
+                {!compareRun && (run?.issues?.length ?? 0) > 0 && runs.length > 1 && (
+                  <div className="compare-picker">
+                    <label htmlFor="compare-picker-select">Compare with:</label>
+                    <select
+                      id="compare-picker-select"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) setCompareRunId(e.target.value);
+                      }}
+                    >
+                      <option value="">(pick a run)</option>
+                      {runs
+                        .filter((r) => r.id !== runId)
+                        .slice(0, 30)
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.original_filename}
+                            {" · "}
+                            {new Date(r.created_at).toLocaleDateString()}
+                            {" · "}
+                            {r.id.slice(0, 8)}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Toolbar */}
                 <div className="toolbar">
                   <div className="toolbar-filters">
@@ -2335,7 +2519,115 @@ export default function App() {
 
                 {/* Issue cards */}
                 <div className="issue-list">
-                  {issues.length === 0 && (
+                  {/* Diff sections — when compare mode is on, show
+                      Fixed / New / Drift / Removed instead of the regular
+                      cards. Each entry shows before-status → after-status
+                      with the rule title, category, page, and a click-
+                      through to open the full finding modal. */}
+                  {compareRun && diff && (() => {
+                    const renderDiffSection = (
+                      title: string,
+                      cssClass: string,
+                      entries: DiffEntry[],
+                    ) => {
+                      if (entries.length === 0) return null;
+                      return (
+                        <div
+                          key={title}
+                          className={`diff-section diff-section-${cssClass}`}
+                        >
+                          <div className="diff-section-head">
+                            <span className="diff-section-title">{title}</span>
+                            <span className="diff-section-count">
+                              {entries.length}
+                            </span>
+                          </div>
+                          {entries.map((d) => {
+                            const beforeS = d.before?.status ?? "—";
+                            const afterS = d.after?.status ?? "—";
+                            const target = d.after ?? d.before;
+                            return (
+                              <div
+                                key={d.key}
+                                className="diff-row"
+                                onClick={() => target && setSel(target)}
+                              >
+                                <span className={`sev sev-${d.severity}`}>
+                                  {SV[d.severity]}
+                                </span>
+                                <div className="diff-row-info">
+                                  <div className="diff-row-title">
+                                    {d.title}
+                                  </div>
+                                  <div className="diff-row-sub">
+                                    {d.category}
+                                    {d.after?.page_number && (
+                                      <> · p.{d.after.page_number}</>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="diff-row-transition">
+                                  <span
+                                    className={`badge badge-${
+                                      beforeS === "Pass"
+                                        ? "pass"
+                                        : beforeS === "Fail"
+                                          ? "fail"
+                                          : beforeS === "Needs Review"
+                                            ? "review"
+                                            : beforeS === "Deferred"
+                                              ? "deferred"
+                                              : beforeS === "Overridden / Accepted by QC Engineer"
+                                                ? "ok"
+                                                : "neutral"
+                                    }`}
+                                  >
+                                    {SL[beforeS as Status] ?? beforeS}
+                                  </span>
+                                  <span className="diff-arrow">→</span>
+                                  <span
+                                    className={`badge badge-${
+                                      afterS === "Pass"
+                                        ? "pass"
+                                        : afterS === "Fail"
+                                          ? "fail"
+                                          : afterS === "Needs Review"
+                                            ? "review"
+                                            : afterS === "Deferred"
+                                              ? "deferred"
+                                              : afterS === "Overridden / Accepted by QC Engineer"
+                                                ? "ok"
+                                                : "neutral"
+                                    }`}
+                                  >
+                                    {SL[afterS as Status] ?? afterS}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    };
+                    return (
+                      <>
+                        {renderDiffSection("Fixed (problem → resolved)", "fixed", diff.fixed)}
+                        {renderDiffSection("New problems", "newly", diff.newly)}
+                        {renderDiffSection("Drift (status changed)", "drift", diff.drift)}
+                        {renderDiffSection("Removed (no longer fired)", "removed", diff.removed)}
+                        {diff.fixed.length === 0 &&
+                          diff.newly.length === 0 &&
+                          diff.drift.length === 0 &&
+                          diff.removed.length === 0 && (
+                            <div className="dim" style={{ padding: "2rem", textAlign: "center" }}>
+                              No differences. {diff.same.length} findings unchanged.
+                            </div>
+                          )}
+                      </>
+                    );
+                  })()}
+
+                  {!compareRun && issues.length === 0 && (
                     <div
                       className="dim"
                       style={{ padding: "3rem", textAlign: "center" }}
@@ -2343,7 +2635,7 @@ export default function App() {
                       No items match this filter.
                     </div>
                   )}
-                  {issueGroups.flatMap((g) => {
+                  {!compareRun && issueGroups.flatMap((g) => {
                     const showAsGroup =
                       groupingEnabled && g.instances.length > 1;
                     const groupExpanded =
