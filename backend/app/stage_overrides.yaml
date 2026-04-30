@@ -115,3 +115,7 @@ disabled_rules:
   # it adds the early-stage requirement and Joe-training reasoning. The plain
   # V3 variant below is the same check without the extra context.
   - v4_e_100_xfmr_z_and_x_r_shown
+  # CT ratio / accuracy / burden — V4-ENH variant (ct_ratio_accuracy_burden)
+  # is kept; it explicitly mentions DAS meter compatibility. The V3 variant
+  # is the same check without the DAS context.
+  - v4_e_100_ct_ratio_accuracy_class_burden
