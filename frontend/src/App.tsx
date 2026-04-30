@@ -321,6 +321,23 @@ export default function App() {
       return next;
     });
   }, []);
+  // Group-similar-findings state. When the same rule key fires across
+  // multiple pages (e.g. "TBD in equipment list" hitting Row 11, 12, 14),
+  // collapse the instances behind a single group header by default.
+  // Manual issues never group (different item_keys), and the user can
+  // disable grouping entirely.
+  const [groupingEnabled, setGroupingEnabled] = useState<boolean>(true);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleGroup = useCallback((key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
   const [sideOpen, setSideOpen] = useState(true);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [showProjDetails, setShowProjDetails] = useState(false);
@@ -527,6 +544,56 @@ export default function App() {
     }
     return list;
   }, [run, cat, statusFilter, issuesOnly, sortBy]);
+
+  // Group findings by rule for the issue list. Same rule firing on
+  // multiple pages (e.g. "TBD in equipment list" on Row 11, 12, 14)
+  // collapses to one card by default. Strip ``stage_deferred_`` and
+  // ``xref_deferred_`` prefixes so deferral pathways for the same
+  // underlying rule still group together.
+  const issueGroups = useMemo(() => {
+    type Group = {
+      key: string;
+      title: string;
+      category: string;
+      severity: string;
+      statuses: Set<Status>;
+      pages: number[];
+      instances: Issue[];
+    };
+    const groups: Group[] = [];
+    const idx = new Map<string, number>();
+    for (const i of issues) {
+      const baseKey = i.item_key
+        .replace(/^stage_deferred_/, "")
+        .replace(/^xref_deferred_/, "");
+      const k = `${baseKey}::${i.title}`;
+      if (!idx.has(k)) {
+        idx.set(k, groups.length);
+        groups.push({
+          key: k,
+          title: i.title,
+          category: i.category,
+          severity: i.severity,
+          statuses: new Set([i.status]),
+          pages: i.page_number ? [i.page_number] : [],
+          instances: [i],
+        });
+      } else {
+        const g = groups[idx.get(k)!];
+        g.instances.push(i);
+        g.statuses.add(i.status);
+        if (i.page_number && !g.pages.includes(i.page_number)) {
+          g.pages.push(i.page_number);
+        }
+        // Severity goes to highest. Order: high > medium > low.
+        if (i.severity === "high") g.severity = "high";
+        else if (i.severity === "medium" && g.severity !== "high") {
+          g.severity = "medium";
+        }
+      }
+    }
+    return groups;
+  }, [issues]);
 
   // Live status counts computed from actual issues (updates when statuses change)
   const liveStatusCounts = useMemo(() => {
@@ -2038,6 +2105,17 @@ export default function App() {
                       ) : null,
                     )}
                   </div>
+                  <label
+                    className="toolbar-toggle"
+                    title="Collapse multi-instance findings of the same rule into a single card"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={groupingEnabled}
+                      onChange={(e) => setGroupingEnabled(e.target.checked)}
+                    />
+                    <span>Group similar</span>
+                  </label>
                   <label className="toolbar-sort">
                     <span className="toolbar-sort-label">Sort</span>
                     <select
@@ -2129,7 +2207,73 @@ export default function App() {
                       No items match this filter.
                     </div>
                   )}
-                  {issues.map((issue) => {
+                  {issueGroups.flatMap((g) => {
+                    const showAsGroup =
+                      groupingEnabled && g.instances.length > 1;
+                    const groupExpanded =
+                      !showAsGroup || expandedGroups.has(g.key);
+
+                    const header = showAsGroup ? (
+                      <div
+                        key={`gh-${g.key}`}
+                        className={`group-header sev-${g.severity}`}
+                        onClick={() => toggleGroup(g.key)}
+                      >
+                        <span className="group-toggle">
+                          {expandedGroups.has(g.key) ? "▾" : "▸"}
+                        </span>
+                        <span className={`sev sev-${g.severity}`}>
+                          {SV[g.severity]}
+                        </span>
+                        <div className="group-info">
+                          <div className="group-title">{g.title}</div>
+                          <div className="group-sub">
+                            {g.category} · {g.instances.length} instances
+                            {g.pages.length > 0 && (
+                              <>
+                                {" · pages "}
+                                {[...g.pages].sort((a, b) => a - b).join(", ")}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="group-statuses">
+                          {(["Fail", "Needs Review", "Pass", "Deferred"] as Status[]).map(
+                            (s) => {
+                              const n = g.instances.filter(
+                                (i) => i.status === s,
+                              ).length;
+                              if (n === 0) return null;
+                              const cls =
+                                s === "Fail"
+                                  ? "fail"
+                                  : s === "Needs Review"
+                                    ? "review"
+                                    : s === "Pass"
+                                      ? "pass"
+                                      : "deferred";
+                              return (
+                                <span
+                                  key={s}
+                                  className={`group-status group-status-${cls}`}
+                                >
+                                  {n}
+                                  {s === "Fail"
+                                    ? "F"
+                                    : s === "Needs Review"
+                                      ? "R"
+                                      : s === "Pass"
+                                        ? "P"
+                                        : "D"}
+                                </span>
+                              );
+                            },
+                          )}
+                        </div>
+                      </div>
+                    ) : null;
+
+                    const cards = (groupExpanded ? g.instances : []).map((issue) => {
                     const isAI = issue.item_key.startsWith("ai_");
                     const hasPreview = !!(
                       issue.snippet_path || issue.page_preview_path
@@ -2379,6 +2523,8 @@ export default function App() {
                         )}
                       </div>
                     );
+                    });
+                    return header ? [header, ...cards] : cards;
                   })}
                 </div>
               </section>

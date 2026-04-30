@@ -178,7 +178,7 @@ a { color: inherit; text-decoration: none; }
 .fb-override.fb-on { background: var(--purple); border-color: var(--purple); }
 .fb strong { margin-left: 2px; }
 
-.toolbar-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); margin-left: auto; }
+.toolbar-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
 .toolbar-sort-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3); }
 .toolbar-sort select { font-size: 12px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); cursor: pointer; }
 .toolbar-sort select:hover { border-color: var(--border2); }
@@ -273,6 +273,28 @@ a { color: inherit; text-decoration: none; }
 .card-thumb img { display: block; width: 100%; max-height: 220px; object-fit: contain; background: #fff; }
 .card-thumb-toggle { display: block; width: calc(100% - 24px); margin: 0 12px 8px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: 6px; background: transparent; color: var(--text3); font-size: 11px; font-weight: 500; cursor: pointer; text-align: left; transition: border-color .12s, color .12s, background .12s; }
 .card-thumb-toggle:hover { border-color: var(--brand); color: var(--brand); background: var(--bg); }
+
+/* Multi-instance group headers — when grouping is on and a rule fired
+   on multiple pages, instances collapse behind one of these. */
+.group-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--text3); border-radius: var(--r); margin-bottom: 6px; cursor: pointer; transition: background .12s, border-color .12s; user-select: none; }
+.group-header:hover { background: var(--surface2); }
+.group-header.sev-high { border-left-color: var(--red); }
+.group-header.sev-medium { border-left-color: var(--amber); }
+.group-header.sev-low { border-left-color: var(--text3); }
+.group-toggle { color: var(--text3); font-size: 14px; width: 14px; flex-shrink: 0; }
+.group-info { flex: 1; min-width: 0; }
+.group-title { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-sub { font-size: 11.5px; color: var(--text3); margin-top: 1px; }
+.group-statuses { display: flex; gap: 4px; flex-shrink: 0; }
+.group-status { padding: 2px 7px; border-radius: 3px; font-size: 11px; font-weight: 700; }
+.group-status-fail { color: var(--red-fg); background: var(--red-bg); }
+.group-status-review { color: var(--amber-fg); background: var(--amber-bg); }
+.group-status-pass { color: var(--green-fg); background: var(--green-bg); }
+.group-status-deferred { color: var(--blue-fg); background: var(--blue-bg); }
+
+/* Toolbar grouping toggle */
+.toolbar-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); cursor: pointer; user-select: none; margin-left: auto; }
+.toolbar-toggle input { cursor: pointer; }
 .detail-evidence { padding: 20px 24px; border-bottom: 1px solid var(--bg); }
 .detail-evidence strong { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); display: block; margin-bottom: 6px; }
 .detail-evidence p { font-size: 14px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
