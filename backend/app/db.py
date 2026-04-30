@@ -60,12 +60,25 @@ def init_db() -> None:
             evidence TEXT,
             confidence REAL NOT NULL,
             override_comment TEXT,
+            source_doc_filename TEXT,
+            source_doc_page INTEGER,
+            source_doc_excerpt TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES runs(id)
         )
         """
     )
+    # Migration: add source_doc_* columns if missing on older DBs.
+    for col, ddl in [
+        ("source_doc_filename", "ALTER TABLE issues ADD COLUMN source_doc_filename TEXT"),
+        ("source_doc_page",     "ALTER TABLE issues ADD COLUMN source_doc_page INTEGER"),
+        ("source_doc_excerpt",  "ALTER TABLE issues ADD COLUMN source_doc_excerpt TEXT"),
+    ]:
+        try:
+            cur.execute(f"SELECT {col} FROM issues LIMIT 1")
+        except sqlite3.OperationalError:
+            cur.execute(ddl)
     conn.commit()
     conn.close()
 
@@ -102,9 +115,10 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
         INSERT INTO issues (
             id, run_id, category, item_key, title, description, severity, status, auto_status,
             page_number, bbox_json, snippet_path, page_preview_path, evidence, confidence,
-            override_comment, created_at, updated_at
+            override_comment, source_doc_filename, source_doc_page, source_doc_excerpt,
+            created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -124,6 +138,9 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 issue.get("evidence"),
                 issue.get("confidence", 0.0),
                 issue.get("override_comment"),
+                issue.get("source_doc_filename"),
+                issue.get("source_doc_page"),
+                issue.get("source_doc_excerpt"),
                 issue["created_at"],
                 issue["updated_at"],
             )

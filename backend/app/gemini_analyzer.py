@@ -1800,6 +1800,19 @@ def _gemini_page_check(
                 # the focused highlight rendered instead.
                 needs_rescue = True
 
+        # Supporting-document citation. The AI emits these only when the
+        # finding's evidence actually came from one of the uploaded
+        # supporting docs (CESIR, BOD, submittal, etc.) — see global
+        # instruction 10b. Stored alongside the issue so the UI can render
+        # a citation panel.
+        src_filename = finding.get("source_doc_filename")
+        src_page = finding.get("source_doc_page")
+        src_excerpt = finding.get("source_doc_excerpt")
+        try:
+            src_page_int = int(src_page) if src_page not in (None, "") else None
+        except (TypeError, ValueError):
+            src_page_int = None
+
         new_issue = make_issue(
             run_id=run_id,
             item_key=item_key,
@@ -1814,6 +1827,9 @@ def _gemini_page_check(
             snippet_path=snippet_path,
             page_preview_path=preview_path,
             bbox=bbox_dict,
+            source_doc_filename=src_filename if isinstance(src_filename, str) else None,
+            source_doc_page=src_page_int,
+            source_doc_excerpt=src_excerpt if isinstance(src_excerpt, str) else None,
         )
         issues.append(new_issue)
         if needs_rescue:
@@ -2001,6 +2017,15 @@ def _gemini_multi_page_check(
             # Defer fallback full-page preview — if we'll do a rescue pass,
             # we want the focused highlight rendered instead.
 
+        # Supporting-document citation (see global instruction 10b).
+        src_filename = finding.get("source_doc_filename")
+        src_page = finding.get("source_doc_page")
+        src_excerpt = finding.get("source_doc_excerpt")
+        try:
+            src_page_int = int(src_page) if src_page not in (None, "") else None
+        except (TypeError, ValueError):
+            src_page_int = None
+
         new_issue = make_issue(
             run_id=run_id,
             item_key=item_key,
@@ -2015,6 +2040,9 @@ def _gemini_multi_page_check(
             snippet_path=snippet_path,
             page_preview_path=preview_path,
             bbox=bbox_dict,
+            source_doc_filename=src_filename if isinstance(src_filename, str) else None,
+            source_doc_page=src_page_int,
+            source_doc_excerpt=src_excerpt if isinstance(src_excerpt, str) else None,
         )
         issues.append(new_issue)
         if status in ("Fail", "Needs Review") and bbox_dict is None:
@@ -2259,6 +2287,32 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
    truly empty or contains an obvious placeholder (XXXX, TBD, ---, N/A).
    All-caps project/owner names (e.g. "WELLINGTON SOLAR") are valid
    values, not placeholders.
+
+10b. **SUPPORTING-DOC CITATION — required when the finding's evidence
+    came from a supporting document.** When you validate a value against
+    something in the AVAILABLE EVIDENCE block (CESIR, BOD / tech spec,
+    PVSyst, transformer / inverter / module submittal, ampacity calc,
+    etc.) — even on a Pass — include three fields so the reviewer can
+    audit the citation:
+
+      "source_doc_filename": "<filename>"      — exact filename from the
+                                                  AVAILABLE EVIDENCE list
+      "source_doc_page":     <integer page>    — 1-based page in that doc
+                                                  (omit for single-page docs)
+      "source_doc_excerpt":  "<verbatim quote>" — short literal text from
+                                                  that doc (3–80 chars), the
+                                                  exact text that supports
+                                                  this finding
+
+    Example (a Pass that confirms a value matches CESIR):
+      "evidence": "Service voltage 480Y/277V matches utility CESIR.",
+      "source_doc_filename": "Gonzo IA_20250915 (3).pdf",
+      "source_doc_page": 7,
+      "source_doc_excerpt": "Service Voltage: 480Y/277V"
+
+    If the finding was determined entirely from the planset (no supporting
+    doc consulted), OMIT all three fields. Do NOT make up a filename or
+    page number — only cite what you actually used.
 
 10. **BBOX COORDINATES — required on every Fail / Needs Review finding.**
     Include a "location_bbox_norm" field as a 4-element list of integers

@@ -29,6 +29,9 @@ export interface Issue {
   evidence?: string | null
   confidence: number
   override_comment?: string | null
+  source_doc_filename?: string | null
+  source_doc_page?: number | null
+  source_doc_excerpt?: string | null
   created_at: string
   updated_at: string
 }

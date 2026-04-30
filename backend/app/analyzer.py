@@ -853,6 +853,9 @@ def make_issue(
     snippet_path: str | None = None,
     page_preview_path: str | None = None,
     bbox: dict | None = None,
+    source_doc_filename: str | None = None,
+    source_doc_page: int | None = None,
+    source_doc_excerpt: str | None = None,
 ) -> dict:
     now = utc_now()
     return {
@@ -872,6 +875,9 @@ def make_issue(
         "evidence": evidence,
         "confidence": confidence,
         "override_comment": None,
+        "source_doc_filename": source_doc_filename,
+        "source_doc_page": source_doc_page,
+        "source_doc_excerpt": source_doc_excerpt,
         "created_at": now,
         "updated_at": now,
     }

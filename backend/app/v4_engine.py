@@ -349,7 +349,10 @@ may be well below the number of checks.
                 "(or a short reason for NR)",
     "location": "table/row/sheet where you found it",
     "location_text": "short literal searchable excerpt (3-30 chars)",
-    "location_bbox_norm": [y0, x0, y1, x1]
+    "location_bbox_norm": [y0, x0, y1, x1],
+    "source_doc_filename": "<supporting-doc filename, if used>",
+    "source_doc_page": <1-based page in that doc, optional>,
+    "source_doc_excerpt": "<verbatim quote from that doc>"
   }
 ]
 

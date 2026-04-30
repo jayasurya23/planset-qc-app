@@ -2167,6 +2167,27 @@ export default function App() {
                           </div>
                         )}
 
+                        {/* Source-document citation — when the AI grounded
+                            this finding in an uploaded supporting doc, show
+                            which file + page + the verbatim excerpt. */}
+                        {issue.source_doc_filename && (
+                          <div className="card-srcdoc">
+                            <span className="card-evidence-label">Source</span>
+                            <span className="card-evidence-text">
+                              <strong>{issue.source_doc_filename}</strong>
+                              {issue.source_doc_page != null && (
+                                <> · p.{issue.source_doc_page}</>
+                              )}
+                              {issue.source_doc_excerpt && (
+                                <>
+                                  {" — "}
+                                  <em>&ldquo;{issue.source_doc_excerpt}&rdquo;</em>
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        )}
+
                         {/* Override comment if present */}
                         {issue.override_comment && !isEditing && (
                           <div className="card-override">
