@@ -338,6 +338,10 @@ export default function App() {
       return next;
     });
   }, []);
+  // Keyboard-navigation focus on a single finding card. Set/cleared by
+  // j/k handlers below; visualized via .card-focused CSS.
+  const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState<boolean>(false);
   const [sideOpen, setSideOpen] = useState(true);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [showProjDetails, setShowProjDetails] = useState(false);
@@ -823,6 +827,130 @@ export default function App() {
     });
     await refresh(run.id);
   };
+
+  // ── Keyboard navigation for triage ──
+  // The list of issues actually visible on screen — respects group
+  // collapse so j/k skips hidden findings. Recomputed whenever the
+  // filter / sort / grouping changes.
+  const visibleIssueIds = useMemo<string[]>(() => {
+    const out: string[] = [];
+    for (const g of issueGroups) {
+      const showAsGroup = groupingEnabled && g.instances.length > 1;
+      if (showAsGroup && !expandedGroups.has(g.key)) continue;
+      for (const i of g.instances) out.push(i.id);
+    }
+    return out;
+  }, [issueGroups, groupingEnabled, expandedGroups]);
+
+  // Keep focusedIssueId valid across filter/sort/expand changes. If the
+  // current focus disappears (filtered out), drop it; the user picks
+  // again with j/k.
+  useEffect(() => {
+    if (focusedIssueId && !visibleIssueIds.includes(focusedIssueId)) {
+      setFocusedIssueId(null);
+    }
+  }, [focusedIssueId, visibleIssueIds]);
+
+  // Auto-scroll the focused card into view when navigation moves it.
+  useEffect(() => {
+    if (!focusedIssueId) return;
+    const el = document.getElementById(`issue-card-${focusedIssueId}`);
+    if (el) {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [focusedIssueId]);
+
+  // Global keydown handler. Handles j/k navigation, p/f/r/o status,
+  // Enter to open modal, Escape to close modal / clear focus, ? to
+  // show help. Suppressed when the user is typing in an input/textarea
+  // or contenteditable, and when the manual-add form is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Don't hijack typing.
+      const t = e.target as HTMLElement | null;
+      if (t) {
+        const tag = t.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (t.isContentEditable) return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // Modal-aware keys.
+      if (sel) {
+        if (e.key === "Escape") {
+          setSel(null);
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Help overlay toggle.
+      if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+        setShowShortcuts((s) => !s);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (showShortcuts) {
+          setShowShortcuts(false);
+        } else {
+          setFocusedIssueId(null);
+        }
+        e.preventDefault();
+        return;
+      }
+
+      const ids = visibleIssueIds;
+      if (ids.length === 0) return;
+
+      // Navigation.
+      if (e.key === "j" || e.key === "ArrowDown") {
+        const i = focusedIssueId ? ids.indexOf(focusedIssueId) : -1;
+        const next = i < ids.length - 1 ? ids[i + 1] : ids[0];
+        setFocusedIssueId(next);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "k" || e.key === "ArrowUp") {
+        const i = focusedIssueId ? ids.indexOf(focusedIssueId) : -1;
+        const next = i > 0 ? ids[i - 1] : ids[ids.length - 1];
+        setFocusedIssueId(next);
+        e.preventDefault();
+        return;
+      }
+
+      // Status / action keys require a focused finding.
+      if (!focusedIssueId) return;
+      const focused = (run?.issues ?? []).find((i) => i.id === focusedIssueId);
+      if (!focused) return;
+
+      if (e.key === "p") {
+        void quickStatus(focused, "Pass");
+        e.preventDefault();
+      } else if (e.key === "f") {
+        void quickStatus(focused, "Fail");
+        e.preventDefault();
+      } else if (e.key === "r") {
+        void quickStatus(focused, "Needs Review");
+        e.preventDefault();
+      } else if (e.key === "o") {
+        void quickStatus(focused, "Overridden / Accepted by QC Engineer");
+        e.preventDefault();
+      } else if (e.key === "Enter") {
+        setSel(focused);
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    sel,
+    showShortcuts,
+    visibleIssueIds,
+    focusedIssueId,
+    run,
+  ]);
 
   const saveIssue = async () => {
     if (!editId || !run) return;
@@ -2132,6 +2260,14 @@ export default function App() {
                     </select>
                   </label>
                   <button
+                    className="btn-shortcut-help"
+                    onClick={() => setShowShortcuts(true)}
+                    title="Keyboard shortcuts (?)"
+                    type="button"
+                  >
+                    ?
+                  </button>
+                  <button
                     className="btn-add"
                     onClick={() => setShowManual(!showManual)}
                   >
@@ -2283,7 +2419,16 @@ export default function App() {
                     return (
                       <div
                         key={issue.id}
-                        className={`card card-${catHealth({ name: "", total: 1, [issue.status === "Overridden / Accepted by QC Engineer" ? "Pass" : issue.status]: 1 } as CategorySummary)}`}
+                        id={`issue-card-${issue.id}`}
+                        className={`card card-${catHealth({ name: "", total: 1, [issue.status === "Overridden / Accepted by QC Engineer" ? "Pass" : issue.status]: 1 } as CategorySummary)} ${focusedIssueId === issue.id ? "card-focused" : ""}`}
+                        onClick={(e) => {
+                          // Click anywhere on the card focuses it (helps when
+                          // you've been keyboarding and want to switch back).
+                          // Don't trigger if the click hit a button / link.
+                          const t = e.target as HTMLElement;
+                          if (t.closest("button, a, input, select, textarea")) return;
+                          setFocusedIssueId(issue.id);
+                        }}
                       >
                         {/* Row 1: header with status, title, actions */}
                         <div className="card-row">
@@ -2532,6 +2677,43 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* ── Keyboard shortcuts overlay (toggled with ?) ── */}
+      {showShortcuts && (
+        <div className="overlay" onClick={() => setShowShortcuts(false)}>
+          <div
+            className="shortcut-help"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shortcut-head">
+              <h2>Keyboard shortcuts</h2>
+              <button
+                className="detail-close"
+                onClick={() => setShowShortcuts(false)}
+              >
+                ×
+              </button>
+            </div>
+            <table className="shortcut-table">
+              <tbody>
+                <tr><td><kbd>j</kbd> / <kbd>↓</kbd></td><td>Next finding</td></tr>
+                <tr><td><kbd>k</kbd> / <kbd>↑</kbd></td><td>Previous finding</td></tr>
+                <tr><td><kbd>p</kbd></td><td>Mark as Pass</td></tr>
+                <tr><td><kbd>f</kbd></td><td>Mark as Fail</td></tr>
+                <tr><td><kbd>r</kbd></td><td>Mark as Needs Review</td></tr>
+                <tr><td><kbd>o</kbd></td><td>Mark as Accepted (Override)</td></tr>
+                <tr><td><kbd>Enter</kbd></td><td>Open detail modal</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Close modal / clear focus</td></tr>
+                <tr><td><kbd>?</kbd></td><td>Show / hide this help</td></tr>
+              </tbody>
+            </table>
+            <div className="shortcut-foot">
+              Click a card or press <kbd>j</kbd> to start navigating. Status
+              keys require a focused finding (highlighted ring).
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Detail modal ── */}
       {sel && (

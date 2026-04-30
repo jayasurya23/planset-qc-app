@@ -182,6 +182,8 @@ a { color: inherit; text-decoration: none; }
 .toolbar-sort-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3); }
 .toolbar-sort select { font-size: 12px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); cursor: pointer; }
 .toolbar-sort select:hover { border-color: var(--border2); }
+.btn-shortcut-help { width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); background: var(--surface); color: var(--text3); border-radius: 6px; font-size: 14px; font-weight: 700; cursor: pointer; transition: border-color .12s, color .12s, background .12s; }
+.btn-shortcut-help:hover { border-color: var(--brand); color: var(--brand); background: var(--bg); }
 .btn-add { background: var(--brand); color: #fff; border: 0; border-radius: var(--r); padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .12s; white-space: nowrap; }
 .btn-add:hover { background: var(--brand-dk); }
 .btn-add:disabled { opacity: .5; }
@@ -295,6 +297,20 @@ a { color: inherit; text-decoration: none; }
 /* Toolbar grouping toggle */
 .toolbar-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); cursor: pointer; user-select: none; margin-left: auto; }
 .toolbar-toggle input { cursor: pointer; }
+
+/* Keyboard navigation focus ring */
+.card-focused { outline: 2px solid var(--brand); outline-offset: 1px; box-shadow: 0 0 0 4px rgba(76, 110, 245, 0.18); }
+
+/* Shortcut help overlay */
+.shortcut-help { width: min(480px, 90vw); border-radius: var(--r3); background: var(--surface); box-shadow: 0 24px 48px rgba(16,24,40,.18); padding: 0; }
+.shortcut-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 12px; border-bottom: 1px solid var(--bg); }
+.shortcut-head h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.shortcut-table { width: 100%; padding: 12px 24px; border-collapse: collapse; }
+.shortcut-table td { padding: 6px 0; font-size: 13.5px; color: var(--text); vertical-align: middle; }
+.shortcut-table td:first-child { width: 130px; white-space: nowrap; }
+.shortcut-foot { padding: 12px 24px 18px; font-size: 12px; color: var(--text3); border-top: 1px solid var(--bg); }
+kbd { display: inline-block; padding: 2px 7px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; font-weight: 600; line-height: 1.4; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; }
+.shortcut-foot kbd { font-size: 10px; padding: 1px 5px; }
 .detail-evidence { padding: 20px 24px; border-bottom: 1px solid var(--bg); }
 .detail-evidence strong { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); display: block; margin-bottom: 6px; }
 .detail-evidence p { font-size: 14px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
