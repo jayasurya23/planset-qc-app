@@ -181,8 +181,214 @@ def _safe_float(val: Any) -> float | None:
 # Calculation Functions
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _string_voltage_context(pd: dict) -> tuple[dict | None, str | None]:
+    """Shared temperature-corrected voltage math for string-level rules.
+
+    Returns ``(ctx, missing_reason)``. When ``missing_reason`` is non-None,
+    caller should emit "Needs Review" with that message. Otherwise ``ctx``
+    contains all computed values used by the three stringing rules.
+
+    Computed fields:
+        voc_cold_per_module, string_voc_cold  (cold Voc — max, for max-Vdc check)
+        vmp_cold_per_module, string_vmp_cold  (cold Vmp — for MPPT upper check)
+        vmp_hot_per_module,  string_vmp_hot   (hot Vmp — for MPPT lower check)
+        string_size, design_temp_low_c, design_temp_high_c,
+        tc_voc, tc_vmp, mppt_low, mppt_high, inverter_max_vdc
+    """
+    voc = _safe_float(pd.get("module_voc"))
+    vmp = _safe_float(pd.get("module_vmp"))
+    tc_voc = _safe_float(pd.get("module_temp_coeff_voc"))
+    tc_vmp = _safe_float(pd.get("module_temp_coeff_pmax")) or tc_voc  # fall back to Voc coeff
+    string_size = _safe_float(pd.get("string_size"))
+    t_low = _safe_float(pd.get("design_temp_low_c"))
+    t_high = _safe_float(pd.get("design_temp_high_c"))
+    max_vdc = _safe_float(pd.get("inverter_max_vdc"))
+    mppt_range = pd.get("inverter_mppt_range")
+
+    missing = []
+    if voc is None:
+        missing.append("module_voc")
+    if string_size is None:
+        missing.append("string_size")
+    if missing:
+        return None, f"Missing project details: {', '.join(missing)}"
+
+    assert voc is not None and string_size is not None
+    n = int(string_size)
+
+    # Temperature coefficient default — typical silicon module (%/°C)
+    if tc_voc is None:
+        tc_voc = -0.27
+    if tc_vmp is None:
+        tc_vmp = tc_voc
+
+    # Design temperature defaults (ASHRAE 2% / 98% fractile typical)
+    if t_low is None:
+        t_low = -15.0
+    if t_high is None:
+        t_high = 40.0
+
+    # Voc(cold): temp drops below STC(25°C), voltage rises for negative tc_voc.
+    delta_t_cold = 25.0 - t_low
+    delta_t_hot = t_high - 25.0
+    voc_cold = voc * (1 - (tc_voc / 100.0) * delta_t_cold)
+    vmp_cold = vmp * (1 - (tc_vmp / 100.0) * delta_t_cold) if vmp is not None else None
+    vmp_hot = vmp * (1 + (tc_vmp / 100.0) * delta_t_hot) if vmp is not None else None
+
+    # Parse MPPT range "200-1000V" → (200, 1000)
+    mppt_low, mppt_high = None, None
+    if mppt_range:
+        try:
+            parts = str(mppt_range).replace("V", "").replace("v", "").split("-")
+            mppt_low = float(parts[0].strip())
+            mppt_high = float(parts[1].strip()) if len(parts) > 1 else None
+        except (ValueError, IndexError):
+            pass
+
+    return {
+        "string_size": n,
+        "voc_cold_per_module": round(voc_cold, 2),
+        "string_voc_cold": round(voc_cold * n, 2),
+        "vmp_cold_per_module": round(vmp_cold, 2) if vmp_cold is not None else None,
+        "string_vmp_cold": round(vmp_cold * n, 2) if vmp_cold is not None else None,
+        "vmp_hot_per_module": round(vmp_hot, 2) if vmp_hot is not None else None,
+        "string_vmp_hot": round(vmp_hot * n, 2) if vmp_hot is not None else None,
+        "design_temp_low_c": t_low,
+        "design_temp_high_c": t_high,
+        "tc_voc": tc_voc,
+        "tc_vmp": tc_vmp,
+        "inverter_max_vdc": max_vdc,
+        "mppt_low": mppt_low,
+        "mppt_high": mppt_high,
+    }, None
+
+
+def validate_string_voc_cold(pd: dict) -> CalcResult:
+    """NEC 690.7: String Voc at coldest design temp <= inverter max DC input."""
+    ctx, missing = _string_voltage_context(pd)
+    if missing:
+        return CalcResult("Needs Review", missing, confidence=0.40)
+    assert ctx is not None
+    max_vdc = ctx["inverter_max_vdc"]
+    string_voc_cold = ctx["string_voc_cold"]
+    n = ctx["string_size"]
+    voc_per = ctx["voc_cold_per_module"]
+
+    if max_vdc is None:
+        return CalcResult(
+            "Needs Review", "Missing inverter_max_vdc",
+            confidence=0.40, computed=ctx,
+        )
+    margin_pct = (1 - string_voc_cold / max_vdc) * 100
+    ctx["vdc_margin_pct"] = round(margin_pct, 1)
+
+    if string_voc_cold > max_vdc:
+        return CalcResult(
+            "Fail",
+            f"String Voc(cold) {string_voc_cold:.1f}V = {voc_per}V × {n} modules "
+            f"> inverter max Vdc {max_vdc:.0f}V (NEC 690.7). "
+            f"At T_low={ctx['design_temp_low_c']}°C, cold-correction applied.",
+            severity="high", confidence=0.92, computed=ctx,
+        )
+    return CalcResult(
+        "Pass",
+        f"String Voc(cold) = {string_voc_cold:.1f}V ({n} × {voc_per}V) < max Vdc {max_vdc:.0f}V "
+        f"— {margin_pct:.1f}% headroom (NEC 690.7).",
+        confidence=0.92, computed=ctx,
+    )
+
+
+def validate_string_vmp_cold(pd: dict) -> CalcResult:
+    """String Vmp at coldest design temp <= inverter MPPT upper bound.
+
+    Cold Vmp is the peak-power voltage at the low design temp — it must not
+    exceed the inverter's MPPT tracking window high end, or the inverter
+    will clip or trip at low-temperature startup.
+    """
+    ctx, missing = _string_voltage_context(pd)
+    if missing:
+        return CalcResult("Needs Review", missing, confidence=0.40)
+    assert ctx is not None
+    string_vmp_cold = ctx["string_vmp_cold"]
+    mppt_high = ctx["mppt_high"]
+    n = ctx["string_size"]
+    vmp_per = ctx["vmp_cold_per_module"]
+
+    if string_vmp_cold is None:
+        return CalcResult(
+            "Needs Review", "Missing module_vmp", confidence=0.40, computed=ctx,
+        )
+    if mppt_high is None:
+        return CalcResult(
+            "Needs Review",
+            "Missing inverter_mppt_range (need upper bound for Vmp cold check)",
+            confidence=0.40, computed=ctx,
+        )
+    if string_vmp_cold > mppt_high:
+        return CalcResult(
+            "Fail",
+            f"String Vmp(cold) {string_vmp_cold:.1f}V = {vmp_per}V × {n} modules "
+            f"> inverter MPPT high {mppt_high:.0f}V. At low-temperature startup the "
+            f"inverter cannot track this string; it will clip.",
+            severity="high", confidence=0.92, computed=ctx,
+        )
+    margin = mppt_high - string_vmp_cold
+    return CalcResult(
+        "Pass",
+        f"String Vmp(cold) = {string_vmp_cold:.1f}V ({n} × {vmp_per}V) < MPPT high "
+        f"{mppt_high:.0f}V — {margin:.0f}V headroom.",
+        confidence=0.92, computed=ctx,
+    )
+
+
+def validate_string_vmp_hot(pd: dict) -> CalcResult:
+    """String Vmp at hottest design temp >= inverter MPPT lower bound.
+
+    Hot Vmp is the worst-case (lowest) peak-power voltage. If it falls below
+    the inverter's MPPT lower bound, the inverter will operate off-peak and
+    lose production during hot-weather operation.
+    """
+    ctx, missing = _string_voltage_context(pd)
+    if missing:
+        return CalcResult("Needs Review", missing, confidence=0.40)
+    assert ctx is not None
+    string_vmp_hot = ctx["string_vmp_hot"]
+    mppt_low = ctx["mppt_low"]
+    n = ctx["string_size"]
+    vmp_per = ctx["vmp_hot_per_module"]
+
+    if string_vmp_hot is None:
+        return CalcResult(
+            "Needs Review", "Missing module_vmp", confidence=0.40, computed=ctx,
+        )
+    if mppt_low is None:
+        return CalcResult(
+            "Needs Review",
+            "Missing inverter_mppt_range (need lower bound for Vmp hot check)",
+            confidence=0.40, computed=ctx,
+        )
+    if string_vmp_hot < mppt_low:
+        return CalcResult(
+            "Fail",
+            f"String Vmp(hot) {string_vmp_hot:.1f}V = {vmp_per}V × {n} modules "
+            f"< inverter MPPT low {mppt_low:.0f}V. At T_high="
+            f"{ctx['design_temp_high_c']}°C the inverter will drop below MPPT window.",
+            severity="high", confidence=0.92, computed=ctx,
+        )
+    margin = string_vmp_hot - mppt_low
+    return CalcResult(
+        "Pass",
+        f"String Vmp(hot) = {string_vmp_hot:.1f}V ({n} × {vmp_per}V) > MPPT low "
+        f"{mppt_low:.0f}V — {margin:.0f}V headroom.",
+        confidence=0.92, computed=ctx,
+    )
+
 def validate_stringing(pd: dict) -> CalcResult:
-    """Validate string voltage against inverter MPPT range and NEC 690.7.
+    """DEPRECATED — use validate_string_voc_cold / vmp_cold / vmp_hot instead.
+
+    Kept for backward compatibility. Returns the same combined result as before
+    so any still-attached legacy rule behaves unchanged. New rules should point
+    at the three split functions.
 
     Uses project_details fields:
         module_voc, module_vmp, module_temp_coeff_voc,

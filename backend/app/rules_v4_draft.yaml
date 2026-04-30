@@ -1139,7 +1139,7 @@ rules:
   confidence: 0.75
   v4_status: V3
   v4_row: 123
-  calc_function: validate_stringing
+  calc_function: validate_string_voc_cold
 - key: v4_e_120_string_vmp_cold_inverter_max_mppt
   category: E-120
   title: String Vmp cold <= inverter max MPPT
@@ -1150,7 +1150,7 @@ rules:
   confidence: 0.75
   v4_status: V3
   v4_row: 124
-  calc_function: validate_stringing
+  calc_function: validate_string_vmp_cold
 - key: v4_e_120_string_vmp_hot_inverter_min_mppt
   category: E-120
   title: String Vmp hot >= inverter min MPPT
@@ -1161,7 +1161,7 @@ rules:
   confidence: 0.75
   v4_status: V3
   v4_row: 125
-  calc_function: validate_stringing
+  calc_function: validate_string_vmp_hot
 - key: v4_e_120_temperature_coefficients_approved_datasheet
   category: E-120
   title: Temperature coefficients = approved datasheet
@@ -4041,7 +4041,7 @@ rules:
   calc_function: validate_ac_ampacity
 - key: v4_e_101_e_102_kaic_correct_for_system_size
   category: E-101/E-102
-  title: kAIC correct for system size
+  title: Aux switchboard kAIC correct for system size
   description: 'Same rule as E-050: <=2MW=50kA, >=2.5MW=65kA. On E-101 switchboard symbol.
 
     NOTE: this needs to vbe utimately verfied by the ampacity study'
@@ -4084,7 +4084,7 @@ rules:
   v4_row: 441
 - key: v4_e_101_e_102_cpt_shown_when_oem_requires
   category: E-101/E-102
-  title: CPT shown when OEM requires
+  title: Aux CPT shown when OEM requires
   description: CPT + downstream loads when OEM switchgear diagram shows CPT. Confirmed Kipp/CS Energy.
   source: OEM switchgear wiring diagram
   severity: medium
@@ -4132,14 +4132,19 @@ rules:
 - key: v4_e_101_e_102_aux_xfmr_kva_all_loads_25
   category: E-101/E-102
   title: Aux XFMR kVA >= all loads + 25%
+  # Main step-up XFMR check is v4_e_050_xfmr_kva_total_inverter_ac_output — different rule.
+  # Aux XFMR carries tracker motors + DAS + controllers + UPS + GFCI outlets.
+  # The aux loads are listed on the AC LV Circuit Schedule on E-101/E-102 itself, so the vision
+  # model can evaluate them from the sheet. Source kept as E-101/E-102 (an always-available
+  # planset reference) so source_is_available() doesn't filter this rule when external submittals
+  # aren't uploaded — submittals would improve accuracy but aren't required for the on-sheet sum.
   description: Sum all aux loads (tracker motors + DAS + controllers + UPS + GFCI outlets) + 25% margin.
-  source: Tracker manual (motor FLA) + DAS submittal + all aux submittals
+  source: E-101/E-102 AC LV Circuit Schedule (aux loads table)
   severity: medium
-  check_type: electrical_calc
+  check_type: gemini_vision
   confidence: 0.75
   v4_status: V3
   v4_row: 447
-  calc_function: validate_transformer
 - key: v4_e_101_e_102_string_count_and_mppt_pvcase
   category: E-101/E-102
   title: String count and MPPT = PVCase
@@ -4225,7 +4230,7 @@ rules:
   v4_row: 459
 - key: v4_e_103_e_104_fault_current_values_at_poi
   category: E-103/E-104
-  title: Fault current values at POI
+  title: Fault current values at POI (three-line)
   description: 3-phase and 1-phase fault from CESIR at POI on E-103.
   source: CESIR (fault current section)
   severity: high
