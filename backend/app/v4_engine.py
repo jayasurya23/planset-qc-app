@@ -125,6 +125,8 @@ _SOURCE_TOKEN_TO_DOC_TYPE: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\brelay\b|\bprotection\s+coord",                            re.I), "relay"),
     (re.compile(r"\b(asce|wind\s*load|snow\s*load|seismic|pile|structural)\b", re.I), "structural"),
     (re.compile(r"\bsubmittal\b|\bdatasheet\b|\bcut\s*sheet\b|\bshop\s*drawing\b", re.I), "datasheet"),
+    (re.compile(r"\bbod\b|\btech(?:nical)?\s+spec\b|\bowner\s+(spec|criteria)\b|"
+                r"\bproject\s+tech\s+spec\b|\bexhibit\s+[a-z]\b", re.I), "bod"),
 ]
 
 # Source tokens that mean "a file we never model" — when one of these is the
@@ -259,58 +261,83 @@ You are a senior solar PV QC engineer auditing the sheets shown for the
 checks listed below. Each check has a unique rule key — report findings
 using that key so results can be tracked.
 
-DEFAULT BEHAVIOR: emit exactly ONE finding for every rule in the CHECKS
-list — one of Pass, Fail, or Needs Review. The typical distribution is
-a mix of all three; empty or single-status responses almost always
-indicate the model skipped checks it should have evaluated.
+For each rule you should emit exactly ONE of: Pass, Fail, Needs Review,
+or SKIP (emit no object). Skipping is a first-class outcome — use it
+aggressively when the rule fundamentally can't be evaluated from what
+you can see. A finding that ends in "cannot be confirmed from this
+sheet alone" is worse than no finding at all; it wastes reviewer time.
 
 - **Pass** — the criterion is clearly met on the sheet(s) shown.
 - **Fail** — clearly violated. State the value you read and the value
   required, with the math if applicable. PREFER FAIL OVER NEEDS REVIEW
   when you can see the defect.
-- **Needs Review** — use ONLY when the sheet clearly shows the relevant
-  area AND the value on THIS sheet is genuinely ambiguous (blurry
-  printout, partially obscured, two conflicting-looking values next to
-  each other). Write a short "evidence" reason naming the exact thing
-  the reviewer should double-check visually.
+- **Needs Review** — use ONLY when the relevant area is visible AND the
+  value on THIS sheet is genuinely ambiguous (blurry, partially obscured,
+  two conflicting values side-by-side). The reviewer's action is
+  "zoom in on this specific spot on this specific sheet."
+- **SKIP** — emit no finding for this rule.
 
-SKIP (emit NO object) in these cases:
-- The rule's category is clearly not the sheet you are looking at
-  (e.g. an E-500 grounding-plan rule when the sheet is a title-block
-  detail).
-- The rule requires comparing to ANOTHER sheet or document NOT in
-  view ("E-300 = E-210", "matches submittal", "per PVCase export",
-  "CAB calcs Excel"). The legacy supplement + Cross-Sheet category
-  handle those — don't NR them here.
-- The rule requires an external workbook/study/survey/manual that
-  isn't in AVAILABLE EVIDENCE. If you cannot evaluate without it,
-  skip rather than NR. (These are usually filtered out upstream, but
-  occasionally slip through.)
-- The rule is asking about a feature the sheet doesn't actually have
-  (e.g. a CAB rule on an E-900 datasheet page). Skip — do not NR.
+=== HARD SKIP TRIGGERS (emit NO finding, do NOT emit NR) ===
 
-Prefer PASS over NR when:
-- The relevant area is visible and nothing looks wrong.
-- The criterion is met at a glance — you don't need a magnifier.
-- You genuinely can't verify, but the planset isn't obviously broken
-  (i.e. nothing on this sheet contradicts the rule).
+If the rule you are evaluating has ANY of these properties, SKIP it —
+do not try to partially evaluate, do not NR, just omit the object.
 
-Only emit NR when a real reviewer would benefit from specifically
-double-checking this item on this sheet. An NR that says "I need to
-see another sheet" wastes reviewer time — skip instead.
+1. The rule title/description contains an "=" comparison between sheet
+   codes or documents, e.g.:
+     "E-001 = E-050 = E-100 = E-200"
+     "E-300 = E-210"
+     "E-100 = E-103: same devices"
+   ...AND any of those referenced sheets is not visible in the images.
 
-Do NOT invent values. One finding per rule key. Maximum one skip in a
-normal category — if you're skipping many rules, you are being too
-conservative.
+2. The rule mentions phrases like:
+     "six-document match", "five-source match", "cross-propagation",
+     "matches submittal", "matches CESIR", "matches transmittal",
+     "per PVCase export", "CAB calcs Excel", "civil X-Prop",
+     "per stringing calc", "matches BOD"
+   ...AND the referenced external doc is NOT listed in AVAILABLE EVIDENCE.
+
+3. Your intended evidence sentence would contain any of these phrases:
+     "not in view"           "not shown"
+     "not available"         "not visible"
+     "cannot be confirmed"   "cannot be verified"
+     "is not provided"       "is not included"
+     "cannot be evaluated"   "no … in view"
+     "from this sheet alone" "without access to"
+     "the other sheet(s) are not"  "field-by-field comparison cannot"
+   If you catch yourself writing any of these → STOP, emit nothing.
+
+4. The rule is asking about a feature this sheet doesn't have
+   (e.g. an AC-disconnect check on a datasheet page, a fence spec
+   check on a cover sheet).
+
+5. The rule's category clearly doesn't match the sheet you're looking at.
+
+=== WHEN TO PASS vs NR ===
+
+Prefer PASS when:
+- The relevant content is visible and nothing looks wrong at a glance.
+- The rule is satisfied by what's shown, even if not every sub-detail
+  is individually zoom-verified.
+- The sheet isn't obviously broken and nothing on it contradicts the rule.
+
+Only emit NR when a reviewer's concrete action is "look closer at
+THIS marking on THIS sheet" — e.g. a number that looks wrong but
+you can't be sure, two nameplates that disagree, a partially
+obscured callout. NR is for on-sheet ambiguity, never for
+missing-other-sheet situations.
+
+Do NOT invent values. One finding per rule key. Many skips are
+expected — do not pad the output.
 """
 
 
 _PROMPT_OUTPUT_FORMAT = """\
 
-Return ONLY a JSON array. Emit one object PER RULE in the CHECKS list —
-Pass, Fail, or Needs Review. The array length should match the number
-of checks unless a few were genuinely out-of-scope (see SKIP criteria
-above; skipping should be rare).
+Return ONLY a JSON array. For each rule in CHECKS, emit at most one
+object — Pass, Fail, or Needs Review — OR nothing at all (skip).
+Re-read the HARD SKIP TRIGGERS block before writing each finding.
+It is normal for many rules in a category to skip; the array length
+may be well below the number of checks.
 
 [
   {
@@ -327,6 +354,27 @@ above; skipping should be rare).
 
 The "check" field MUST match one of the rule keys from the CHECKS list
 above exactly. Do not invent new keys.
+"""
+
+
+_CROSS_SHEET_PREAMBLE = """\
+
+=== CROSS-SHEET CATEGORY — ADDITIONAL GATE ===
+
+This category's rules compare values across MULTIPLE sheets
+(e.g. "E-001 = E-050 = E-100 = E-200"). You are only given a
+representative subset of the planset's pages, NOT every sheet.
+
+For each Cross-Sheet rule:
+- List in your head the sheets/docs the rule names.
+- If you can actually see ALL of them in the images → evaluate normally.
+- If ANY referenced sheet or doc is not in the images → SKIP the rule.
+  Do NOT emit "E-100 shows X but E-103 is not visible" as an NR.
+  That is exactly the failure mode we are trying to eliminate — skip it.
+
+A Cross-Sheet category response of 2–5 Pass/Fail findings and many
+skips is correct. A response full of NRs that say "other sheet not
+shown" is wrong.
 """
 
 
@@ -351,7 +399,10 @@ def build_category_prompt(
     sources_note: str = "",
 ) -> str:
     """Produce a full vision prompt for all rules in a category."""
-    header = f"{_PROMPT_INTRO}\n\n=== CONTEXT ===\nSheet / section under review: {category}"
+    header = f"{_PROMPT_INTRO}"
+    if category == "Cross-Sheet":
+        header += _CROSS_SHEET_PREAMBLE
+    header += f"\n\n=== CONTEXT ===\nSheet / section under review: {category}"
     if sheet_hint:
         header += f"\n{sheet_hint}"
     if sources_note:

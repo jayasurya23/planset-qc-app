@@ -1060,6 +1060,22 @@ value you read. If the item is NOT shown / missing / not called out →
 Fail with evidence "Not shown on this sheet". Only use Needs Review
 when the item is partially shown or ambiguous. Do not Pass by default.
 
+PASS CRITERION — READ CAREFULLY:
+You may ONLY emit status="Pass" when the item is explicitly, clearly
+visible on the sheet with a readable value. If the item is "not shown"
+/ "not indicated" / "missing" / "implied" / "ambiguous" → status="Fail"
+(or "Needs Review" if truly ambiguous). Never emit Pass with a "value"
+field that contains words like "not shown", "not indicated", "missing",
+"implied", "N/A" — those are Fails. The only legitimate N/A Pass is for
+rules explicitly marked "fixed-tilt → Pass (N/A)" in the check list,
+and only when the system is actually fixed-tilt.
+
+OUTPUT-LENGTH RULE: for valid status="Pass" findings, emit ONLY the
+minimal fields — { "check": "...", "status": "Pass", "value": "what you read (1 short phrase)" }.
+Omit "location", "evidence", and "severity" on Pass findings. Reviewers
+don't need provenance text when the check genuinely passes. For Fail /
+Needs Review, keep the full "location" + "evidence" + "severity".
+
 1. **Aux Transformer** – An aux transformer MUST be shown with its
    rating (kVA, voltage). Missing → Fail.
 2. **Single Phase Check** – If the aux transformer is single phase, it
