@@ -87,6 +87,13 @@ class Rule:
     # Populated from stage_overrides.yaml (category default + per-rule override).
     min_stage: str | None = None
 
+    # True when ``min_stage`` came from an explicit per-rule override (or was
+    # set in the rule entry itself), False when it was inherited from the
+    # category default. The V4 engine uses this to decide whether the lenient
+    # "if the sheet is in the PDF, run anyway" bypass applies — explicit
+    # rule overrides are treated as authoritative and bypass-resistant.
+    min_stage_explicit: bool = False
+
     # keyword check fields
     keywords: list[Any] = field(default_factory=list)
     min_matches: int = 1
@@ -151,10 +158,22 @@ def load_rules() -> tuple[list[Rule], list[str]]:
         if fields.get("key") in disabled:
             skipped += 1
             continue
-        if fields.get("min_stage") is None:
+        # min_stage precedence:
+        #   1. value already on the rule entry (rare; treat as explicit)
+        #   2. per-rule override in stage_overrides.yaml (explicit)
+        #   3. category default (NOT explicit — lenient bypass applies)
+        if fields.get("min_stage") is not None:
+            fields["min_stage_explicit"] = True
+        else:
             key = fields.get("key") or ""
             cat = fields.get("category") or ""
-            fields["min_stage"] = rule_stage.get(key) or cat_stage.get(cat)
+            override = rule_stage.get(key)
+            if override is not None:
+                fields["min_stage"] = override
+                fields["min_stage_explicit"] = True
+            else:
+                fields["min_stage"] = cat_stage.get(cat)
+                fields["min_stage_explicit"] = False
         rules.append(Rule(**fields))
     if skipped:
         log.info("Registry: suppressed %d disabled rule(s)", skipped)

@@ -820,11 +820,18 @@ def run_v4_checks(
         else:
             target_pages = find_pages_for_category(pages, category)
 
-        # ── Stage gating (lenient) ────────────────────────────────────────
+        # ── Stage gating (lenient for category defaults) ──────────────────
         # If a rule's min_stage is later than the selected design stage, we
         # normally defer it. BUT if the target sheet is actually present in
         # the PDF (target_pages non-empty for sheet-code categories), we let
         # it run anyway — content is there, check it.
+        #
+        # Exception: when ``min_stage`` came from an EXPLICIT per-rule override
+        # (rule_overrides in stage_overrides.yaml), we treat it as authoritative
+        # and skip the lenient bypass. The override exists precisely because
+        # the rule shouldn't fire at earlier stages even when the sheet is
+        # present — e.g. "No TBD at IFC" doesn't apply at 90% even though the
+        # equipment-list sheet is always drawn.
         if design_stage:
             sheet_is_present = bool(target_pages) and category not in (
                 "Title Block", "Cross-Sheet"
@@ -832,8 +839,10 @@ def run_v4_checks(
             gated = []
             for r in kept:
                 rule_cutoff = stage_index(r.min_stage)
-                if rule_cutoff <= stage_cutoff or sheet_is_present:
-                    gated.append(r)
+                if rule_cutoff <= stage_cutoff:
+                    gated.append(r)  # rule applies at-or-before selected stage
+                elif sheet_is_present and not r.min_stage_explicit:
+                    gated.append(r)  # lenient bypass — sheet drawn, category default
                 else:
                     deferred_issues.append(_defer_issue(run_id, r, design_stage))
             deferred_count = len(kept) - len(gated)

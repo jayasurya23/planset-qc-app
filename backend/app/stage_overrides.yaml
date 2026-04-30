@@ -61,11 +61,18 @@ category_min_stage:
 # Use for outliers inside an otherwise-common category:
 #   e.g. Title Block is "30" overall, but "PE wet stamp" is IFC-only.
 #
-# Seed list only — add more as incorrect gating surfaces in review.
-rule_overrides: {}
-# Example (uncomment and adapt after you've confirmed the exact rule keys):
-#   v4_title_block_pe_stamp_signed_sealed: "IFC"
-#   v4_title_block_revision_block_populated: "60"
+# Explicit overrides are AUTHORITATIVE — the V4 engine's lenient
+# "fire anyway when the sheet is in the PDF" bypass is disabled for
+# rules listed here. That bypass is meant for category defaults, not
+# for rules that were intentionally gated to a later stage.
+#
+# Add entries as incorrect gating surfaces in review.
+rule_overrides:
+  # E-050 equipment list rule whose intent is IFC-only. At 30/60/90 the
+  # equipment list sheet is always drawn, but TBD entries are still
+  # acceptable — submittals get firmed up by the IFC submission. Without
+  # an explicit override, the rule fires from 30% onward (E-050 default).
+  v4_e_050_no_tbd_at_ifc: IFC
 
 
 # Rules that should be suppressed entirely — not emitted as Pass/Fail/NR/Deferred,
