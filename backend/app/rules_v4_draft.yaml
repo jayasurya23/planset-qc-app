@@ -644,7 +644,7 @@ rules:
 - key: v4_e_050_no_tbd_at_ifc
   category: E-050
   title: No TBD at IFC
-  description: Every row has definitive mfg/model. No TBD, blank, "NO" in submittal column.
+  description: 'Every row has definitive mfg/model. No TBD, blank, or "NO" in submittal column. Exception: "N/A" or "NA" in the model column is acceptable for software / SaaS / cloud-only equipment (e.g. DAS platforms like Also Energy) that has no hardware model number.'
   source: All submittals
   severity: medium
   check_type: gemini_vision
