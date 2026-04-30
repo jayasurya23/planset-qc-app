@@ -5085,3 +5085,50 @@ rules:
   confidence: 0.75
   v4_status: V3
   v4_row: 653
+
+# ─────────────────────────────────────────────────────────────────────────
+# MANUAL SUPPLEMENT — system-info math checks (ex-legacy SysInfo prompt)
+#
+# These 4 rules replace the 15-rule legacy "System Information Table"
+# Gemini vision prompt that was taking ~50s per run. Math now runs as
+# deterministic electrical_calc against project_details — zero tokens.
+#
+# When re-ingesting Claude V4 Final.xlsx, re-append this block OR update
+# the Excel source to include these four rules.
+# ─────────────────────────────────────────────────────────────────────────
+- key: calc_module_count_consistency
+  category: E-001
+  title: Module count consistency
+  description: Verify total module count equals String Size × String Quantity.
+  source: project_details (string_size, string_quantity, module_qty)
+  severity: high
+  check_type: electrical_calc
+  calc_function: validate_module_count
+  confidence: 0.92
+- key: calc_total_dc_math
+  category: E-001
+  title: Total DC size math
+  description: Total DC kW must equal Module Qty × STC Watts / 1000 within 2% binning tolerance.
+  source: project_details (module_qty or string_size × qty, module_stc_watts, total_dc_kw)
+  severity: high
+  check_type: electrical_calc
+  calc_function: validate_total_dc
+  confidence: 0.92
+- key: calc_total_ac_math
+  category: E-001
+  title: Total AC size math
+  description: Total AC kVA must equal Inverter Quantity × Inverter kVA rating (exact, no tolerance).
+  source: project_details (inverter_quantity, inverter_kva, total_ac_kva)
+  severity: high
+  check_type: electrical_calc
+  calc_function: validate_total_ac
+  confidence: 0.92
+- key: calc_dc_ac_ratio
+  category: E-001
+  title: DC/AC ratio math
+  description: DC/AC ratio should match stated and fall within typical 1.10–1.50 range.
+  source: project_details (total_dc_kw, total_ac_kva, dc_ac_ratio)
+  severity: medium
+  check_type: electrical_calc
+  calc_function: validate_dc_ac_ratio
+  confidence: 0.88

@@ -383,6 +383,7 @@ def validate_string_vmp_hot(pd: dict) -> CalcResult:
         confidence=0.92, computed=ctx,
     )
 
+
 def validate_stringing(pd: dict) -> CalcResult:
     """DEPRECATED — use validate_string_voc_cold / vmp_cold / vmp_hot instead.
 
@@ -546,35 +547,60 @@ def validate_fuse_sizing(pd: dict) -> CalcResult:
 
 
 def validate_transformer(pd: dict) -> CalcResult:
-    """Validate transformer sizing: kVA >= total inverter output, BIL per voltage class.
+    """Validate transformer sizing: total kVA >= total inverter output,
+    BIL per voltage class.
 
-    Uses: transformer_kva, inverter_kva, inverter_quantity, poi_voltage,
-          transformer_impedance, transformer_bil
+    Multi-transformer projects: large solar plants commonly have N step-up
+    transformers each carrying a portion of the inverter load. We compare
+    total transformer capacity (per-unit kVA × count, or an explicit
+    transformer_total_kva if stated) against total inverter output.
+
+    Uses:
+      transformer_kva           (per-unit nameplate)
+      transformer_quantity      (defaults to 1 if missing)
+      transformer_total_kva     (explicit total if stated; overrides math)
+      inverter_kva, inverter_quantity, poi_voltage,
+      transformer_impedance, transformer_bil
     """
     xfmr_kva = _safe_float(pd.get("transformer_kva"))
+    xfmr_qty = _safe_float(pd.get("transformer_quantity")) or 1
+    xfmr_total = _safe_float(pd.get("transformer_total_kva"))
     inv_kva = _safe_float(pd.get("inverter_kva"))
     inv_qty = _safe_float(pd.get("inverter_quantity")) or 1
     poi_v = _safe_float(pd.get("poi_voltage"))
     xfmr_z = _safe_float(pd.get("transformer_impedance"))
     xfmr_bil = _safe_float(pd.get("transformer_bil"))
 
-    if xfmr_kva is None and inv_kva is None:
+    if xfmr_kva is None and xfmr_total is None and inv_kva is None:
         return CalcResult("Needs Review", "Missing transformer_kva and inverter_kva", confidence=0.40)
+
+    # Compute aggregate XFMR capacity. Explicit total wins over per-unit math.
+    total_xfmr_kva = xfmr_total
+    if total_xfmr_kva is None and xfmr_kva is not None:
+        total_xfmr_kva = xfmr_kva * xfmr_qty
 
     issues = []
     computed: dict[str, Any] = {}
 
-    # Check 1: kVA adequacy
-    if xfmr_kva is not None and inv_kva is not None:
+    # Check 1: kVA adequacy — total transformer capacity vs total inverter output
+    if total_xfmr_kva is not None and inv_kva is not None:
         total_inv_kva = inv_kva * inv_qty
-        computed["transformer_kva"] = xfmr_kva
+        computed["transformer_kva_each"] = xfmr_kva
+        computed["transformer_quantity"] = int(xfmr_qty)
+        computed["total_transformer_kva"] = total_xfmr_kva
         computed["total_inverter_kva"] = total_inv_kva
-        if xfmr_kva < total_inv_kva:
+        if total_xfmr_kva < total_inv_kva:
+            xfmr_breakdown = (
+                f"({int(xfmr_qty)} × {xfmr_kva:.0f} kVA = {total_xfmr_kva:.0f} kVA)"
+                if xfmr_qty > 1 and xfmr_kva is not None
+                else f"{total_xfmr_kva:.0f} kVA"
+            )
             issues.append(
-                f"FAIL: Transformer {xfmr_kva:.0f} kVA < total inverter output {total_inv_kva:.0f} kVA"
+                f"FAIL: Total transformer capacity {xfmr_breakdown} "
+                f"< total inverter output {total_inv_kva:.0f} kVA"
             )
         else:
-            margin = (xfmr_kva / total_inv_kva - 1) * 100
+            margin = (total_xfmr_kva / total_inv_kva - 1) * 100
             computed["kva_margin_pct"] = round(margin, 1)
 
     # Check 2: BIL per voltage class
@@ -615,7 +641,17 @@ def validate_transformer(pd: dict) -> CalcResult:
 
     parts = []
     if "total_inverter_kva" in computed:
-        parts.append(f"Transformer {xfmr_kva:.0f}kVA >= inverter total {computed['total_inverter_kva']:.0f}kVA")
+        if xfmr_qty > 1 and xfmr_kva is not None:
+            parts.append(
+                f"Transformer total {int(xfmr_qty)} × {xfmr_kva:.0f} kVA = "
+                f"{computed['total_transformer_kva']:.0f} kVA >= inverter total "
+                f"{computed['total_inverter_kva']:.0f} kVA"
+            )
+        else:
+            parts.append(
+                f"Transformer {computed['total_transformer_kva']:.0f} kVA >= inverter total "
+                f"{computed['total_inverter_kva']:.0f} kVA"
+            )
     if "required_bil_kv" in computed:
         parts.append(f"BIL {xfmr_bil:.0f}kV >= {computed['required_bil_kv']:.0f}kV")
     return CalcResult("Pass", "; ".join(parts) or "Transformer specs verified", confidence=0.88, computed=computed)
@@ -947,6 +983,215 @@ def validate_conduit_fill(pd: dict) -> CalcResult:
     )
 
 
+def validate_module_count(pd: dict) -> CalcResult:
+    """Module Qty = String Size × String Quantity (NEC 690 arrangement math).
+
+    Uses: string_size, string_quantity, total_module_qty (optional — some
+    plansets key this as ``module_qty`` or derived from string_size × qty).
+    """
+    ss = _safe_float(pd.get("string_size"))
+    sq = _safe_float(pd.get("string_quantity"))
+    mq = _safe_float(pd.get("module_qty")) or _safe_float(pd.get("total_module_qty"))
+
+    if ss is None or sq is None:
+        return CalcResult("Needs Review", "Missing string_size or string_quantity", confidence=0.40)
+
+    expected = ss * sq
+    if mq is None:
+        return CalcResult(
+            "Pass",
+            f"Module count = String Size × String Qty = {ss:.0f} × {sq:.0f} = {expected:.0f} modules (stated total not provided).",
+            confidence=0.70,
+            computed={"expected_module_qty": expected},
+        )
+    # Exact check
+    if abs(mq - expected) < 1:
+        return CalcResult(
+            "Pass",
+            f"Module count consistent: {ss:.0f} strings × {sq:.0f} = {expected:.0f} modules",
+            confidence=0.92,
+            computed={"expected": expected, "stated": mq},
+        )
+    return CalcResult(
+        "Fail",
+        f"Module count mismatch: stated {mq:.0f} vs calculated {ss:.0f} × {sq:.0f} = {expected:.0f}",
+        severity="high", confidence=0.92,
+        computed={"expected": expected, "stated": mq},
+    )
+
+
+def validate_total_dc(pd: dict) -> CalcResult:
+    """Total DC (kW) ≈ Module Qty × STC Watts / 1000. Allow ±2% (module binning).
+
+    Uses: module_qty (or string_size × string_quantity), module_stc_watts, total_dc_kw
+    """
+    mq = _safe_float(pd.get("module_qty")) or _safe_float(pd.get("total_module_qty"))
+    if mq is None:
+        ss = _safe_float(pd.get("string_size"))
+        sq = _safe_float(pd.get("string_quantity"))
+        if ss and sq:
+            mq = ss * sq
+    stc = _safe_float(pd.get("module_stc_watts"))
+    dc = _safe_float(pd.get("total_dc_kw"))
+
+    if mq is None or stc is None:
+        return CalcResult("Needs Review", "Missing module_qty or module_stc_watts", confidence=0.40)
+
+    expected = (mq * stc) / 1000.0
+    if dc is None:
+        return CalcResult(
+            "Pass",
+            f"Expected Total DC = {mq:.0f} modules × {stc:.0f}W / 1000 = {expected:.1f} kWp (stated total not provided)",
+            confidence=0.70, computed={"expected_dc_kw": expected},
+        )
+    pct_err = abs(dc - expected) / max(expected, 0.001) * 100
+    if pct_err <= 2.0:
+        return CalcResult(
+            "Pass",
+            f"Total DC math: {mq:.0f} × {stc:.0f}W = {expected:.1f} kWp vs stated {dc:.1f} ({pct_err:.2f}% delta — within 2% binning tolerance)",
+            confidence=0.92, computed={"expected": expected, "stated": dc, "delta_pct": pct_err},
+        )
+    if pct_err <= 10.0:
+        # Common causes that aren't designer math errors: stale module STC
+        # extracted from datasheet vs as-procured wattage, mixed module
+        # variants, or extraction noise. Surface for review rather than
+        # asserting a defect.
+        return CalcResult(
+            "Needs Review",
+            f"Total DC partial mismatch: stated {dc:.1f} kWp vs calculated {expected:.1f} kWp ({pct_err:.1f}% delta). "
+            f"Possible causes: extracted module STC ({stc:.0f}W) doesn't match as-procured wattage, "
+            f"mixed module variants, or extraction noise. Verify cover-sheet system info table.",
+            severity="medium", confidence=0.75,
+            computed={"expected": expected, "stated": dc, "delta_pct": pct_err},
+        )
+    if pct_err > 50.0:
+        # Very large deltas almost always come from one wrong input rather
+        # than a real designer-math error (e.g. extractor pulled the wrong
+        # string-size from a multi-project cover sheet). Demote to NR with
+        # an extraction-quality hint rather than asserting a defect.
+        return CalcResult(
+            "Needs Review",
+            f"Total DC extreme mismatch: stated {dc:.1f} kWp vs calculated {expected:.1f} kWp ({pct_err:.0f}% delta). "
+            f"At this size, one of the extracted inputs is almost certainly wrong: "
+            f"module count {mq:.0f}, STC {stc:.0f}W. Cross-check the cover-sheet "
+            f"system info table — particularly modules/string vs site dimensions.",
+            severity="medium", confidence=0.50,
+            computed={"expected": expected, "stated": dc, "delta_pct": pct_err},
+        )
+    return CalcResult(
+        "Fail",
+        f"Total DC mismatch: stated {dc:.1f} kWp vs calculated {expected:.1f} kWp ({pct_err:.1f}% delta — exceeds 10% tolerance, real designer-math error likely)",
+        severity="high", confidence=0.92,
+        computed={"expected": expected, "stated": dc, "delta_pct": pct_err},
+    )
+
+
+def validate_total_ac(pd: dict) -> CalcResult:
+    """Total AC (kVA) = Inverter Qty × Inverter kVA rating. Must be exact.
+
+    Uses: inverter_quantity, inverter_kva (or inverter_kw + 0.9 PF), total_ac_kva
+    """
+    qty = _safe_float(pd.get("inverter_quantity"))
+    kva = _safe_float(pd.get("inverter_kva"))
+    kw = _safe_float(pd.get("inverter_kw"))
+    total = _safe_float(pd.get("total_ac_kva"))
+
+    if qty is None or (kva is None and kw is None):
+        return CalcResult("Needs Review", "Missing inverter_quantity or inverter_kva/kw", confidence=0.40)
+
+    per_inv = kva or (kw / 0.9 if kw else 0)
+    expected = qty * per_inv
+
+    if total is None:
+        return CalcResult(
+            "Pass",
+            f"Expected Total AC = {qty:.0f} × {per_inv:.1f} kVA = {expected:.1f} kVA (stated total not provided)",
+            confidence=0.70, computed={"expected_ac_kva": expected},
+        )
+    pct_err = abs(total - expected) / max(expected, 0.001) * 100
+    if pct_err < 0.5:
+        return CalcResult(
+            "Pass",
+            f"Total AC math: {qty:.0f} inverters × {per_inv:.1f} kVA = {expected:.1f} kVA vs stated {total:.1f} (exact)",
+            confidence=0.92, computed={"expected": expected, "stated": total},
+        )
+    if pct_err <= 10.0:
+        # Common legit causes: mixed-inverter projects (e.g. "19/1" = 19 of
+        # one model + 1 of another), export-limit derating where the cover
+        # states a kW export cap below the inverter sum, or a kW value
+        # treated as kVA. Demote to Needs Review with a hint.
+        return CalcResult(
+            "Needs Review",
+            f"Total AC partial mismatch: stated {total:.1f} kVA vs calculated {qty:.0f} × {per_inv:.1f} = "
+            f"{expected:.1f} kVA ({pct_err:.1f}% delta). Possible causes: mixed-inverter config "
+            f"(e.g. 'qty/qty' on cover), export-limit derating, or a kW value labeled as kVA. "
+            f"Cross-check the cover-sheet inverter quantity callout (single number vs 'X/Y' split).",
+            severity="medium", confidence=0.75,
+            computed={"expected": expected, "stated": total, "delta_pct": pct_err},
+        )
+    if pct_err > 50.0:
+        # Extreme mismatch almost always means one wrong input, not a real
+        # designer error. Demote to NR with extraction-quality hint.
+        return CalcResult(
+            "Needs Review",
+            f"Total AC extreme mismatch: stated {total:.1f} kVA vs calculated {qty:.0f} × {per_inv:.1f} = "
+            f"{expected:.1f} kVA ({pct_err:.0f}% delta). At this size, one of the inputs is almost "
+            f"certainly wrong (inverter count or per-inverter rating). Verify the cover-sheet "
+            f"inverter quantity and rating against what was actually procured.",
+            severity="medium", confidence=0.50,
+            computed={"expected": expected, "stated": total, "delta_pct": pct_err},
+        )
+    return CalcResult(
+        "Fail",
+        f"Total AC mismatch: stated {total:.1f} kVA vs calculated {qty:.0f} × {per_inv:.1f} = {expected:.1f} kVA "
+        f"({pct_err:.1f}% delta — exceeds 10% tolerance)",
+        severity="high", confidence=0.92,
+        computed={"expected": expected, "stated": total, "delta_pct": pct_err},
+    )
+
+
+def validate_dc_ac_ratio(pd: dict) -> CalcResult:
+    """DC/AC ratio = Total DC (kW) / Total AC (kW). Typical range 1.10-1.50.
+
+    Uses: total_dc_kw, total_ac_kva (or inverter totals), dc_ac_ratio (stated)
+    """
+    dc = _safe_float(pd.get("total_dc_kw"))
+    ac_kva = _safe_float(pd.get("total_ac_kva"))
+    stated = _safe_float(pd.get("dc_ac_ratio"))
+
+    if dc is None or ac_kva is None:
+        return CalcResult("Needs Review", "Missing total_dc_kw or total_ac_kva", confidence=0.40)
+
+    computed_ratio = dc / max(ac_kva, 0.001)
+
+    checks: list[str] = []
+    # Range check
+    if computed_ratio < 1.10 or computed_ratio > 1.50:
+        checks.append(
+            f"Computed DC/AC = {dc:.0f} / {ac_kva:.0f} = {computed_ratio:.3f} — outside typical range 1.10–1.50"
+        )
+
+    if stated is not None and abs(stated - computed_ratio) > 0.02:
+        checks.append(
+            f"Stated ratio {stated:.2f} != computed {computed_ratio:.3f} (delta {abs(stated - computed_ratio):.3f})"
+        )
+
+    if checks:
+        return CalcResult(
+            "Needs Review" if computed_ratio >= 1.0 else "Fail",
+            "; ".join(checks),
+            severity="medium" if computed_ratio >= 1.0 else "high",
+            confidence=0.88,
+            computed={"computed": computed_ratio, "stated": stated},
+        )
+    return CalcResult(
+        "Pass",
+        f"DC/AC = {dc:.0f} / {ac_kva:.0f} = {computed_ratio:.2f} (within 1.10–1.50 and matches stated)",
+        confidence=0.92,
+        computed={"computed": computed_ratio, "stated": stated},
+    )
+
+
 def validate_nec_clearances(pd: dict) -> CalcResult:
     """Provide NEC 110.26 clearance requirements based on system voltage."""
     poi_v = _safe_float(pd.get("poi_voltage"))
@@ -991,7 +1236,10 @@ def validate_nec_clearances(pd: dict) -> CalcResult:
 # ═══════════════════════════════════════════════════════════════════════════
 
 CALC_FUNCTIONS: dict[str, Any] = {
-    "validate_stringing": validate_stringing,
+    "validate_stringing": validate_stringing,  # deprecated combined check
+    "validate_string_voc_cold": validate_string_voc_cold,
+    "validate_string_vmp_cold": validate_string_vmp_cold,
+    "validate_string_vmp_hot": validate_string_vmp_hot,
     "validate_fuse_sizing": validate_fuse_sizing,
     "validate_transformer": validate_transformer,
     "validate_dc_ampacity": validate_dc_ampacity,
@@ -1002,6 +1250,10 @@ CALC_FUNCTIONS: dict[str, Any] = {
     "validate_voltage_drop": validate_voltage_drop,
     "validate_conduit_fill": validate_conduit_fill,
     "validate_nec_clearances": validate_nec_clearances,
+    "validate_module_count": validate_module_count,
+    "validate_total_dc": validate_total_dc,
+    "validate_total_ac": validate_total_ac,
+    "validate_dc_ac_ratio": validate_dc_ac_ratio,
 }
 
 

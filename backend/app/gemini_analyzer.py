@@ -456,19 +456,31 @@ only for cosmetic issues.
   real value is required, or an obvious placeholder like "Project Name"
   literally as the project name.
 
-**M16 — Multi-location consistency (if multiple pages submitted):**
-  For any value appearing on more than one submitted page (cover system
-  info vs datasheet vs SLD), they must agree. Emit a finding per mismatch
-  with both values quoted and severity "high".
+NOTE ON CONSISTENCY: the system info table is replicated identically
+across every sheet of the planset by template — cross-sheet consistency
+OF THE TABLE ITSELF is guaranteed by construction. Do NOT emit findings
+about sysinfo differences between pages; that is not a real defect. The
+only cross-source check still relevant is M7/M8 — comparing the sysinfo
+table against the equipment datasheet on a submitted datasheet page.
 
 ════════════════════════════════════════════════════════════════
 OUTPUT FORMAT
 ════════════════════════════════════════════════════════════════
 
-Return a JSON array. Emit one finding per rule (M1 through M16) plus one
-finding per extracted field group (module, array, inverter, layout, site).
-For EACH finding include the standard "location" / "location_text" fields so
-the reviewer can highlight the value on the PDF.
+Return a JSON array. Emit findings ONLY for the M1–M15 rules. Do NOT emit
+per-field-group extractions — the extracted values from STEP 1 are used
+internally for validation and should NOT appear as separate findings.
+Do NOT emit any finding about "sysinfo table differs between pages";
+the table is replicated by template and is always consistent.
+
+EMIT-ON-FAILURE-ONLY rules: for M9 (bifacial sanity), M11 (GCR vs pitch),
+M12 (azimuth/tilt plausibility), and M13 (derated rating), omit the
+finding entirely when the check passes. Emit only when Fail or Needs
+Review. These are low-yield sanity checks that dominate output length
+when everything is normal.
+
+For EACH emitted finding include the standard "location" / "location_text"
+fields so the reviewer can highlight the value on the PDF.
 
 ```json
 [
@@ -1962,33 +1974,12 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         # equivalent to a V3 category with tuned hardcoded prompts. These
         # run alongside the V4 engine so their findings are additive.
         #
-        # System Information Table — V3 hardcoded prompt targets cover +
-        # datasheets with an atomic Pass/Fail per spec field. V4's E-001
-        # category has some overlap but the V4 prompt emits fewer findings
-        # per run.
-        sysinfo_pages = [1]
-        _datasheet_pages = [
-            p.number for p in pages
-            if any(kw in (p.sheet_title or "").upper() for kw in
-                   ("DATASHEET", "DATA SHEET", "SPEC SHEET", "SPECIFICATION",
-                    "SUBMITTAL", "CUT SHEET"))
-        ]
-        if _datasheet_pages:
-            sysinfo_pages.extend(_datasheet_pages[:1])
-        if len(sysinfo_pages) == 1:
-            _safe_call(
-                _gemini_page_check, doc, 1, _prompt(_SYSTEM_INFO_PROMPT),
-                run_id, run_dir, "System Information Table",
-                "ai_sysinfo_legacy", "System Information Table",
-            )
-        else:
-            _safe_call(
-                _gemini_multi_page_check, doc, sysinfo_pages[:2],
-                _prompt(_SYSTEM_INFO_PROMPT),
-                run_id, run_dir, "System Information Table",
-                "ai_sysinfo_legacy",
-                f"System Info + Datasheet ({len(sysinfo_pages[:2])} pages)",
-            )
+        # NOTE: the legacy "System Information Table" Gemini prompt was
+        # removed — its 15 math checks now run as deterministic
+        # electrical_calc rules (calc_module_count_consistency,
+        # calc_total_dc_math, calc_total_ac_math, calc_dc_ac_ratio) plus
+        # V4 Cross-Sheet for the make/model/spec comparisons. Saves ~50s
+        # per run with equivalent coverage.
 
         # Helper: run a legacy V3 prompt on the first page matching any of
         # the given title keywords. No-op when no page matches.
@@ -2080,35 +2071,12 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         )
     )
 
-    # 2 ── System Information Table (cover + datasheet pages) ────────────
-    # Values like inverter kVA/kW may be on datasheets, not just the cover
-    sysinfo_pages = [1]
-    datasheet_pages = find_pages(
-        "DATASHEET", "DATA SHEET", "SPEC SHEET", "SPECIFICATION",
-        "SUBMITTAL", "CUT SHEET",
-    )
-    if datasheet_pages:
-        sysinfo_pages.extend(datasheet_pages[:2])
-    # System info uses the standard (mini) model — the 16 validation rules
-    # in the prompt are explicit math, not freeform reasoning, so deep mode
-    # is overkill and adds 60–90s per run for marginal accuracy gain.
-    if len(sysinfo_pages) == 1:
-        all_issues.extend(
-            _safe_call(
-                _gemini_page_check, doc, 1, _prompt(_SYSTEM_INFO_PROMPT),
-                run_id, run_dir, "System Information Table", "ai_sysinfo",
-                "System Information Table",
-            )
-        )
-    else:
-        all_issues.extend(
-            _safe_call(
-                _gemini_multi_page_check, doc, sysinfo_pages[:2],
-                _prompt(_SYSTEM_INFO_PROMPT),
-                run_id, run_dir, "System Information Table", "ai_sysinfo",
-                f"System Info + Datasheet ({len(sysinfo_pages[:2])} pages)",
-            )
-        )
+    # 2 ── System Information Table — REMOVED.
+    # The 15 SysInfo math rules are now deterministic electrical_calc rules
+    # (calc_module_count_consistency, calc_total_dc_math, calc_total_ac_math,
+    # calc_dc_ac_ratio in rules_v4_draft.yaml) plus existing validate_stringing
+    # / validate_fuse_sizing for M10/M14, plus V4 Cross-Sheet for M6/M7/M8
+    # make/model comparisons. Saves ~50s per run.
 
     # 3 ── Title Block spot-check (sample 3 pages) ────────────────────────
     sample = list(dict.fromkeys([1, len(pages)//2, len(pages)]))
