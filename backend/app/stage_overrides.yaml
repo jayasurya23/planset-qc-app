@@ -119,3 +119,35 @@ disabled_rules:
   # is kept; it explicitly mentions DAS meter compatibility. The V3 variant
   # is the same check without the DAS context.
   - v4_e_100_ct_ratio_accuracy_class_burden
+
+  # ── Bulk V3-vs-V4-ENH duplicate sweep ──────────────────────────────────
+  # The V4 ingest re-imported many V3 rules with slightly more descriptive
+  # titles / sources (V4-ENH variants) but did not disable the originals.
+  # The V4-ENH variant is kept in each case; the V3 duplicate below is
+  # disabled. Identified by the registry-similarity sweep (Jaccard ≥ 0.6
+  # on normalized titles within the same category, opposite v4_status).
+
+  # Inverter submittal — V4-ENH "Inverter submittal + installation manual" kept
+  - v4_ai_input_gate_approved_inverter_submittal_installation_manu
+  # Switchgear / AC combiner — V4-ENH "Approved switchgear / AC combiner" kept
+  - v4_ai_input_gate_approved_switchgear_ac_combiner_submittal
+  # XFMR datasheet — V4-ENH "XFMR datasheet + shop drawing" kept
+  - v4_e_900_xfmr_datasheet_and_shop_drawing
+  # Surge arrester MCOV — V4-ENH "MCOV from IEEE C62.22 + feeder grounding" kept
+  - v4_e_100_surge_arrester_mcov_from_ieee_c62_22
+  # Module submittal — V4-ENH "Approved module submittal" kept
+  - v4_ai_input_gate_approved_module_submittal_available
+  # Transformer submittal — V4-ENH "Approved transformer submittal" kept
+  - v4_ai_input_gate_approved_transformer_submittal_available
+  # Voltage drop workbook — V4-ENH "Voltage drop workbook" kept
+  - v4_ai_input_gate_voltage_drop_calculation_workbook
+  # Thermal ampacity study — V4-ENH "Thermal ampacity study" kept
+  - v4_ai_input_gate_thermal_ampacity_study_available
+  # Project name match — V4-ENH "Project name exact match (cross-propagation)" kept
+  - v4_title_block_project_name_exact_match
+  # Access road widths — V4-ENH "Access road widths = project criteria" kept
+  - v4_e_010_access_road_widths_meet_criteria
+  # MV cable description — V4-ENH "MV cable four-element description" kept
+  - v4_e_300_mv_cable_description_four_elements
+  # XFMR change propagation — V4-ENH "(6 sheets)" variant kept
+  - v4_cross_sheet_xfmr_change_propagation
