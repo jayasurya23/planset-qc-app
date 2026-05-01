@@ -64,6 +64,21 @@ a { color: inherit; text-decoration: none; }
 .run-item-meta { font-size: 11px; color: rgba(255,255,255,.4); margin-top: 2px; }
 .run-item-eng { font-size: 11px; color: rgba(173,31,43,.85); font-weight: 600; margin-top: 2px; }
 .eng-row { display: flex; flex-direction: column; gap: 4px; }
+.eng-add { display: flex; gap: 4px; align-items: stretch; }
+.eng-add .si { flex: 1; }
+.eng-add-ok, .eng-add-cancel {
+  border: 1px solid rgba(255,255,255,.15);
+  background: rgba(255,255,255,.06);
+  color: #fff;
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+}
+.eng-add-ok:hover:not(:disabled) { background: rgba(61,214,140,.18); border-color: rgba(61,214,140,.35); color: #3dd68c; }
+.eng-add-cancel:hover { background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.35); color: #ff6b6b; }
+.eng-add-ok:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ════ Per-finding "Report a problem" ════ */
 .ib-report { color: rgba(255,255,255,.45); }

@@ -407,22 +407,45 @@ export default function App() {
   const [plansetDragOver, setPlansetDragOver] = useState(false);
   const [supportingDragOver, setSupportingDragOver] = useState(false);
   const [pdDragOver, setPdDragOver] = useState(false);
-  // Engineer name (who's running this QC). Persisted in localStorage so the
-  // browser remembers the user; the list of past names feeds a <datalist>
-  // so engineers can pick from a dropdown of colleagues already on file.
+  // Engineer name (who's running this QC). Persisted in localStorage so
+  // the browser remembers the picker list across sessions. Default seed
+  // is the office crew (Manjil, Jay, Sam) — a fresh browser sees these
+  // immediately. Adding via "+ Add new engineer..." appends to the list
+  // and persists for next time.
+  const DEFAULT_ENGINEERS = ["Jay", "Manjil", "Sam"];
   const [engineerName, setEngineerName] = useState<string>(() => {
     if (typeof localStorage === "undefined") return "";
     return localStorage.getItem("engineer_name") || "";
   });
   const [knownEngineers, setKnownEngineers] = useState<string[]>(() => {
-    if (typeof localStorage === "undefined") return [];
-    try {
-      const raw = localStorage.getItem("known_engineers");
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
-    } catch {
-      return [];
+    let saved: string[] = [];
+    if (typeof localStorage !== "undefined") {
+      try {
+        const raw = localStorage.getItem("known_engineers");
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) {
+          saved = parsed.filter((s) => typeof s === "string");
+        }
+      } catch {
+        saved = [];
+      }
     }
+    // Merge defaults so the seed crew is present on first load and any
+    // additions stay. Case-insensitive dedupe — "jay" from past data
+    // shouldn't double up with "Jay" from the seed.
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    for (const n of [...DEFAULT_ENGINEERS, ...saved]) {
+      const k = n.trim().toLowerCase();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      merged.push(n.trim());
+    }
+    merged.sort((a, b) => a.localeCompare(b));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("known_engineers", JSON.stringify(merged));
+    }
+    return merged;
   });
   useEffect(() => {
     if (typeof localStorage === "undefined") return;
@@ -430,16 +453,40 @@ export default function App() {
   }, [engineerName]);
   const rememberEngineer = useCallback((name: string) => {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed) return trimmed;
+    let resolved = trimmed;
     setKnownEngineers((prev) => {
-      if (prev.includes(trimmed)) return prev;
+      // Case-insensitive match against existing list — if the name is
+      // already there, keep the canonical casing and don't duplicate.
+      const existing = prev.find(
+        (n) => n.toLowerCase() === trimmed.toLowerCase(),
+      );
+      if (existing) {
+        resolved = existing;
+        return prev;
+      }
       const next = [...prev, trimmed].sort((a, b) => a.localeCompare(b));
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("known_engineers", JSON.stringify(next));
       }
       return next;
     });
+    return resolved;
   }, []);
+  const [addingEngineer, setAddingEngineer] = useState(false);
+  const [newEngineerDraft, setNewEngineerDraft] = useState("");
+  const confirmNewEngineer = useCallback(() => {
+    const trimmed = newEngineerDraft.trim();
+    if (!trimmed) {
+      setAddingEngineer(false);
+      setNewEngineerDraft("");
+      return;
+    }
+    const resolved = rememberEngineer(trimmed);
+    setEngineerName(resolved || trimmed);
+    setAddingEngineer(false);
+    setNewEngineerDraft("");
+  }, [newEngineerDraft, rememberEngineer]);
   // Per-finding feedback panel state. ``reportingId`` holds the issue
   // currently being reported (only one open at a time); ``reportedIds``
   // tracks which findings have feedback submitted in this session so the
@@ -1347,19 +1394,67 @@ export default function App() {
           <>
             <form className="upload-form" onSubmit={upload}>
               <div className="eng-row">
-                <input
-                  value={engineerName}
-                  onChange={(e) => setEngineerName(e.target.value)}
-                  placeholder="Your name (QC engineer)"
-                  className="si"
-                  list="engineer-list"
-                  autoComplete="off"
-                />
-                <datalist id="engineer-list">
-                  {knownEngineers.map((n) => (
-                    <option key={n} value={n} />
-                  ))}
-                </datalist>
+                {addingEngineer ? (
+                  <div className="eng-add">
+                    <input
+                      value={newEngineerDraft}
+                      onChange={(e) => setNewEngineerDraft(e.target.value)}
+                      placeholder="New engineer name"
+                      className="si"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          confirmNewEngineer();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setAddingEngineer(false);
+                          setNewEngineerDraft("");
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="eng-add-ok"
+                      onClick={confirmNewEngineer}
+                      disabled={!newEngineerDraft.trim()}
+                      title="Add engineer"
+                    >
+                      &#10003;
+                    </button>
+                    <button
+                      type="button"
+                      className="eng-add-cancel"
+                      onClick={() => {
+                        setAddingEngineer(false);
+                        setNewEngineerDraft("");
+                      }}
+                      title="Cancel"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={engineerName}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "__add__") {
+                        setAddingEngineer(true);
+                        setNewEngineerDraft("");
+                      } else {
+                        setEngineerName(v);
+                      }
+                    }}
+                    className="si"
+                  >
+                    <option value="">Your name (QC engineer)…</option>
+                    {knownEngineers.map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                    <option value="__add__">+ Add new engineer…</option>
+                  </select>
+                )}
               </div>
               <input
                 value={projName}
