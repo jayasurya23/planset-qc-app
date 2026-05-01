@@ -64,6 +64,120 @@ a { color: inherit; text-decoration: none; }
 .run-item-meta { font-size: 11px; color: rgba(255,255,255,.4); margin-top: 2px; }
 .run-item-eng { font-size: 11px; color: rgba(173,31,43,.85); font-weight: 600; margin-top: 2px; }
 .eng-row { display: flex; flex-direction: column; gap: 4px; }
+
+/* ════ Per-finding "Report a problem" ════ */
+.ib-report { color: rgba(255,255,255,.45); }
+.ib-report:hover { color: var(--brand); background: rgba(173,31,43,.08); }
+.ib-report-done { color: #3dd68c; background: rgba(61,214,140,.10); }
+.ib-report-done:hover { color: #3dd68c; background: rgba(61,214,140,.18); }
+.card-report {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(173,31,43,.35);
+  border-radius: 8px;
+  background: rgba(173,31,43,.04);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.report-head { font-weight: 600; font-size: 12px; color: var(--text); }
+.report-sub { font-weight: 400; color: var(--text3); }
+.report-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.report-tag {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text2);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .12s;
+}
+.report-tag:hover { border-color: var(--brand); color: var(--brand); }
+.report-tag-on { background: var(--brand); color: #fff; border-color: var(--brand); }
+.report-tag-on:hover { color: #fff; }
+.report-comment {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+.report-comment:focus { outline: none; border-color: var(--brand); }
+.report-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* ════ Run-level "How was this run?" banner ════ */
+.run-fb {
+  margin: 12px 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(173,31,43,.04);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.run-fb-rated { background: rgba(61,214,140,.06); border-color: rgba(61,214,140,.30); }
+.run-fb-rated-text { flex: 1; font-size: 13px; color: var(--text2); }
+.run-fb-quote { color: var(--text3); font-style: italic; }
+.run-fb-edit {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.run-fb-edit:hover { border-color: var(--brand); color: var(--brand); }
+.run-fb-prompt { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; }
+.run-fb-q { font-weight: 600; font-size: 13px; color: var(--text); }
+.run-fb-buttons { display: flex; gap: 4px; }
+.run-fb-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text2);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .12s;
+}
+.run-fb-btn:hover { border-color: var(--brand); }
+.run-fb-btn-on { background: var(--brand); color: #fff; border-color: var(--brand); }
+.run-fb-input {
+  flex: 1;
+  min-width: 200px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.run-fb-input:focus { outline: none; border-color: var(--brand); }
+.run-fb-submit {
+  background: var(--brand);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.run-fb-submit:disabled { opacity: .5; cursor: not-allowed; }
+.run-fb-submit:hover:not(:disabled) { background: var(--brand-dk); }
+.run-fb-dismiss {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.run-fb-dismiss:hover { color: var(--text); }
 .run-item-pills { display: flex; gap: 4px; margin-top: 6px; }
 .run-item-actions { display: flex; gap: 4px; margin-top: 6px; }
 .run-act { border: 0; background: rgba(255,255,255,.06); color: rgba(255,255,255,.5); border-radius: 6px; width: 26px; height: 26px; font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: all .12s; padding: 0; }

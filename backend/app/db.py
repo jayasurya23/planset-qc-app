@@ -84,8 +84,105 @@ def init_db() -> None:
             cur.execute(f"SELECT {col} FROM issues LIMIT 1")
         except sqlite3.OperationalError:
             cur.execute(ddl)
+    # Per-finding feedback distinct from override status — captures "the
+    # call was right but the location/citation/reason/category was wrong"
+    # signal that override comments alone can't capture.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS issue_feedback (
+            id TEXT PRIMARY KEY,
+            issue_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            engineer_name TEXT,
+            tags_json TEXT,
+            comment TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (issue_id) REFERENCES issues(id)
+        )
+        """
+    )
+    # Per-run "how was this run" rating: saved_time / even / cost_time
+    # plus optional comment. Insert-only so the rating history is preserved
+    # if engineers change their mind after more triage.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS run_feedback (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            engineer_name TEXT,
+            rating TEXT NOT NULL,
+            comment TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(id)
+        )
+        """
+    )
     conn.commit()
     conn.close()
+
+
+def insert_issue_feedback(fb: dict[str, Any]) -> None:
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO issue_feedback (
+            id, issue_id, run_id, engineer_name, tags_json, comment, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            fb["id"], fb["issue_id"], fb["run_id"], fb.get("engineer_name"),
+            json.dumps(fb.get("tags") or [], ensure_ascii=False),
+            fb.get("comment"),
+            fb["created_at"],
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def insert_run_feedback(fb: dict[str, Any]) -> None:
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO run_feedback (
+            id, run_id, engineer_name, rating, comment, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            fb["id"], fb["run_id"], fb.get("engineer_name"),
+            fb["rating"], fb.get("comment"),
+            fb["created_at"],
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_issue_run_id(issue_id: str) -> str | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT run_id FROM issues WHERE id = ?", (issue_id,)).fetchone()
+    conn.close()
+    return row["run_id"] if row else None
+
+
+def latest_run_feedback(run_id: str, engineer_name: str | None) -> dict[str, Any] | None:
+    """Most recent rating for this run by this engineer (or anonymous if name is None)."""
+    conn = get_conn()
+    if engineer_name:
+        row = conn.execute(
+            "SELECT * FROM run_feedback WHERE run_id = ? AND engineer_name = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (run_id, engineer_name),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM run_feedback WHERE run_id = ? AND engineer_name IS NULL "
+            "ORDER BY created_at DESC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:

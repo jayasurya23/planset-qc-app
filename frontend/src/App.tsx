@@ -2,12 +2,25 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import type {
   Issue,
   RunData,
+  RunFeedback,
+  RunRating,
   Status,
   CategorySummary,
   GeminiUsage,
   ProjectDetails,
   SupportingDoc,
 } from "./types";
+
+const REPORT_TAGS: Array<{ value: string; label: string }> = [
+  { value: "wrong_status", label: "Wrong status" },
+  { value: "wrong_page", label: "Wrong page" },
+  { value: "wrong_location", label: "Wrong location / bbox" },
+  { value: "wrong_source_citation", label: "Wrong source citation" },
+  { value: "wrong_reason", label: "Wrong reason / description" },
+  { value: "wrong_category", label: "Wrong category" },
+  { value: "rule_shouldnt_exist", label: "Rule shouldn't exist" },
+  { value: "other", label: "Other (see comment)" },
+];
 
 const API = `http://${window.location.hostname}:8000`;
 const STATUSES: Status[] = [
@@ -427,6 +440,95 @@ export default function App() {
       return next;
     });
   }, []);
+  // Per-finding feedback panel state. ``reportingId`` holds the issue
+  // currently being reported (only one open at a time); ``reportedIds``
+  // tracks which findings have feedback submitted in this session so the
+  // card can show a small confirmation.
+  const [reportingId, setReportingId] = useState<string | null>(null);
+  const [reportTags, setReportTags] = useState<Set<string>>(new Set());
+  const [reportComment, setReportComment] = useState<string>("");
+  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const openReport = useCallback((issueId: string) => {
+    setReportingId(issueId);
+    setReportTags(new Set());
+    setReportComment("");
+  }, []);
+  const closeReport = useCallback(() => {
+    setReportingId(null);
+    setReportTags(new Set());
+    setReportComment("");
+  }, []);
+  const toggleReportTag = useCallback((tag: string) => {
+    setReportTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }, []);
+  const submitIssueFeedback = useCallback(async () => {
+    if (!reportingId) return;
+    if (reportTags.size === 0 && !reportComment.trim()) return;
+    setReportSubmitting(true);
+    try {
+      const r = await fetch(`${API}/api/issues/${reportingId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tags: Array.from(reportTags),
+          comment: reportComment.trim() || null,
+          engineer_name: engineerName.trim() || null,
+        }),
+      });
+      if (!r.ok) {
+        alert(`Failed: ${await r.text()}`);
+        return;
+      }
+      setReportedIds((prev) => {
+        const next = new Set(prev);
+        next.add(reportingId);
+        return next;
+      });
+      closeReport();
+    } finally {
+      setReportSubmitting(false);
+    }
+  }, [reportingId, reportTags, reportComment, engineerName, closeReport]);
+
+  // Run-level feedback (saved time / even / cost time).
+  const [runFeedback, setRunFeedback] = useState<RunFeedback | null>(null);
+  const [runFeedbackLoaded, setRunFeedbackLoaded] = useState(false);
+  const [runFeedbackDismissed, setRunFeedbackDismissed] = useState(false);
+  const [runRatingDraft, setRunRatingDraft] = useState<RunRating | null>(null);
+  const [runRatingComment, setRunRatingComment] = useState<string>("");
+  const [runFeedbackSubmitting, setRunFeedbackSubmitting] = useState(false);
+  const submitRunFeedback = useCallback(async (
+    runId: string, rating: RunRating, comment: string,
+  ) => {
+    setRunFeedbackSubmitting(true);
+    try {
+      const r = await fetch(`${API}/api/runs/${runId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating,
+          comment: comment.trim() || null,
+          engineer_name: engineerName.trim() || null,
+        }),
+      });
+      if (!r.ok) {
+        alert(`Failed: ${await r.text()}`);
+        return;
+      }
+      const fb: RunFeedback = await r.json();
+      setRunFeedback(fb);
+      setRunRatingDraft(null);
+      setRunRatingComment("");
+    } finally {
+      setRunFeedbackSubmitting(false);
+    }
+  }, [engineerName]);
 
   const parseSupportingDocs = async (fileList: FileList) => {
     setSupportingLoading(true);
@@ -589,6 +691,37 @@ export default function App() {
     () => runs.find((r) => r.id === runId) ?? null,
     [runs, runId],
   );
+
+  // Fetch existing run-feedback whenever the run or engineer changes.
+  // If this engineer has already rated this run, the banner shows the
+  // recorded rating with an Edit link instead of the empty rate form.
+  useEffect(() => {
+    if (!runId) {
+      setRunFeedback(null);
+      setRunFeedbackLoaded(false);
+      setRunFeedbackDismissed(false);
+      return;
+    }
+    setRunFeedbackLoaded(false);
+    setRunFeedback(null);
+    setRunFeedbackDismissed(false);
+    setRunRatingDraft(null);
+    setRunRatingComment("");
+    let cancelled = false;
+    const params = new URLSearchParams();
+    if (engineerName.trim()) params.set("engineer_name", engineerName.trim());
+    fetch(`${API}/api/runs/${runId}/feedback?${params.toString()}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        setRunFeedback(d.feedback || null);
+        setRunFeedbackLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setRunFeedbackLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, [runId, engineerName]);
 
   const issues = useMemo(() => {
     if (!run) return [];
@@ -2344,6 +2477,93 @@ export default function App() {
               </div>
             </header>
 
+            {/* ── Run-level feedback banner ── */}
+            {runFeedbackLoaded && !runFeedbackDismissed && (
+              <div className={`run-fb ${runFeedback ? "run-fb-rated" : ""}`}>
+                {runFeedback && runRatingDraft === null ? (
+                  <>
+                    <div className="run-fb-rated-text">
+                      Rated{" "}
+                      <strong>
+                        {runFeedback.rating === "saved_time" && "🙂 saved time"}
+                        {runFeedback.rating === "even" && "😐 even"}
+                        {runFeedback.rating === "cost_time" && "😞 cost time"}
+                      </strong>
+                      {runFeedback.engineer_name && (
+                        <> by {runFeedback.engineer_name}</>
+                      )}
+                      {" — "}
+                      {new Date(runFeedback.created_at).toLocaleDateString()}
+                      {runFeedback.comment && (
+                        <span className="run-fb-quote">
+                          {" "}"{runFeedback.comment}"
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      className="run-fb-edit"
+                      onClick={() => {
+                        setRunRatingDraft(runFeedback.rating);
+                        setRunRatingComment(runFeedback.comment || "");
+                      }}
+                    >
+                      Edit
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="run-fb-prompt">
+                      <span className="run-fb-q">How was this run?</span>
+                      <div className="run-fb-buttons">
+                        {([
+                          ["saved_time", "🙂 Saved time"],
+                          ["even", "😐 About even"],
+                          ["cost_time", "😞 Cost time"],
+                        ] as Array<[RunRating, string]>).map(
+                          ([val, label]) => (
+                            <button
+                              key={val}
+                              className={`run-fb-btn ${runRatingDraft === val ? "run-fb-btn-on" : ""}`}
+                              onClick={() => setRunRatingDraft(val)}
+                            >
+                              {label}
+                            </button>
+                          ),
+                        )}
+                      </div>
+                      <input
+                        className="run-fb-input"
+                        placeholder="Optional: one specific thing (saved time on cover sheet, lost time on E-110, …)"
+                        value={runRatingComment}
+                        onChange={(e) => setRunRatingComment(e.target.value)}
+                      />
+                      <button
+                        className="run-fb-submit"
+                        disabled={
+                          runFeedbackSubmitting || runRatingDraft === null
+                        }
+                        onClick={() =>
+                          runRatingDraft &&
+                          void submitRunFeedback(
+                            run.id, runRatingDraft, runRatingComment,
+                          )
+                        }
+                      >
+                        {runFeedbackSubmitting ? "Sending..." : "Submit"}
+                      </button>
+                      <button
+                        className="run-fb-dismiss"
+                        title="Hide for now (won't ask again until next run)"
+                        onClick={() => setRunFeedbackDismissed(true)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* ── Score cards ── */}
             <div className="scores">
               <div
@@ -3033,6 +3253,21 @@ export default function App() {
                             >
                               &#9998;
                             </button>
+                            <button
+                              className={`ib ib-report ${reportedIds.has(issue.id) ? "ib-report-done" : ""}`}
+                              onClick={() =>
+                                reportingId === issue.id
+                                  ? closeReport()
+                                  : openReport(issue.id)
+                              }
+                              title={
+                                reportedIds.has(issue.id)
+                                  ? "Feedback submitted — click to add more"
+                                  : "Report a problem with this finding (location, citation, reason, etc.)"
+                              }
+                            >
+                              &#9873;
+                            </button>
                           </div>
                         </div>
 
@@ -3166,6 +3401,60 @@ export default function App() {
                             >
                               Cancel
                             </button>
+                          </div>
+                        )}
+
+                        {/* Report-a-problem panel */}
+                        {reportingId === issue.id && (
+                          <div className="card-report">
+                            <div className="report-head">
+                              Report a problem with this finding
+                              <span className="report-sub">
+                                {" "}— for the rule itself, not the QC status
+                              </span>
+                            </div>
+                            <div className="report-tags">
+                              {REPORT_TAGS.map((t) => {
+                                const on = reportTags.has(t.value);
+                                return (
+                                  <button
+                                    key={t.value}
+                                    type="button"
+                                    className={`report-tag ${on ? "report-tag-on" : ""}`}
+                                    onClick={() => toggleReportTag(t.value)}
+                                  >
+                                    {on ? "✓ " : ""}{t.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <textarea
+                              className="report-comment"
+                              rows={2}
+                              placeholder="Optional: details (e.g. 'bbox is on row 5 but the value is on row 4')"
+                              value={reportComment}
+                              onChange={(e) => setReportComment(e.target.value)}
+                            />
+                            <div className="report-actions">
+                              <button
+                                className="btn-add"
+                                onClick={submitIssueFeedback}
+                                disabled={
+                                  reportSubmitting ||
+                                  (reportTags.size === 0 &&
+                                    !reportComment.trim())
+                                }
+                              >
+                                {reportSubmitting ? "Sending..." : "Submit"}
+                              </button>
+                              <button
+                                className="btn-cancel"
+                                onClick={closeReport}
+                                disabled={reportSubmitting}
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>

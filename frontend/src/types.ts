@@ -132,6 +132,27 @@ export interface ProjectDetails {
   special_notes: string
 }
 
+export type RunRating = 'saved_time' | 'even' | 'cost_time'
+
+export interface RunFeedback {
+  id: string
+  run_id: string
+  engineer_name?: string | null
+  rating: RunRating
+  comment?: string | null
+  created_at: string
+}
+
+export interface IssueFeedback {
+  id: string
+  issue_id: string
+  run_id: string
+  engineer_name?: string | null
+  tags: string[]
+  comment?: string | null
+  created_at: string
+}
+
 export interface SupportingDoc {
   filename: string
   doc_type: string

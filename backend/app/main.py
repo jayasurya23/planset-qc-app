@@ -14,7 +14,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .analyzer import analyze_pdf, make_issue, utc_now
-from .db import DATA_DIR, delete_run, get_run, init_db, insert_manual_issue, insert_run, list_runs, update_issue
+from .db import (
+    DATA_DIR, delete_run, get_issue_run_id, get_run, init_db,
+    insert_issue_feedback, insert_manual_issue, insert_run,
+    insert_run_feedback, latest_run_feedback, list_runs, update_issue,
+)
 from .exporter import export_due_diligence, export_run_to_excel
 from .progress import clear_progress, get_progress, set_progress
 
@@ -90,6 +94,21 @@ class ManualIssueCreate(BaseModel):
     status: str = "Needs Review"
     page_number: int | None = None
     evidence: str | None = None
+
+
+class IssueFeedbackCreate(BaseModel):
+    tags: list[str] = []
+    comment: str | None = None
+    engineer_name: str | None = None
+
+
+class RunFeedbackCreate(BaseModel):
+    rating: str  # "saved_time" | "even" | "cost_time"
+    comment: str | None = None
+    engineer_name: str | None = None
+
+
+_VALID_RATINGS = {"saved_time", "even", "cost_time"}
 
 
 @app.get("/api/health")
@@ -607,6 +626,57 @@ def api_create_manual_issue(payload: ManualIssueCreate) -> dict:
     )
     insert_manual_issue(issue)
     return issue
+
+
+@app.post("/api/issues/{issue_id}/feedback")
+def api_create_issue_feedback(issue_id: str, payload: IssueFeedbackCreate) -> dict:
+    if not (payload.tags or (payload.comment or "").strip()):
+        raise HTTPException(
+            status_code=400, detail="Provide at least one tag or a comment")
+    fb = {
+        "id": str(uuid.uuid4()),
+        "issue_id": issue_id,
+        "run_id": "",
+        "engineer_name": (payload.engineer_name or "").strip() or None,
+        "tags": [t for t in payload.tags if t and isinstance(t, str)],
+        "comment": (payload.comment or "").strip() or None,
+        "created_at": utc_now(),
+    }
+    run_id = get_issue_run_id(issue_id)
+    if not run_id:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    fb["run_id"] = run_id
+    insert_issue_feedback(fb)
+    return fb
+
+
+@app.post("/api/runs/{run_id}/feedback")
+def api_create_run_feedback(run_id: str, payload: RunFeedbackCreate) -> dict:
+    if payload.rating not in _VALID_RATINGS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid rating {payload.rating!r}; expected one of {sorted(_VALID_RATINGS)}",
+        )
+    if not get_run(run_id):
+        raise HTTPException(status_code=404, detail="Run not found")
+    fb = {
+        "id": str(uuid.uuid4()),
+        "run_id": run_id,
+        "engineer_name": (payload.engineer_name or "").strip() or None,
+        "rating": payload.rating,
+        "comment": (payload.comment or "").strip() or None,
+        "created_at": utc_now(),
+    }
+    insert_run_feedback(fb)
+    return fb
+
+
+@app.get("/api/runs/{run_id}/feedback")
+def api_get_run_feedback(run_id: str, engineer_name: str | None = None) -> dict:
+    """Most recent rating for this run by this engineer (so the UI can avoid
+    re-prompting people who've already rated)."""
+    fb = latest_run_feedback(run_id, (engineer_name or "").strip() or None)
+    return {"feedback": fb}
 
 
 @app.get("/api/due-diligence-template")
