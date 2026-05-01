@@ -45,6 +45,12 @@ a { color: inherit; text-decoration: none; }
 .si { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: #fff; border-radius: 8px; padding: 8px 12px; font-size: 13px; width: 100%; }
 .si::placeholder { color: rgba(255,255,255,.3); }
 .si::file-selector-button { background: rgba(255,255,255,.1); color: #fff; border: 0; border-radius: 6px; padding: 4px 10px; margin-right: 8px; cursor: pointer; font-size: 12px; }
+/* The OS-rendered <select> dropdown popup ignores the parent's background.
+   Without explicit option styling, color:#fff inherits onto the popup and
+   we get white-on-white. Force a dark popup palette for any .si <select>. */
+select.si option, select.si optgroup { background: var(--dark2); color: #fff; }
+/* Belt-and-braces: any <select> inside the dark sidebar gets the same. */
+.side select option, .side select optgroup { background: var(--dark2); color: #fff; }
 .btn-upload { background: var(--brand); color: #fff; border: 0; border-radius: 8px; padding: 9px; font-weight: 700; font-size: 13px; cursor: pointer; transition: background .15s; }
 .btn-upload:hover { background: var(--brand-dk); }
 .btn-upload:disabled { opacity: .5; cursor: not-allowed; }
