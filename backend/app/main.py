@@ -378,6 +378,7 @@ def _run_analysis_bg(
     original_filename: str, pd: dict | None, use_deep: bool = True,
     supporting_docs: list[dict] | None = None,
     design_stage: str | None = None,
+    engineer_name: str | None = None,
 ) -> None:
     """Run analysis in a background thread, updating progress along the way."""
     try:
@@ -394,6 +395,8 @@ def _run_analysis_bg(
             supporting_docs=supporting_docs,
             design_stage=design_stage,
         )
+        if engineer_name:
+            run["engineer_name"] = engineer_name
 
         set_progress(upload_id, "saving", "Saving results...", 95)
         insert_run(run, issues)
@@ -419,6 +422,7 @@ async def api_analyze(
     use_deep: str | None = Form("true"),
     supporting_docs: str | None = Form(None),
     design_stage: str | None = Form(None),
+    engineer_name: str | None = Form(None),
     file: UploadFile = File(...),
 ) -> dict:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -481,10 +485,12 @@ async def api_analyze(
             detail=f"Invalid design_stage {stage!r}; expected one of {sorted(_VALID_STAGES)}",
         )
 
+    eng = (engineer_name or "").strip() or None
+
     # Launch in background thread — return upload_id immediately
     t = threading.Thread(
         target=_run_analysis_bg,
-        args=(upload_id, pdf_path, project_name, file.filename, pd, deep_flag, sd, stage),
+        args=(upload_id, pdf_path, project_name, file.filename, pd, deep_flag, sd, stage, eng),
         daemon=True,
     )
     t.start()
@@ -530,7 +536,11 @@ def api_delete_run(run_id: str) -> dict:
 
 
 @app.post("/api/runs/{run_id}/reanalyze")
-async def api_reanalyze(run_id: str, use_deep: str | None = Form("true")) -> dict:
+async def api_reanalyze(
+    run_id: str,
+    use_deep: str | None = Form("true"),
+    engineer_name: str | None = Form(None),
+) -> dict:
     old_run = get_run(run_id)
     if not old_run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -557,9 +567,12 @@ async def api_reanalyze(run_id: str, use_deep: str | None = Form("true")) -> dic
 
     deep_flag = (use_deep or "true").strip().lower() not in ("false", "0", "no", "off")
 
+    eng = (engineer_name or "").strip() or old_run.get("engineer_name")
+
     t = threading.Thread(
         target=_run_analysis_bg,
-        args=(upload_id, new_pdf_path, project_name, original_filename, None, deep_flag),
+        args=(upload_id, new_pdf_path, project_name, original_filename, None,
+              deep_flag, None, None, eng),
         daemon=True,
     )
     t.start()

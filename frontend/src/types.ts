@@ -175,4 +175,5 @@ export interface RunData {
   categories: CategorySummary[]
   issues: Issue[]
   project_details?: Partial<ProjectDetails> | null
+  engineer_name?: string | null
 }

@@ -3198,21 +3198,6 @@ rules:
   - NEC 2023
   min_matches: 1
   search_scope: cover
-- key: v4_e_002_wire_stranding_note
-  category: E-002
-  title: Wire stranding note
-  description: 'NEC 690.31(E) stranding note present. Flexible stranding note for tracker projects.
-
-    NOTE: another thing to chek is if ther is any conflicting info in the notes verus the client spec'
-  source: NEC 690.31(E) / tracker manual
-  severity: medium
-  check_type: keyword
-  confidence: 0.75
-  v4_status: V3
-  v4_row: 346
-  keywords:
-  - NEC 690.31(E)
-  min_matches: 1
 - key: v4_e_002_conductor_color_convention
   category: E-002
   title: Conductor color convention
@@ -3824,19 +3809,6 @@ rules:
   confidence: 0.75
   v4_status: V3
   v4_row: 414
-- key: v4_e_100_xfmr_z_and_x_r_shown
-  category: E-100
-  title: XFMR %Z and X/R shown
-  description: '%Z and X/R on E-100 = approved submittal.'
-  source: XFMR submittal
-  severity: medium
-  check_type: keyword
-  confidence: 0.75
-  v4_status: V3
-  v4_row: 415
-  keywords:
-  - X/R
-  min_matches: 1
 - key: v4_e_100_xfmr_bil_hv_and_lv_shown
   category: E-100
   title: XFMR BIL (HV and LV) shown
@@ -3950,21 +3922,6 @@ rules:
   confidence: 0.75
   v4_status: V3
   v4_row: 425
-- key: v4_e_100_cpt_shown_when_oem_diagram_requires
-  category: E-100
-  title: CPT shown when OEM diagram requires
-  description: CPT on E-100 when OEM switchgear wiring diagram shows internal CPT. Confirmed Kipp missing
-    CPT.
-  source: OEM switchgear wiring diagram
-  severity: medium
-  check_type: keyword
-  confidence: 0.75
-  v4_status: V3
-  v4_row: 426
-  keywords:
-  - CPT
-  - CONTROL POWER
-  min_matches: 1
 - key: v4_e_100_all_customer_poles_with_device_types_and_ids
   category: E-100
   title: All customer poles with device types and IDs

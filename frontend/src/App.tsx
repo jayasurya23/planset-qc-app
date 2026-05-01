@@ -390,6 +390,43 @@ export default function App() {
   const [supportingDocs, setSupportingDocs] = useState<SupportingDoc[]>([]);
   const [supportingLoading, setSupportingLoading] = useState(false);
   const [supportingMsg, setSupportingMsg] = useState("");
+  const [plansetFile, setPlansetFile] = useState<File | null>(null);
+  const [plansetDragOver, setPlansetDragOver] = useState(false);
+  const [supportingDragOver, setSupportingDragOver] = useState(false);
+  const [pdDragOver, setPdDragOver] = useState(false);
+  // Engineer name (who's running this QC). Persisted in localStorage so the
+  // browser remembers the user; the list of past names feeds a <datalist>
+  // so engineers can pick from a dropdown of colleagues already on file.
+  const [engineerName, setEngineerName] = useState<string>(() => {
+    if (typeof localStorage === "undefined") return "";
+    return localStorage.getItem("engineer_name") || "";
+  });
+  const [knownEngineers, setKnownEngineers] = useState<string[]>(() => {
+    if (typeof localStorage === "undefined") return [];
+    try {
+      const raw = localStorage.getItem("known_engineers");
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem("engineer_name", engineerName);
+  }, [engineerName]);
+  const rememberEngineer = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setKnownEngineers((prev) => {
+      if (prev.includes(trimmed)) return prev;
+      const next = [...prev, trimmed].sort((a, b) => a.localeCompare(b));
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("known_engineers", JSON.stringify(next));
+      }
+      return next;
+    });
+  }, []);
 
   const parseSupportingDocs = async (fileList: FileList) => {
     setSupportingLoading(true);
@@ -430,6 +467,37 @@ export default function App() {
 
   const removeSupportingDoc = (filename: string) => {
     setSupportingDocs((prev) => prev.filter((d) => d.filename !== filename));
+  };
+
+  // Convert a DataTransferItemList/FileList into a plain File[] and filter
+  // by accept patterns. ``accept`` is the same comma-separated list the
+  // <input accept=…> attribute takes (e.g. ".pdf,.xlsx,application/pdf").
+  const filesFromDrop = (
+    dt: DataTransfer | null,
+    accept: string,
+  ): File[] => {
+    if (!dt?.files?.length) return [];
+    const patterns = accept
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    const matches = (f: File) => {
+      if (!patterns.length) return true;
+      const name = f.name.toLowerCase();
+      const type = (f.type || "").toLowerCase();
+      return patterns.some((p) => {
+        if (p.startsWith(".")) return name.endsWith(p);
+        if (p.endsWith("/*")) return type.startsWith(p.slice(0, -1));
+        return type === p;
+      });
+    };
+    return Array.from(dt.files).filter(matches);
+  };
+
+  const filesToList = (files: File[]): FileList => {
+    const dt = new DataTransfer();
+    for (const f of files) dt.items.add(f);
+    return dt.files;
   };
 
   const parseDocuments = async (fileList: FileList) => {
@@ -824,16 +892,19 @@ export default function App() {
   const upload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
-    const inp = form.elements.namedItem("pdf") as HTMLInputElement | null;
-    if (!inp?.files?.[0]) return;
+    if (!plansetFile) return;
     const fd = new FormData();
-    fd.append("file", inp.files[0]);
+    fd.append("file", plansetFile);
     if (projName.trim()) fd.append("project_name", projName.trim());
     if (pdHasValues) fd.append("project_details", JSON.stringify(pd));
     fd.append("use_deep", deepMode ? "true" : "false");
     if (designStage) fd.append("design_stage", designStage);
     if (supportingDocs.length > 0) {
       fd.append("supporting_docs", JSON.stringify(supportingDocs));
+    }
+    if (engineerName.trim()) {
+      fd.append("engineer_name", engineerName.trim());
+      rememberEngineer(engineerName);
     }
     setUploading(true);
     setProgress("Uploading...");
@@ -857,6 +928,7 @@ export default function App() {
       setStatusFilter("all");
       form.reset();
       setProjName("");
+      setPlansetFile(null);
       setTimeout(() => {
         setProgress("");
         setProgressPct(0);
@@ -894,6 +966,10 @@ export default function App() {
     try {
       const rfd = new FormData();
       rfd.append("use_deep", deepMode ? "true" : "false");
+      if (engineerName.trim()) {
+        rfd.append("engineer_name", engineerName.trim());
+        rememberEngineer(engineerName);
+      }
       const r = await fetch(`${API}/api/runs/${id}/reanalyze`, {
         method: "POST",
         body: rfd,
@@ -1137,18 +1213,92 @@ export default function App() {
         {sideOpen && (
           <>
             <form className="upload-form" onSubmit={upload}>
+              <div className="eng-row">
+                <input
+                  value={engineerName}
+                  onChange={(e) => setEngineerName(e.target.value)}
+                  placeholder="Your name (QC engineer)"
+                  className="si"
+                  list="engineer-list"
+                  autoComplete="off"
+                />
+                <datalist id="engineer-list">
+                  {knownEngineers.map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+              </div>
               <input
                 value={projName}
                 onChange={(e) => setProjName(e.target.value)}
                 placeholder="Project name"
                 className="si"
               />
-              <input
-                name="pdf"
-                type="file"
-                accept="application/pdf"
-                className="si"
-              />
+              <label
+                className={`planset-drop ${plansetDragOver ? "planset-drop-over" : ""} ${plansetFile ? "planset-drop-filled" : ""}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+                  setPlansetDragOver(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPlansetDragOver(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPlansetDragOver(false);
+                  const accepted = filesFromDrop(
+                    e.dataTransfer,
+                    "application/pdf,.pdf",
+                  );
+                  if (accepted[0]) setPlansetFile(accepted[0]);
+                }}
+              >
+                <input
+                  name="pdf"
+                  type="file"
+                  accept="application/pdf"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setPlansetFile(f);
+                  }}
+                />
+                {plansetFile ? (
+                  <span className="planset-drop-row">
+                    <span className="planset-drop-icon">&#128196;</span>
+                    <span
+                      className="planset-drop-name"
+                      title={plansetFile.name}
+                    >
+                      {plansetFile.name}
+                    </span>
+                    <button
+                      type="button"
+                      className="planset-drop-clear"
+                      title="Remove"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setPlansetFile(null);
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ) : (
+                  <span className="planset-drop-row">
+                    <span className="planset-drop-icon">&#11015;</span>
+                    <span className="planset-drop-text">
+                      Drop planset PDF here or click to browse
+                    </span>
+                  </span>
+                )}
+              </label>
               <button
                 type="button"
                 className={`btn-pd-toggle ${pdHasValues ? "btn-pd-active" : ""}`}
@@ -1190,12 +1340,42 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <div className="sd-box">
+              <div
+                className={`sd-box ${supportingDragOver ? "sd-box-over" : ""}`}
+                onDragOver={(e) => {
+                  if (supportingLoading) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+                  setSupportingDragOver(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSupportingDragOver(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSupportingDragOver(false);
+                  if (supportingLoading) return;
+                  const accepted = filesFromDrop(
+                    e.dataTransfer,
+                    ".pdf,.xlsx,.xls,.csv,.txt,.eml,.msg,.png,.jpg,.jpeg",
+                  );
+                  if (accepted.length) {
+                    parseSupportingDocs(filesToList(accepted));
+                  }
+                }}
+              >
                 <div className="sd-label">
                   Supporting documents{" "}
                   <span className="sd-hint">
                     (CESIR, PVSyst, ampacity, …)
                   </span>
+                </div>
+                <div className="sd-drop-hint">
+                  Drop files here or use the picker below
                 </div>
                 <input
                   type="file"
@@ -1276,6 +1456,9 @@ export default function App() {
                       <> &middot; <em>mini</em></>
                     )}
                   </div>
+                  {r.engineer_name && (
+                    <div className="run-item-eng">by {r.engineer_name}</div>
+                  )}
                   <div className="run-item-pills">
                     <span className="pill pill-p">
                       {r.issues
@@ -1348,7 +1531,32 @@ export default function App() {
             {/* Document upload for auto-fill */}
             <div className="pd-upload-zone">
               <label
-                className={`pd-dropzone ${parsing ? "pd-dropzone-busy" : ""}`}
+                className={`pd-dropzone ${parsing ? "pd-dropzone-busy" : ""} ${pdDragOver ? "pd-dropzone-over" : ""}`}
+                onDragOver={(e) => {
+                  if (parsing) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+                  setPdDragOver(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPdDragOver(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPdDragOver(false);
+                  if (parsing) return;
+                  const accepted = filesFromDrop(
+                    e.dataTransfer,
+                    ".pdf,.png,.jpg,.jpeg,.txt,.eml,.csv,.docx,.doc,.xlsx,.xls",
+                  );
+                  if (accepted.length) {
+                    parseDocuments(filesToList(accepted));
+                  }
+                }}
               >
                 <input
                   type="file"

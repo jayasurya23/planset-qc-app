@@ -32,7 +32,8 @@ def init_db() -> None:
             summary_json TEXT NOT NULL,
             status_counts_json TEXT NOT NULL,
             categories_json TEXT NOT NULL,
-            project_details_json TEXT
+            project_details_json TEXT,
+            engineer_name TEXT
         )
         """
     )
@@ -41,6 +42,10 @@ def init_db() -> None:
         cur.execute("SELECT project_details_json FROM runs LIMIT 1")
     except sqlite3.OperationalError:
         cur.execute("ALTER TABLE runs ADD COLUMN project_details_json TEXT")
+    try:
+        cur.execute("SELECT engineer_name FROM runs LIMIT 1")
+    except sqlite3.OperationalError:
+        cur.execute("ALTER TABLE runs ADD COLUMN engineer_name TEXT")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS issues (
@@ -92,8 +97,8 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
             id, project_name, original_filename, created_at,
             pdf_path, page_count, summary_json,
             status_counts_json, categories_json,
-            project_details_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            project_details_json, engineer_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run["id"],
@@ -108,6 +113,7 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
             json.dumps(run.get("project_details"),
                        ensure_ascii=False)
             if run.get("project_details") else None,
+            run.get("engineer_name"),
         ),
     )
     cur.executemany(
