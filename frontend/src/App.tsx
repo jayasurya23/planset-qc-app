@@ -22,7 +22,13 @@ const REPORT_TAGS: Array<{ value: string; label: string }> = [
   { value: "other", label: "Other (see comment)" },
 ];
 
-const API = `http://${window.location.hostname}:8000`;
+// In production the built SPA is served by the FastAPI backend itself, so the
+// API is same-origin (""). During local Vite dev (port 5173) the UI is served
+// separately, so talk to the backend on :8000.
+const API =
+  window.location.port === "5173"
+    ? `http://${window.location.hostname}:8000`
+    : "";
 const STATUSES: Status[] = [
   "Pass",
   "Fail",
