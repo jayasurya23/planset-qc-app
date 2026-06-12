@@ -91,6 +91,16 @@ are all supported (DOCX paragraphs and table cells, in document order).
 - **Windows packaging plan:** PyInstaller for backend + `npm run build`
   for frontend served by FastAPI, launched via a small starter script
 
+## Cloud deployment (Azure)
+
+For shared office use, the app deploys as a single Linux container (FastAPI
+serves the built React UI) to Azure Container Apps, with CI/CD via GitHub
+Actions and org-only sign-in via Microsoft Entra. Persistent data (SQLite,
+uploads, artifacts) lives on a mounted Azure Files share; the app runs as a
+single always-on replica. See [DEPLOYMENT.md](DEPLOYMENT.md) for the full
+step-by-step runbook. The container build and infrastructure live in
+[Dockerfile](Dockerfile) and [infra/](infra/main.bicep).
+
 ---
 
 ## Folder structure

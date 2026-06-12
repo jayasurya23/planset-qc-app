@@ -1,0 +1,21 @@
+# VCS / tooling
+.git/
+.github/
+.claude/
+
+# Python
+backend/.venv/
+backend/.env
+**/__pycache__/
+**/*.pyc
+
+# Node (rebuilt inside the image)
+frontend/node_modules/
+frontend/dist/
+
+# Local app data and generated artifacts (large; never ship in the image)
+backend/data/
+
+# Infra & docs (not needed at runtime)
+infra/
+**/*.md

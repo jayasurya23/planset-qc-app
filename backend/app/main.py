@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -705,3 +706,13 @@ def api_export_run(run_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=out_path.name,
     )
+
+
+# ── Serve the built React SPA (single-container deployment) ─────────────────
+# When FRONTEND_DIST points at a built frontend (set in the Docker image), mount
+# it at "/" so one container serves both the API and the UI. Mounted last so all
+# /api and /artifacts routes above take precedence. Unset for local dev, where
+# Vite serves the UI on :5173 and talks to this API on :8000.
+_frontend_dist = os.getenv("FRONTEND_DIST")
+if _frontend_dist and Path(_frontend_dist).is_dir():
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
