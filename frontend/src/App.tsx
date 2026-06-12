@@ -88,6 +88,33 @@ function pdfPageUrl(run: RunData, pg?: number | null) {
   return pg ? `${artifactUrl(run.pdf_path)}#page=${pg}` : null;
 }
 
+function relativeDate(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const startOfDay = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+  if (Number.isNaN(diff)) return "";
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return `${diff}d ago`;
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(undefined, opts);
+}
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatDuration(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return "—";
   if (sec < 60) return `${sec.toFixed(sec < 10 ? 1 : 0)}s`;
@@ -396,6 +423,8 @@ export default function App() {
     window.history.replaceState({}, "", url.toString());
   }, [compareRunId]);
   const [sideOpen, setSideOpen] = useState(true);
+  const [mobileNav, setMobileNav] = useState(false);
+  const [runSearch, setRunSearch] = useState("");
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [showProjDetails, setShowProjDetails] = useState(false);
   const [pd, setPd] = useState<Partial<ProjectDetails>>({});
@@ -1371,6 +1400,16 @@ export default function App() {
     await refresh(run.id);
   };
 
+  const runQuery = runSearch.trim().toLowerCase();
+  const filteredRuns = runQuery
+    ? runs.filter(
+        (r) =>
+          (r.project_name || "").toLowerCase().includes(runQuery) ||
+          (r.original_filename || "").toLowerCase().includes(runQuery) ||
+          (r.engineer_name || "").toLowerCase().includes(runQuery),
+      )
+    : runs;
+
   // ── Render ──
   return (
     <div className="app">
@@ -1378,8 +1417,21 @@ export default function App() {
       {uploading && (
         <WaitingAnimation pct={progressPct} label={progress} />
       )}
+      {/* ── Mobile nav toggle + backdrop ── */}
+      <button
+        className="nav-hamburger"
+        onClick={() => setMobileNav(true)}
+        aria-label="Open menu"
+      >
+        &#9776;
+      </button>
+      {mobileNav && (
+        <div className="side-backdrop" onClick={() => setMobileNav(false)} />
+      )}
       {/* ── Sidebar ── */}
-      <aside className={`side ${sideOpen ? "" : "collapsed"}`}>
+      <aside
+        className={`side ${sideOpen ? "" : "collapsed"} ${mobileNav ? "mobile-open" : ""}`}
+      >
         <div className="side-head">
           <div className="brand">
             <div className="brand-mark">CE</div>
@@ -1669,8 +1721,22 @@ export default function App() {
             </form>
 
             <div className="run-list">
-              <div className="run-list-title">Analysis Runs</div>
-              {runs.map((r) => (
+              <div className="run-list-head">
+                <span className="run-list-title">Analysis Runs</span>
+                {runs.length > 0 && (
+                  <span className="run-list-count">{runs.length}</span>
+                )}
+              </div>
+              {runs.length > 5 && (
+                <input
+                  className="run-search"
+                  type="text"
+                  placeholder={"Search runs…"}
+                  value={runSearch}
+                  onChange={(e) => setRunSearch(e.target.value)}
+                />
+              )}
+              {filteredRuns.map((r) => (
                 <div
                   key={r.id}
                   className={`run-item ${r.id === runId ? "active" : ""}`}
@@ -1678,9 +1744,16 @@ export default function App() {
                     void refresh(r.id);
                     setCat("All");
                     setStatusFilter("all");
+                    setMobileNav(false);
                   }}
                 >
-                  <div className="run-item-name">{r.project_name}</div>
+                  <div
+                    className="run-item-name"
+                    title={`${r.project_name}\n${formatDateTime(r.created_at)}`}
+                  >
+                    {r.project_name}
+                  </div>
+                  <div className="run-item-date">{relativeDate(r.created_at)}</div>
                   <div className="run-item-meta">
                     {r.original_filename}
                     {r.summary?.duration_seconds != null && (
@@ -1691,7 +1764,7 @@ export default function App() {
                     )}
                   </div>
                   {r.engineer_name && (
-                    <div className="run-item-eng">by {r.engineer_name}</div>
+                    <div className="run-item-eng">{r.engineer_name}</div>
                   )}
                   <div className="run-item-pills">
                     <span className="pill pill-p">
@@ -1737,6 +1810,9 @@ export default function App() {
                 </div>
               ))}
               {!runs.length && <div className="dim">No runs yet</div>}
+              {runs.length > 0 && !filteredRuns.length && (
+                <div className="dim">No runs match &ldquo;{runSearch}&rdquo;</div>
+              )}
             </div>
           </>
         )}
@@ -2476,7 +2552,7 @@ export default function App() {
                 <h1 className="hdr-title">{run.project_name}</h1>
                 <div className="hdr-meta">
                   {run.original_filename} &middot; {run.page_count} pages
-                  &middot; {new Date(run.created_at).toLocaleDateString()}
+                  &middot; {formatDateTime(run.created_at)}
                   &middot;{" "}
                   <code
                     className="run-id"
