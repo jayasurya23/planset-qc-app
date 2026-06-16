@@ -413,6 +413,25 @@ def _is_garbage_label(norm: str) -> bool:
     return False
 
 
+# Title-block / sheet-identity / administrative labels are NOT cross-sheet
+# value-consistency targets — sheet name/number/title, revision, date, scale,
+# drawn/checked-by, project/engineer/EPC/logo, SOV, etc. legitimately DIFFER
+# from sheet to sheet (or are covered by the dedicated Title Block category).
+# Excluding them removes a whole class of false positives (e.g. flagging the
+# title-block "SHEET NAME" for differing across sheets).
+_METADATA_LABEL_RE = re.compile(
+    r"\b(SHEET|SHT|DWG|DRAWING|REV|REVISION|DATE|SCALE|NTS|DRAWN|CHECKED|"
+    r"APPROVED|DESIGNED|DESIGNER|ENGINEER|PROJECT|CLIENT|OWNER|EPC|LOGO|"
+    r"STAMP|SEAL|FILE\s*NAME|FILENAME|PAGE|SOV|TITLE\s*BLOCK)\b"
+)
+
+
+def _is_metadata_label(norm: str) -> bool:
+    """True for title-block / administrative labels that are not cross-sheet
+    value-consistency targets (they differ by design)."""
+    return bool(_METADATA_LABEL_RE.search(norm))
+
+
 # A category → pseudo-field used so the right tolerance / normalizer applies in
 # consistency.normalize_value (which keys behavior off the field name).
 def _pseudo_field(category: str) -> str:
@@ -451,7 +470,7 @@ def cross_check_annotations(annotations: list[dict]) -> list[dict]:
     by_label: dict[str, dict] = {}
     for ann in annotations:
         norm = _norm_label(ann.get("label", ""))
-        if _is_garbage_label(norm):
+        if _is_garbage_label(norm) or _is_metadata_label(norm):
             continue
         slot = by_label.setdefault(
             norm, {"sightings": [], "categories": {}, "display": ann.get("label")}
@@ -476,6 +495,23 @@ def cross_check_annotations(annotations: list[dict]) -> list[dict]:
 
         category = max(slot["categories"].items(), key=lambda kv: kv[1])[0]
         pseudo = _pseudo_field(category)
+
+        # Multi-instance guard: a label carrying MULTIPLE distinct values on the
+        # SAME page is a per-instance label (e.g. FLA for different equipment, or
+        # several breaker ratings) — not one cross-sheet value. Skip it.
+        per_page: dict = {}
+        for s in sightings:
+            pn = s.get("page_number")
+            if pn is None:
+                continue
+            k, _m = consistency.normalize_value(pseudo, s.get("value"))
+            per_page.setdefault(pn, set()).add(k)
+        if any(len(vals) >= 2 for vals in per_page.values()):
+            log.info(
+                "diagram-consistency: '%s' skipped — multi-instance label "
+                "(multiple values on one sheet)", slot["display"] or norm,
+            )
+            continue
 
         groups = consistency._group_sightings(pseudo, sightings)
         if len(groups) < 2:

@@ -190,6 +190,47 @@ def test_garbage_label_ignored() -> None:
           f"got {len(findings)}")
 
 
+def test_metadata_label_ignored() -> None:
+    print("cross_check_annotations — title-block metadata ignored:")
+    annotations = [
+        {"label": "Sheet name", "value": "THREE LINE DIAGRAM - SHEET 1",
+         "category": "label", "page_number": 8, "sheet_number": "E-105"},
+        {"label": "Sheet name", "value": "Single Line Diagram - Sheet 1",
+         "category": "label", "page_number": 6, "sheet_number": "E-100"},
+        {"label": "Sheet number", "value": "E-105", "category": "label",
+         "page_number": 8, "sheet_number": "E-105"},
+        {"label": "Sheet number", "value": "E-100", "category": "label",
+         "page_number": 6, "sheet_number": "E-100"},
+        {"label": "Revision", "value": "A", "category": "label",
+         "page_number": 8, "sheet_number": "E-105"},
+        {"label": "Revision", "value": "B", "category": "label",
+         "page_number": 6, "sheet_number": "E-100"},
+    ]
+    findings = cross_check_annotations(annotations)
+    check("no finding for sheet name / number / revision metadata",
+          len(findings) == 0,
+          f"got {len(findings)}: {[f['item_key'] for f in findings]}")
+
+
+def test_multi_instance_label_ignored() -> None:
+    print("cross_check_annotations — multi-instance label (FLA) ignored:")
+    # E-100 lists FLA for several pieces of equipment -> multiple distinct
+    # values on ONE page -> per-instance, not a single cross-sheet value.
+    annotations = [
+        {"label": "FLA", "value": "1786.5 A", "category": "count",
+         "page_number": 6, "sheet_number": "E-100"},
+        {"label": "FLA", "value": "82.8 A", "category": "count",
+         "page_number": 6, "sheet_number": "E-100"},
+        {"label": "FLA", "value": "41.4 A", "category": "count",
+         "page_number": 6, "sheet_number": "E-100"},
+        {"label": "FLA", "value": "198.5 A", "category": "count",
+         "page_number": 7, "sheet_number": "E-101"},
+    ]
+    findings = cross_check_annotations(annotations)
+    check("no finding for multi-instance FLA label", len(findings) == 0,
+          f"got {len(findings)}")
+
+
 # ── (c) recognized label routed to provenance, not double-flagged ───────────
 
 def test_mapped_label_routed_to_provenance() -> None:
@@ -299,6 +340,8 @@ def main() -> int:
     test_equivalent_no_finding()
     test_single_page_no_finding()
     test_garbage_label_ignored()
+    test_metadata_label_ignored()
+    test_multi_instance_label_ignored()
     test_mapped_label_routed_to_provenance()
     test_select_diagram_pages_cap()
     test_defensive_on_bad_ai()
