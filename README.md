@@ -23,6 +23,11 @@ that a QC engineer can open, adjust, and export to Excel.
   - Multi-transformer sizing (per-unit kVA × count or explicit total)
   - Fuse, ampacity (DC / AC / MV), EGC / GEC sizing, voltage drop,
     NEC 110.26 clearances
+- **Cross-sheet consistency** — flag when the same value (transformer
+  kVA, voltages, module / string counts, wire sizes, GCR, pole / pile
+  spacing, row pitch, equipment tags, …) appears on two sheets with
+  conflicting numbers, reading values off the **drawings** with vision,
+  not just the text layer (see [Cross-sheet consistency](#cross-sheet-consistency))
 - Generate cropped issue snippets and full-page highlighted previews
   pointing at the literal text excerpt that triggered each finding
 - Manual overrides and free-form issues from the UI
@@ -53,6 +58,46 @@ reason: missing sheet code, missing external document type
 not yet reached. Evidence-less Needs Review findings (no location,
 value, or notes returned) are also auto-demoted to Deferred — an
 unreviewable NR was always noise.
+
+## Cross-sheet consistency
+
+Catches the classic planset defect where the **same value disagrees
+between sheets** — e.g. a transformer rated 2500 kVA on the SLD but
+2000 kVA on the cover schedule, or pole spacing called out as 10'-0" on
+the array layout and 8'-0" on a foundation detail. Each is surfaced as a
+**"Cross-Sheet Consistency"** finding that cites **both** sheets
+side-by-side (Sheet A vs Sheet B) with a highlighted crop of each, and is
+written to the Excel export with a `Locations` column.
+
+How it works, in layers:
+
+1. **Structured comparator** (`consistency.py`) — every value the
+   analyzer reads is recorded per sheet in a `provenance` map and diffed.
+   Comparison is unit/format tolerant: `2250 kVA` == `2.25 MVA`,
+   `480` == `480V`, `#6 AWG` == `6 AWG`, `1.30` == `1.298`,
+   `18 ft` == `18'-0"`, `.35` == `0.35`.
+2. **Vision-diagram pass** (`diagram_consistency.py`) — renders the
+   diagram-heavy sheets (one-line, three-line, array / civil layout,
+   schedules, details) and reads labeled values, equipment tags with
+   ratings, and dimension callouts **off the drawings themselves**.
+   Recognized values feed the comparator; open-ended labels get their own
+   cross-sheet check.
+3. **AI reconciler** — for ambiguous free-text fields (winding configs,
+   labels) a text-only model call decides equivalent-vs-conflict so
+   formatting quirks don't hard-fail.
+4. **Same-referent verification** — before any conflict is raised, a
+   vision check confirms the two values describe the **same engineering
+   quantity** and aren't two different things mistakenly compared (pile
+   spacing vs row pitch, N-S vs E-W, transformer T1 vs T2). It drops a
+   finding **only when it is confident** they differ; on any doubt the
+   finding is kept as **Needs Review**, so a real conflict is never
+   hidden. Confirmed same-thing conflicts are **Fail**.
+
+Every AI/vision step is cost-capped (layout extraction ≤ 6 pages, diagram
+extraction ≤ 10 pages, referent checks ≤ 15 per run) and fully defensive —
+a vision failure degrades to no / Needs-Review findings, never crashes an
+analysis. Two-sheet conflicts are stored as multi-location findings
+(`issues.locations_json`).
 
 ## Supporting documents
 
@@ -111,6 +156,8 @@ planset-qc-app/
     app/
       analyzer.py            # PDF parsing, page detection, regex checks
       electrical_calcs.py    # NEC math: stringing, ampacity, transformer, …
+      consistency.py         # cross-sheet value comparator + same-referent verify
+      diagram_consistency.py # vision pass: read values/labels off the drawings
       gemini_analyzer.py     # Gemini vision orchestration + AUX SLD prompt
       v4_engine.py           # Dynamic rule engine + stage gating + xref filter
       rule_registry.py       # YAML loader, stage_overrides, Rule dataclass
@@ -305,6 +352,6 @@ That includes:
 - **PVSyst comparison** beyond the current evidence-block ingest —
   side-by-side module / inverter / DC-AC / albedo / loss / tracker
   diffing
-- **Per-category rule expansion** — Cross-Sheet, E-200 series, civil
-  / structural cross-refs are still thinner than the electrical-side
-  coverage
+- **Per-category rule expansion** — E-200 series and civil / structural
+  cross-refs are still thinner than the electrical-side coverage
+  (cross-sheet *value* consistency now ships — see above)
