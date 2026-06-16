@@ -3357,7 +3357,30 @@ export default function App() {
                             <div className="card-sub">{issue.category}</div>
                           </div>
 
-                          {issue.page_number ? (
+                          {issue.locations && issue.locations.length > 1 ? (
+                            <div
+                              className="pg-multi"
+                              title={`Spans ${issue.locations.length} sheets`}
+                            >
+                              {issue.locations.map((loc, i) => (
+                                <a
+                                  key={i}
+                                  className="pg pg-mini"
+                                  href={pdfPageUrl(run, loc.page_number)!}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={
+                                    loc.source_label ||
+                                    `${loc.sheet_number ?? ""} p${loc.page_number}`.trim()
+                                  }
+                                >
+                                  {loc.sheet_number
+                                    ? `${loc.sheet_number}·p${loc.page_number}`
+                                    : `p.${loc.page_number}`}
+                                </a>
+                              ))}
+                            </div>
+                          ) : issue.page_number ? (
                             <a
                               className="pg"
                               href={pdfPageUrl(run, issue.page_number)!}
@@ -3461,7 +3484,31 @@ export default function App() {
                             full-page image with no highlighted region —
                             noisy and not informative — so it's collapsed
                             behind a "Show preview" button. */}
-                        {hasPreview && (issue.bbox || expandedPreview.has(issue.id)) ? (
+                        {issue.locations && issue.locations.length > 1 ? (
+                          <button
+                            className="card-thumb-strip"
+                            onClick={() => setSel(issue)}
+                            title="Conflicting values across sheets — click to compare"
+                            type="button"
+                          >
+                            {issue.locations.map((loc, i) =>
+                              loc.snippet_path || loc.page_preview_path ? (
+                                <img
+                                  key={i}
+                                  src={artifactUrl(
+                                    loc.snippet_path || loc.page_preview_path,
+                                  )}
+                                  alt={`${loc.source_label ?? loc.sheet_number ?? "location"} preview`}
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <span key={i} className="card-thumb-strip-noimg">
+                                  {loc.sheet_number ?? `p${loc.page_number}`}
+                                </span>
+                              ),
+                            )}
+                          </button>
+                        ) : hasPreview && (issue.bbox || expandedPreview.has(issue.id)) ? (
                           <button
                             className="card-thumb"
                             onClick={() => setSel(issue)}
@@ -3717,7 +3764,48 @@ export default function App() {
                 &times;
               </button>
             </div>
-            {sel.page_preview_path || sel.snippet_path ? (
+            {sel.locations && sel.locations.length > 1 ? (
+              <div className="detail-twoup">
+                {sel.locations.map((loc, i) => (
+                  <div className="detail-twoup-cell" key={i}>
+                    {loc.snippet_path || loc.page_preview_path ? (
+                      <img
+                        className="detail-twoup-img"
+                        src={artifactUrl(
+                          loc.snippet_path || loc.page_preview_path,
+                        )}
+                        alt={`${loc.source_label ?? loc.sheet_number ?? "Location"} preview`}
+                      />
+                    ) : (
+                      <div className="detail-twoup-noimg">
+                        No preview for this location
+                      </div>
+                    )}
+                    <div className="detail-twoup-cap">
+                      <span className="detail-twoup-loc">
+                        {loc.source_label ||
+                          [
+                            loc.sheet_number,
+                            loc.page_number ? `p${loc.page_number}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") ||
+                          `p${loc.page_number}`}
+                        {loc.sheet_number && loc.page_number ? (
+                          <span className="detail-twoup-pg">
+                            {" "}
+                            &middot; p{loc.page_number}
+                          </span>
+                        ) : null}
+                      </span>
+                      {loc.value && (
+                        <span className="detail-twoup-val">{loc.value}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : sel.page_preview_path || sel.snippet_path ? (
               <div
                 className={`detail-img-wrap detail-img-${selZoom}`}
                 onClick={() =>
@@ -3753,16 +3841,31 @@ export default function App() {
               <div className="detail-desc">{sel.description}</div>
             )}
             <div className="detail-foot">
-              {sel.page_number && (
-                <a
-                  className="hdr-btn"
-                  href={pdfPageUrl(run!, sel.page_number)!}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open PDF Page {sel.page_number}
-                </a>
-              )}
+              {sel.locations && sel.locations.length > 1
+                ? sel.locations
+                    .filter((loc) => loc.page_number)
+                    .map((loc, i) => (
+                      <a
+                        key={i}
+                        className="hdr-btn"
+                        href={pdfPageUrl(run!, loc.page_number)!}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open PDF Page {loc.page_number}
+                        {loc.sheet_number ? ` (${loc.sheet_number})` : ""}
+                      </a>
+                    ))
+                : sel.page_number && (
+                    <a
+                      className="hdr-btn"
+                      href={pdfPageUrl(run!, sel.page_number)!}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open PDF Page {sel.page_number}
+                    </a>
+                  )}
               <a
                 className="hdr-btn"
                 href={artifactUrl(run!.pdf_path)}

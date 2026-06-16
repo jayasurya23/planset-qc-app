@@ -26,6 +26,15 @@ export interface Issue {
   bbox?: { x0: number; y0: number; x1: number; y1: number } | null
   snippet_path?: string | null
   page_preview_path?: string | null
+  locations?: Array<{
+    page_number: number
+    sheet_number?: string | null
+    bbox?: { x0: number; y0: number; x1: number; y1: number } | null
+    snippet_path?: string | null
+    page_preview_path?: string | null
+    value?: string | null
+    source_label?: string | null
+  }> | null
   evidence?: string | null
   confidence: number
   override_comment?: string | null
