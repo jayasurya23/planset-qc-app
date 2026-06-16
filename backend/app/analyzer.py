@@ -2442,6 +2442,19 @@ def analyze_pdf(
             "Gemini checks failed – continuing with regex-only results"
         )
 
+    # Gate the Cross-Sheet Consistency category (both our comparator AND the
+    # legacy ai_consistency_* rule findings) through a false-positive verifier:
+    # drop confident non-conflicts (absent / agreeing / different-thing /
+    # metadata values) and downgrade an unverifiable Fail to Needs Review.
+    # Guarded — a verification failure leaves the findings untouched.
+    try:
+        issues = _consistency_mod.filter_cross_sheet_findings(issues)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "cross-sheet verification failed — keeping findings unfiltered"
+        )
+
     _progress("summary", "Building summary...", 90)
     status_counts = Counter(issue["status"] for issue in issues)
     by_category = defaultdict(lambda: {"total": 0, "Pass": 0, "Fail": 0, "Needs Review": 0, "Overridden / Accepted by QC Engineer": 0})
