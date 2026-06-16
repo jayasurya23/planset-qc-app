@@ -929,3 +929,123 @@ def compare_provenance(provenance: dict, page_map: dict | None = None) -> list[d
                     loc["sheet_number"] = page_to_sheet[loc["page_number"]]
 
     return findings
+
+
+# ── Cross-sheet finding verification (false-positive gate) ──────────────────
+# Both our own comparator and the legacy ``ai_consistency_*`` rule-engine checks
+# over-fire on non-conflicts: absent / placeholder values, values that actually
+# agree, different things (transformer T1 vs T2, kVA vs kW, a label), or
+# title-block metadata that is supposed to differ. A cheap text re-read drops
+# the confident false positives and downgrades unverifiable Fails to Needs
+# Review — conservative, so a genuine conflict is never silently dropped.
+
+_CROSS_SHEET_DROP_CONFIDENCE = 0.7
+
+_CROSS_SHEET_VERIFY_PROMPT = """\
+You are a senior solar PV professional engineer auditing an automated
+"cross-sheet consistency" finding that claims a value disagrees between planset
+sheets. Decide GENUINE conflict vs FALSE POSITIVE using ONLY the text below.
+
+A GENUINE conflict needs TWO real, present values for the SAME engineering
+quantity that genuinely differ (e.g. transformer secondary 480V on one sheet vs
+600V on another).
+
+It is a FALSE_POSITIVE if the text shows ANY of:
+  - No actual value / a placeholder ("xxx", "TBD") / "Found: none" / "not shown"
+    — nothing to conflict.
+  - The values actually AGREE (same model or number; or one sheet just omits it
+    while the others match).
+  - It compares DIFFERENT things: different equipment (transformer T1 vs T2,
+    inverter #1 vs #2), different quantities (kVA capacity vs kW), a label/note
+    rather than a value, or a "typical" vs a specific callout.
+  - It compares title-block / sheet-identity METADATA (sheet name/title/number,
+    revision, date) that is SUPPOSED to differ between sheets.
+
+If you genuinely cannot tell from the text, return "uncertain".
+
+Finding:
+{payload}
+
+Output STRICT JSON only, no prose:
+{{"verdict": "genuine" | "false_positive" | "uncertain", "confidence": 0.0-1.0, "reason": "one short sentence"}}
+"""
+
+
+def _verify_cross_sheet_finding(finding: dict) -> dict:
+    """Text-only judgement of whether a cross-sheet finding is a real conflict.
+    Defensive: returns ``uncertain`` (keep the finding) on any error."""
+    fallback = {"verdict": "uncertain", "confidence": 0.0, "reason": "verification unavailable"}
+    payload = json.dumps({
+        "title": finding.get("title"),
+        "description": finding.get("description"),
+        "evidence": finding.get("evidence"),
+    }, ensure_ascii=False, indent=2)
+    try:
+        from .gemini_client import analyze_text
+    except Exception:
+        log.exception("cross-sheet verify: import failed")
+        return fallback
+    try:
+        raw = analyze_text(_CROSS_SHEET_VERIFY_PROMPT.format(payload=payload), deep=True)
+    except Exception:
+        log.exception("cross-sheet verify: AI call failed")
+        return fallback
+    parsed = _parse_json_object(raw)
+    verdict = str(parsed.get("verdict", "")).strip().lower()
+    if verdict not in ("genuine", "false_positive", "uncertain"):
+        return fallback
+    try:
+        conf = float(parsed.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {
+        "verdict": verdict,
+        "confidence": max(0.0, min(1.0, conf)),
+        "reason": str(parsed.get("reason", "")).strip() or "(no reason)",
+    }
+
+
+def filter_cross_sheet_findings(issues: list[dict], *, verifier=None) -> list[dict]:
+    """Gate every ``Cross-Sheet Consistency`` Fail / Needs-Review finding (from
+    BOTH our comparator and the legacy ``ai_consistency_*`` rules) through a
+    verifier: DROP confident false positives, DOWNGRADE an unverifiable Fail to
+    Needs Review. Anything not confidently a false positive is kept unchanged.
+
+    *verifier* is injectable for testing (defaults to the AI verifier).
+    """
+    vf = verifier or _verify_cross_sheet_finding
+    out: list[dict] = []
+    checked = dropped = downgraded = 0
+    for it in issues:
+        if (it.get("category") != "Cross-Sheet Consistency"
+                or it.get("status") not in ("Fail", "Needs Review")):
+            out.append(it)
+            continue
+        checked += 1
+        try:
+            verdict = vf(it)
+        except Exception:
+            log.exception("cross-sheet verify raised — keeping finding")
+            out.append(it)
+            continue
+        v = verdict.get("verdict")
+        try:
+            conf = float(verdict.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        if v == "false_positive" and conf >= _CROSS_SHEET_DROP_CONFIDENCE:
+            dropped += 1
+            log.info("cross-sheet: dropped false positive '%s' — %s",
+                     it.get("title"), verdict.get("reason"))
+            continue
+        if v != "genuine" and it.get("status") == "Fail":
+            it["status"] = "Needs Review"
+            it["auto_status"] = "Needs Review"
+            it["description"] = (it.get("description") or "") + \
+                " [Auto: cross-sheet conflict not confirmed — verify manually.]"
+            downgraded += 1
+        out.append(it)
+    if checked:
+        log.info("cross-sheet verification: %d checked, %d dropped (FP), %d downgraded to NR",
+                 checked, dropped, downgraded)
+    return out

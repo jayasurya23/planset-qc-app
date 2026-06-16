@@ -274,6 +274,49 @@ def test_sheet_number_backfill() -> None:
               sheets.get(7) == "E-100" and sheets.get(1) == "G-001", f"got {sheets}")
 
 
+def test_filter_cross_sheet() -> None:
+    print("filter_cross_sheet_findings — false-positive gate (stubbed AI):")
+    issues = [
+        {"category": "Cross-Sheet Consistency", "status": "Fail", "auto_status": "Fail",
+         "title": "Total DC size", "item_key": "ai_consistency_total_dc",
+         "description": "d", "evidence": "Found: none"},
+        {"category": "Cross-Sheet Consistency", "status": "Needs Review", "auto_status": "Needs Review",
+         "title": "Transformer kVA", "item_key": "ai_consistency_xfmr",
+         "description": "d", "evidence": "2250 vs 2000"},
+        {"category": "Cross-Sheet Consistency", "status": "Fail", "auto_status": "Fail",
+         "title": "VT ratio", "item_key": "ai_consistency_vt",
+         "description": "d", "evidence": "illegible"},
+        {"category": "AC Single Line Diagram", "status": "Fail", "auto_status": "Fail",
+         "title": "Other", "item_key": "ai_sld_x", "description": "d", "evidence": "e"},
+        {"category": "Cross-Sheet Consistency", "status": "Pass", "auto_status": "Pass",
+         "title": "OK", "item_key": "ai_consistency_ok", "description": "d", "evidence": "agree"},
+    ]
+
+    def stub(finding):
+        t = finding.get("title")
+        if t == "Total DC size":
+            return {"verdict": "false_positive", "confidence": 0.9, "reason": "no value"}
+        if t == "Transformer kVA":
+            return {"verdict": "genuine", "confidence": 0.9, "reason": "real conflict"}
+        if t == "VT ratio":
+            return {"verdict": "uncertain", "confidence": 0.3, "reason": "illegible"}
+        return {"verdict": "genuine", "confidence": 0.9, "reason": "x"}
+
+    out = consistency.filter_cross_sheet_findings(issues, verifier=stub)
+    titles = {i["title"] for i in out}
+    by = {i["title"]: i for i in out}
+    check("confident FP dropped", "Total DC size" not in titles, f"got {titles}")
+    check("genuine kept", "Transformer kVA" in titles)
+    check("uncertain Fail kept but downgraded to NR",
+          by.get("VT ratio", {}).get("status") == "Needs Review",
+          f"got {by.get('VT ratio', {}).get('status')}")
+    check("non-cross-sheet untouched (still Fail)",
+          by.get("Other", {}).get("status") == "Fail")
+    check("cross-sheet Pass untouched (not checked)",
+          by.get("OK", {}).get("status") == "Pass")
+    check("4 findings kept (1 dropped)", len(out) == 4, f"got {len(out)}")
+
+
 def main() -> int:
     test_normalize_value()
     test_compare_conflict()
@@ -282,6 +325,7 @@ def main() -> int:
     test_ambiguous_path_stubbed()
     test_gcr_leading_dot_no_false_positive()
     test_sheet_number_backfill()
+    test_filter_cross_sheet()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 
