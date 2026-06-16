@@ -856,6 +856,7 @@ def make_issue(
     source_doc_filename: str | None = None,
     source_doc_page: int | None = None,
     source_doc_excerpt: str | None = None,
+    locations: list[dict] | None = None,
 ) -> dict:
     now = utc_now()
     return {
@@ -878,6 +879,10 @@ def make_issue(
         "source_doc_filename": source_doc_filename,
         "source_doc_page": source_doc_page,
         "source_doc_excerpt": source_doc_excerpt,
+        # Multi-location findings (cross-sheet conflicts) carry a list of
+        # 2+ locations; normal single-location findings keep this None so
+        # existing rendering is unchanged.
+        "locations": locations,
         "created_at": now,
         "updated_at": now,
     }
@@ -1198,23 +1203,86 @@ def _looks_like_datasheet_page(p: PageInfo) -> bool:
     return False
 
 
+# ── Layout / plan / detail / stringing sheet detection ──────────────────────
+# These sheets carry the geometric design values (pole/pile spacing, row
+# pitch, GCR, tilt, azimuth, tracker rotation) that the cross-sheet
+# consistency checker compares. We pick them by title keyword or sheet-code
+# prefix and cap how many we run vision on to keep cost bounded.
+_LAYOUT_TITLE_KW = (
+    "LAYOUT", "ARRAY", "PLAN", "RACKING", "PILE", "PIER", "STRINGING",
+    "SITE", "CIVIL", "ROW", "TRACKER", "FOUNDATION",
+)
+# Sheet-code prefixes that usually mark layout/civil/plan sheets.
+_LAYOUT_SHEET_PREFIXES = ("C", "SP", "PV", "A")
+_MAX_LAYOUT_PAGES = 6
+
+
+def _looks_like_layout_page(p: PageInfo) -> bool:
+    """Detect layout / plan / detail / stringing sheets that carry the
+    geometric design values (spacing, pitch, GCR, tilt, azimuth)."""
+    title = (p.sheet_title or "").upper()
+    if any(kw in title for kw in _LAYOUT_TITLE_KW):
+        return True
+    snum = (p.sheet_number or "").upper()
+    if snum:
+        prefix = snum.split("-")[0].split(".")[0]
+        if prefix in _LAYOUT_SHEET_PREFIXES:
+            return True
+    return False
+
+
+_LAYOUT_EXTRACT_PROMPT = """\
+You are an expert solar PV civil/layout engineer reading a planset LAYOUT,
+ARRAY PLAN, RACKING, PILE/PIER, STRINGING, or SITE/CIVIL sheet. Extract the
+geometric design values shown on THIS sheet (dimension callouts, plan-detail
+tables, racking schedules).
+
+Return ONLY a JSON object using EXACTLY these field names. OMIT any field you
+cannot read with confidence. Numeric values may keep their unit suffix
+(e.g. "15 ft", "23'-6\\"", "0.35", "25 deg").
+
+```json
+{
+  "pole_spacing": "pole-to-pole spacing (ft) along a row",
+  "pile_spacing": "pile/pier spacing (ft) along a row",
+  "row_pitch": "row-to-row pitch (ft) — center to center",
+  "interrow_spacing": "clear gap between rows (ft)",
+  "gcr": "ground coverage ratio (e.g. 0.35)",
+  "tilt_angle": "module/array tilt angle (deg)",
+  "azimuth": "array azimuth (deg, 180 = due south)",
+  "tracker_rotation": "max tracker rotation angle (deg, e.g. 60)"
+}
+```
+Return ONLY the JSON object, no other text.
+"""
+
+
 def extract_specs_from_pages(
     doc: fitz.Document,
     pages: list[PageInfo],
     design_stage: str | None = None,
     project_name: str | None = None,
-) -> dict:
+) -> tuple[dict, dict]:
     """Auto-extract electrical specs from the planset itself.
 
-    Two passes:
+    Three passes:
       1. SYSTEM-INFO PASS — page 1 (cover) for the system-info table that
          carries totals (string size, total DC, MPPT range stated, etc.).
       2. DATASHEET PASS — every page whose title/sheet-code marks it as a
          vendor datasheet. Sub-classified into module / inverter /
          transformer and processed with the matching extractor prompt
          from ``supporting_docs``.
+      3. LAYOUT PASS — up to 6 layout/plan/detail/stringing sheets for the
+         geometric design values (spacing, pitch, GCR, tilt, azimuth).
 
-    Returns the merged dict keyed by ``project_details`` field names.
+    Returns ``(merged, provenance)`` where:
+      * ``merged`` is the collapsed dict keyed by ``project_details`` field
+        names (first writer wins — cover beats datasheet beats layout).
+      * ``provenance`` maps each field → list of EVERY sighting
+        ``{"value", "source", "page_number"}`` (including the "losers" that
+        lost the merge), so the cross-sheet consistency checker can compare
+        planset-page-vs-planset-page disagreements.
+
     User-supplied project_details still wins downstream — this only fills
     gaps so calc rules stop deferring on missing inputs.
     """
@@ -1225,9 +1293,25 @@ def extract_specs_from_pages(
         from .gemini_client import analyze_multiple_images, analyze_page_image
     except Exception:
         log.exception("extract_specs_from_pages: imports failed")
-        return {}
+        return {}, {}
 
     merged: dict[str, str] = {}
+    # provenance[field] = [{"value", "source", "page_number"}, ...] — keeps
+    # ALL sightings (even ones that lost the merge) for consistency checking.
+    provenance: dict[str, list[dict]] = {}
+
+    def _record(field: str, value, source: str, page_number: int | None) -> None:
+        """Append a sighting of *field* to provenance. page_number is the
+        1-based PDF page the value was read on (None for non-planset
+        sources)."""
+        if value is None:
+            return
+        sv = str(value).strip()
+        if not sv or sv.lower() in ("not shown", "n/a", "tbd", "null", "none"):
+            return
+        provenance.setdefault(field, []).append(
+            {"value": sv, "source": source, "page_number": page_number}
+        )
 
     # ── Pass 1: cover-sheet system info ──────────────────────────────────
     # Render at 2x — system-info tables on solar cover sheets are dense and
@@ -1264,12 +1348,19 @@ def extract_specs_from_pages(
             )
             raw = analyze_multiple_images(cover_images, cover_prompt)
             sysinfo = _parse_extract_json(raw)
+            cover_sheet = pages[0].sheet_number if pages else None
+            cover_label = (
+                f"{cover_sheet} cover system-info" if cover_sheet
+                else "cover system-info"
+            )
             for k, v in sysinfo.items():
                 if v is None:
                     continue
                 sv = str(v).strip()
                 if sv:
                     merged[k] = sv
+                    # Cover is page 1.
+                    _record(k, sv, cover_label, 1)
             log.info("cover-sheet specs: %d fields (%s)",
                      len(merged), list(merged.keys()))
         except Exception:
@@ -1303,6 +1394,13 @@ def extract_specs_from_pages(
             img = pix.tobytes("png")
             raw = analyze_page_image(img, _PLANSET_DATASHEET_PROMPT, "image/png")
             specs = _parse_extract_json(raw)
+            equip0 = specs.get("equipment_type") or "?"
+            ds_label = (
+                f"{p.sheet_number} datasheet" if p.sheet_number
+                else f"datasheet p{p.number}"
+            )
+            if equip0 and equip0 != "?":
+                ds_label = f"{p.sheet_number or f'p{p.number}'} {equip0} datasheet"
             n_kept = 0
             for k, v in specs.items():
                 if k in ("doc_type", "equipment_type", "summary", "source_pages"):
@@ -1312,6 +1410,10 @@ def extract_specs_from_pages(
                 sv = str(v).strip()
                 if not sv or sv.lower() in ("not shown", "n/a", "tbd", "null"):
                     continue
+                # Record EVERY legible datasheet spec into provenance (even
+                # ones the cover already won) so cross-sheet comparison sees
+                # the disagreement.
+                _record(k, sv, ds_label, p.number)
                 # Cover wins on overlap. Datasheet only fills gaps.
                 if merged.setdefault(k, sv) is sv:
                     n_kept += 1
@@ -1322,6 +1424,52 @@ def extract_specs_from_pages(
                      p.number, p.sheet_number or "?", equip, n_kept)
         except Exception:
             log.exception("datasheet extraction failed for page %d", p.number)
+
+    # ── Pass 3: layout / plan / detail / stringing sheets ────────────────
+    # These carry the geometric design values (pole/pile spacing, row pitch,
+    # GCR, tilt, azimuth, tracker rotation) that the cross-sheet consistency
+    # checker compares. We select by title keyword / sheet-code prefix, CAP
+    # the count to keep cost bounded, and record each value WITH its page.
+    layout_candidates = [p for p in pages if _looks_like_layout_page(p)]
+    layout_pages = layout_candidates[:_MAX_LAYOUT_PAGES]
+    if len(layout_candidates) > _MAX_LAYOUT_PAGES:
+        dropped = [
+            (p.sheet_number or f"p{p.number}")
+            for p in layout_candidates[_MAX_LAYOUT_PAGES:]
+        ]
+        log.info(
+            "layout pass: %d candidate sheets, capped at %d; dropped %d (%s)",
+            len(layout_candidates), _MAX_LAYOUT_PAGES, len(dropped),
+            ", ".join(dropped),
+        )
+    else:
+        log.info("layout pass: %d candidate sheets (within cap of %d)",
+                 len(layout_candidates), _MAX_LAYOUT_PAGES)
+    for p in layout_pages:
+        try:
+            page = doc[p.number - 1]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+            img = pix.tobytes("png")
+            raw = analyze_page_image(img, _LAYOUT_EXTRACT_PROMPT, "image/png")
+            specs = _parse_extract_json(raw)
+            lay_label = (
+                f"{p.sheet_number} layout" if p.sheet_number
+                else f"layout p{p.number}"
+            )
+            n_kept = 0
+            for k, v in specs.items():
+                if v is None:
+                    continue
+                sv = str(v).strip()
+                if not sv or sv.lower() in ("not shown", "n/a", "tbd", "null"):
+                    continue
+                _record(k, sv, lay_label, p.number)
+                if merged.setdefault(k, sv) is sv:
+                    n_kept += 1
+            log.info("layout page %d (sheet %s): %d new fields extracted",
+                     p.number, p.sheet_number or "?", n_kept)
+        except Exception:
+            log.exception("layout extraction failed for page %d", p.number)
 
     # Backfill {equipment}_quantity from page counts when cover didn't say.
     # Two transformer datasheet pages = transformer_quantity ≥ 2 etc. We
@@ -1343,7 +1491,7 @@ def extract_specs_from_pages(
 
     log.info("extract_specs_from_pages: %d total fields → %s",
              len(merged), sorted(merged.keys()))
-    return merged
+    return merged, provenance
 
 
 def analyze_pdf(
@@ -1930,11 +2078,249 @@ def analyze_pdf(
 
     # --- Auto-extract specs from planset pages for electrical calcs ---
     _progress("calcs", "Extracting specs from planset...", 33)
-    auto_specs = extract_specs_from_pages(
+    auto_specs, provenance = extract_specs_from_pages(
         doc, pages,
         design_stage=design_stage,
         project_name=project_name,
     )
+
+    # Augment provenance with NON-planset sightings: user-entered
+    # project_details and supporting-doc extractions. These are authoritative
+    # references (page_number=None) — never themselves flagged as a conflict,
+    # but recorded so the consistency checker can cite the canonical value.
+    for fld, val in (project_details or {}).items():
+        if val is None:
+            continue
+        sval = str(val).strip()
+        if sval:
+            provenance.setdefault(fld, []).append(
+                {"value": sval, "source": "user project_details", "page_number": None}
+            )
+    for sdoc in (supporting_docs or []):
+        if not isinstance(sdoc, dict):
+            continue
+        sd_name = sdoc.get("filename") or sdoc.get("name") or "supporting doc"
+        sd_fields = sdoc.get("fields") or sdoc.get("extracted") or sdoc.get("specs") or {}
+        if isinstance(sd_fields, dict):
+            for fld, val in sd_fields.items():
+                if val is None:
+                    continue
+                sval = str(val).strip()
+                if sval:
+                    provenance.setdefault(fld, []).append(
+                        {"value": sval, "source": f"{sd_name}", "page_number": None}
+                    )
+
+    # --- Vision-based diagram-consistency pass ──────────────────────────
+    # Read labeled values OFF THE DRAWINGS (equipment tags-with-ratings,
+    # dimension callouts, schedule cells, ratings inside one-line symbols)
+    # that never reach the text layer / predefined spec fields. Recognized
+    # labels are merged into `provenance` (so the deterministic comparator
+    # below catches them — this is the de-dup mechanism); un-recognized
+    # labels are cross-checked open-endedly and returned as findings here.
+    # Guarded so a diagram-pass failure never breaks analysis.
+    diagram_findings: list[dict] = []
+    try:
+        from . import diagram_consistency
+        from .gemini_analyzer import render_page_to_bytes
+        from .gemini_client import analyze_page_image
+
+        _progress("calcs", "Reading diagram annotations...", 33)
+
+        def _diagram_render(page) -> bytes:
+            # High-res (2x) render so fine drawing digits stay legible.
+            return render_page_to_bytes(doc, page.number, zoom=2.0)
+
+        def _diagram_ai(image: bytes, prompt: str) -> str:
+            return analyze_page_image(image, prompt, "image/png")
+
+        diagram_findings = diagram_consistency.run_diagram_consistency(
+            pages, provenance,
+            render=_diagram_render, ai_call=_diagram_ai,
+        )
+        import logging as _dlog
+        _dlog.getLogger(__name__).info(
+            "diagram-consistency pass: %d open-ended finding(s) returned",
+            len(diagram_findings),
+        )
+    except Exception:
+        import logging as _dlog
+        _dlog.getLogger(__name__).exception(
+            "diagram-consistency pass failed — continuing"
+        )
+        diagram_findings = []
+
+    # --- Cross-sheet value-consistency findings ─────────────────────────
+    # Compare each field's planset-page sightings; flag planset-vs-planset
+    # disagreements (user/supporting values are authoritative references).
+    try:
+        from .consistency import compare_provenance
+
+        _progress("calcs", "Checking cross-sheet consistency...", 34)
+        consistency_findings = compare_provenance(provenance, page_map)
+
+        # DEDUP: a (page_number, normalized-value) pair already covered by a
+        # provenance-based finding must NOT be re-reported by the open-ended
+        # diagram cross-check. Track covered pairs from the deterministic
+        # findings and drop any diagram finding fully covered by them.
+        from .consistency import normalize_value as _norm_val
+        covered_pairs: set[tuple] = set()
+        for finding in consistency_findings:
+            for loc in finding.get("locations") or []:
+                pn = loc.get("page_number")
+                val = loc.get("value")
+                if pn is not None and val is not None:
+                    key, _mag = _norm_val("", str(val))
+                    covered_pairs.add((pn, key))
+
+        deduped_diagram: list[dict] = []
+        for dfind in diagram_findings:
+            locs = dfind.get("locations") or []
+            if locs and all(
+                (
+                    loc.get("page_number"),
+                    _norm_val("", str(loc.get("value")))[0],
+                ) in covered_pairs
+                for loc in locs
+                if loc.get("page_number") is not None and loc.get("value") is not None
+            ):
+                import logging as _ddl
+                _ddl.getLogger(__name__).info(
+                    "diagram-consistency: skipping '%s' — already covered by a "
+                    "provenance-based finding",
+                    dfind.get("item_key"),
+                )
+                continue
+            deduped_diagram.append(dfind)
+
+        emitted_findings = list(consistency_findings) + deduped_diagram
+
+        # SAME-REFERENT VERIFICATION setup. Every candidate conflict (from BOTH
+        # the provenance comparator and the diagram cross-check) is, AFTER its
+        # location previews are rendered, checked with one vision call to
+        # confirm the disagreeing values describe the SAME engineering quantity
+        # (a real defect) rather than two DIFFERENT things mistakenly compared
+        # (e.g. pile-spacing vs row-pitch, T1 kVA vs T2 kVA). Conflicts are
+        # rare, so a small cap bounds the added vision cost; beyond it remaining
+        # conflicts are emitted UNVERIFIED as Needs Review (never auto-Fail or
+        # silently dropped).
+        from . import consistency as _consistency_mod
+        from .gemini_analyzer import render_page_to_bytes as _rpt
+        from .gemini_client import analyze_multiple_images as _ami
+
+        _MAX_REFERENT_CHECKS = 15
+        _referent_calls = 0
+        _referent_dropped = 0
+
+        def _referent_render_page(page_number: int) -> bytes:
+            # Full-page render so the model sees WHAT the value labels in
+            # context (2x for legibility).
+            return _rpt(doc, page_number, zoom=2.0)
+
+        def _referent_vision(images, prompt: str) -> str:
+            return _ami(images, prompt, "image/png")
+
+        kept_findings: list[dict] = []
+        for finding in emitted_findings:
+            locations = finding.get("locations") or []
+            # Render a highlighted crop + preview for each located sighting
+            # FIRST so the verification step can reuse the preview images.
+            for loc in locations:
+                pn = loc.get("page_number")
+                if not pn:
+                    continue
+                target = loc.get("value")
+                sp, pp, bbox_d = render_issue_artifacts(
+                    doc, str(uuid.uuid4()), pn, run_dir,
+                    target_text=target,
+                )
+                loc["snippet_path"] = sp
+                loc["page_preview_path"] = pp
+                loc["bbox"] = bbox_d
+
+            # SAME-REFERENT VERIFICATION — guarded so any failure leaves the
+            # finding as its original (unverified) self downgraded to Needs
+            # Review, and never crashes analyze_pdf.
+            # Bare field/label for the verification prompt — cleaner than the
+            # full finding title (item_key is consistency_<field> / diagram_<slug>).
+            _ik = finding.get("item_key") or ""
+            if _ik.startswith("consistency_"):
+                field_label = _ik[len("consistency_"):].replace("_", " ")
+            elif _ik.startswith("diagram_"):
+                field_label = _ik[len("diagram_"):].replace("_", " ").replace("-", " ")
+            else:
+                field_label = finding.get("title") or _ik or "value"
+            try:
+                if _referent_calls >= _MAX_REFERENT_CHECKS:
+                    # Over the cost cap: emit UNVERIFIED as Needs Review with
+                    # the inconclusive note (never silently Fail or drop).
+                    _consistency_mod._downgrade_finding_to_needs_review(finding)
+                else:
+                    _referent_calls += 1
+                    verdict = _consistency_mod.verify_same_referent(
+                        field_label, locations,
+                        render_page=_referent_render_page,
+                        vision_call=_referent_vision,
+                        doc=doc,
+                    )
+                    keep = _consistency_mod.apply_referent_verdict(finding, verdict)
+                    if not keep:
+                        # Confident DIFFERENT-things verdict -> SUPPRESS.
+                        _referent_dropped += 1
+                        import logging as _rlog
+                        _rlog.getLogger(__name__).info(
+                            "consistency: dropped candidate conflict on %s — "
+                            "values reference different things (%s)",
+                            field_label, verdict.get("reason") or "(no reason)",
+                        )
+                        continue  # do NOT emit this finding
+            except Exception:
+                import logging as _rlog
+                _rlog.getLogger(__name__).exception(
+                    "consistency: same-referent verification errored — "
+                    "downgrading finding to Needs Review"
+                )
+                try:
+                    _consistency_mod._downgrade_finding_to_needs_review(finding)
+                except Exception:
+                    pass
+
+            kept_findings.append(finding)
+
+            # Scalar fields mirror locations[0] for backward compatibility.
+            primary = locations[0] if locations else {}
+            issues.append(make_issue(
+                run_id,
+                finding["item_key"],
+                finding["category"],
+                finding["title"],
+                finding["description"],
+                finding["status"],
+                severity=finding.get("severity", "medium"),
+                page_number=primary.get("page_number"),
+                evidence=finding.get("evidence"),
+                confidence=finding.get("confidence", 0.6),
+                snippet_path=primary.get("snippet_path"),
+                page_preview_path=primary.get("page_preview_path"),
+                bbox=primary.get("bbox"),
+                locations=locations or None,
+            ))
+        if emitted_findings:
+            import logging
+            logging.getLogger(__name__).info(
+                "cross-sheet consistency: %d candidate conflict(s) "
+                "(%d provenance-based, %d diagram-based); same-referent "
+                "verification ran %d vision call(s), dropped %d false "
+                "positive(s), emitted %d finding(s)",
+                len(emitted_findings), len(consistency_findings),
+                len(deduped_diagram), _referent_calls, _referent_dropped,
+                len(kept_findings),
+            )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "cross-sheet consistency check failed — continuing"
+        )
 
     # Merge: user-provided project_details override auto-extracted values
     pd = {**auto_specs, **(project_details or {})}

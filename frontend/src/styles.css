@@ -456,6 +456,24 @@ select.si option, select.si optgroup { background: var(--dark2); color: #fff; }
 .card-thumb-toggle { display: block; width: calc(100% - 24px); margin: 0 12px 8px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: 6px; background: transparent; color: var(--text3); font-size: 11px; font-weight: 500; cursor: pointer; text-align: left; transition: border-color .12s, color .12s, background .12s; }
 .card-thumb-toggle:hover { border-color: var(--brand); color: var(--brand); background: var(--bg); }
 
+/* Cross-sheet conflict findings — multi-location chips + mini-snippet strip */
+.pg-multi { display: flex; flex-wrap: wrap; gap: 4px; flex-shrink: 0; justify-content: flex-end; max-width: 180px; }
+.pg-mini { min-width: 0; font-size: 11px; padding: 3px 7px; }
+.card-thumb-strip { display: flex; gap: 6px; width: calc(100% - 24px); margin: 0 12px 8px; padding: 6px; border: 1px solid var(--brand); border-radius: 6px; background: rgba(173,31,43,.04); cursor: zoom-in; overflow-x: auto; transition: box-shadow .12s; }
+.card-thumb-strip:hover { box-shadow: 0 0 0 1px var(--brand); }
+.card-thumb-strip img { flex: 1 1 0; min-width: 0; max-height: 120px; object-fit: contain; background: #fff; border: 1px solid var(--border); border-radius: 4px; }
+.card-thumb-strip-noimg { flex: 1 1 0; display: grid; place-items: center; min-height: 60px; font-size: 11px; font-weight: 600; color: var(--text3); background: #fff; border: 1px dashed var(--border); border-radius: 4px; }
+
+/* Detail modal — two-up side-by-side comparison for conflict findings */
+.detail-twoup { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; padding: 16px 24px; border-top: 1px solid var(--bg); border-bottom: 1px solid var(--bg); background: var(--surface2); }
+.detail-twoup-cell { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; }
+.detail-twoup-img { width: 100%; max-height: 360px; object-fit: contain; background: #fff; display: block; }
+.detail-twoup-noimg { display: grid; place-items: center; min-height: 120px; font-size: 12px; color: var(--text3); background: var(--bg); }
+.detail-twoup-cap { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.detail-twoup-loc { font-size: 12px; font-weight: 600; color: var(--text2); }
+.detail-twoup-pg { color: var(--text3); font-weight: 500; }
+.detail-twoup-val { font-size: 16px; font-weight: 800; color: var(--brand); letter-spacing: .01em; }
+
 /* Multi-instance group headers — when grouping is on and a rule fired
    on multiple pages, instances collapse behind one of these. */
 .group-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--text3); border-radius: var(--r); margin-bottom: 6px; cursor: pointer; transition: background .12s, border-color .12s; user-select: none; }

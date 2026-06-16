@@ -231,6 +231,29 @@ STATUS_FILL = {
 }
 
 
+def _format_locations(issue: dict) -> str | None:
+    """For a multi-location (cross-sheet conflict) finding, render the
+    conflicting sheet/page + value pairs as a single cell string, e.g.::
+
+        E-100 p7: 2250 kVA; cover p1: 2000 kVA
+
+    Returns None for normal single-location findings so the cell stays blank.
+    """
+    locations = issue.get("locations")
+    if not locations or not isinstance(locations, list) or len(locations) < 2:
+        return None
+    parts: list[str] = []
+    for loc in locations:
+        if not isinstance(loc, dict):
+            continue
+        label = loc.get("source_label") or loc.get("sheet_number") or "?"
+        page = loc.get("page_number")
+        value = loc.get("value")
+        page_str = f" p{page}" if page else ""
+        parts.append(f"{label}{page_str}: {value}")
+    return "; ".join(parts) if parts else None
+
+
 def autosize_columns(ws):
     for col in ws.columns:
         max_len = 0
@@ -316,6 +339,7 @@ def build_workbook(run: dict) -> Workbook:
         "Evidence",
         "Description",
         "Override Comment",
+        "Locations",
         "Snippet",
     ]
     ws_issues.append(headers)
@@ -336,11 +360,14 @@ def build_workbook(run: dict) -> Workbook:
         ws_issues.cell(row=row_idx, column=8, value=issue.get("evidence"))
         ws_issues.cell(row=row_idx, column=9, value=issue.get("description"))
         ws_issues.cell(row=row_idx, column=10, value=issue.get("override_comment"))
+        # Locations — cross-sheet conflict findings list every conflicting
+        # sheet/page + value pair here; blank for normal single-location ones.
+        ws_issues.cell(row=row_idx, column=11, value=_format_locations(issue))
 
         fill_color = STATUS_FILL.get(issue["status"], "FFFFFF")
         ws_issues.cell(row=row_idx, column=3).fill = PatternFill("solid", fgColor=fill_color)
 
-        for col in range(1, 11):
+        for col in range(1, 12):
             ws_issues.cell(row=row_idx, column=col).alignment = Alignment(wrap_text=True, vertical="top")
 
         snippet_path = issue.get("snippet_path")
@@ -348,15 +375,16 @@ def build_workbook(run: dict) -> Workbook:
             img = XLImage(snippet_path)
             img.width = 180
             img.height = int(img.height * (180 / img.width)) if img.width else 120
-            anchor = f"K{row_idx}"
+            anchor = f"L{row_idx}"
             ws_issues.add_image(img, anchor)
             ws_issues.row_dimensions[row_idx].height = max(ws_issues.row_dimensions[row_idx].height or 15, 110)
         row_idx += 1
 
-    for col in range(1, 12):
+    for col in range(1, 13):
         ws_issues.column_dimensions[get_column_letter(col)].width = 24
     ws_issues.column_dimensions["H"].width = 40
     ws_issues.column_dimensions["I"].width = 40
+    ws_issues.column_dimensions["K"].width = 48
     return wb
 
 

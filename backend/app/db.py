@@ -100,6 +100,9 @@ def init_db() -> None:
             ("source_doc_filename", "ALTER TABLE issues ADD COLUMN source_doc_filename TEXT"),
             ("source_doc_page",     "ALTER TABLE issues ADD COLUMN source_doc_page INTEGER"),
             ("source_doc_excerpt",  "ALTER TABLE issues ADD COLUMN source_doc_excerpt TEXT"),
+            # Multi-location findings (cross-sheet consistency conflicts) store
+            # their per-location list here as JSON (or NULL for normal findings).
+            ("locations_json",      "ALTER TABLE issues ADD COLUMN locations_json TEXT"),
         ]:
             try:
                 cur.execute(f"SELECT {col} FROM issues LIMIT 1")
@@ -235,9 +238,9 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 id, run_id, category, item_key, title, description, severity, status, auto_status,
                 page_number, bbox_json, snippet_path, page_preview_path, evidence, confidence,
                 override_comment, source_doc_filename, source_doc_page, source_doc_excerpt,
-                created_at, updated_at
+                locations_json, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -260,6 +263,8 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                     issue.get("source_doc_filename"),
                     issue.get("source_doc_page"),
                     issue.get("source_doc_excerpt"),
+                    json.dumps(issue.get("locations"), ensure_ascii=False)
+                    if issue.get("locations") else None,
                     issue["created_at"],
                     issue["updated_at"],
                 )
@@ -273,6 +278,10 @@ def row_to_issue(row: sqlite3.Row) -> dict[str, Any]:
     issue = dict(row)
     issue["bbox"] = json.loads(issue["bbox_json"]) if issue.get("bbox_json") else None
     issue.pop("bbox_json", None)
+    # Decode the multi-location list (cross-sheet conflicts). Older rows /
+    # normal findings have it NULL → locations stays None.
+    loc_json = issue.pop("locations_json", None)
+    issue["locations"] = json.loads(loc_json) if loc_json else None
     return issue
 
 
@@ -340,8 +349,8 @@ def insert_manual_issue(issue: dict[str, Any]) -> None:
             INSERT INTO issues (
                 id, run_id, category, item_key, title, description, severity, status, auto_status,
                 page_number, bbox_json, snippet_path, page_preview_path, evidence, confidence,
-                override_comment, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                override_comment, locations_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 issue["id"],
@@ -360,6 +369,8 @@ def insert_manual_issue(issue: dict[str, Any]) -> None:
                 issue.get("evidence"),
                 issue.get("confidence", 0.0),
                 issue.get("override_comment"),
+                json.dumps(issue.get("locations"), ensure_ascii=False)
+                if issue.get("locations") else None,
                 issue["created_at"],
                 issue["updated_at"],
             ),
