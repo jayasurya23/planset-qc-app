@@ -446,6 +446,12 @@ export default function App() {
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search).get("run");
   });
+  // Dashboard (projects grid) vs a single-run view. Default to the dashboard
+  // unless a specific run is deep-linked via ?run=.
+  const [showDashboard, setShowDashboard] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return !new URLSearchParams(window.location.search).get("run");
+  });
   const [cat, setCat] = useState("All");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("default");
@@ -551,20 +557,8 @@ export default function App() {
   // Signed-in engineer (EasyAuth). Used to attribute runs and auto-fill the
   // name picker. null until /api/me resolves.
   const [me, setMe] = useState<Me | null>(null);
-  // Project sidebar: projects are expanded by default (preserving the old
-  // "see all runs" feel); collapsing adds to this set. Version history under a
-  // lineage is collapsed by default and opened per root_run_id.
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const toggleProject = useCallback((id: string) => {
-    setCollapsedProjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  // Version history under a lineage is collapsed by default, opened per
+  // root_run_id, shown in the dashboard project cards.
   const [expandedVersions, setExpandedVersions] = useState<Set<string>>(
     () => new Set(),
   );
@@ -899,7 +893,9 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
-    if (runId) {
+    // Only deep-link a run when actually viewing one — on the dashboard the
+    // URL stays clean so a refresh returns to the dashboard, not a run.
+    if (runId && !showDashboard) {
       url.searchParams.set("run", runId);
     } else {
       url.searchParams.delete("run");
@@ -907,7 +903,7 @@ export default function App() {
     // ``replaceState`` (not pushState) — selecting a run shouldn't pollute
     // the back/forward stack with every click.
     window.history.replaceState({}, "", url.toString());
-  }, [runId]);
+  }, [runId, showDashboard]);
 
   const refresh = useCallback(async (id: string) => {
     const r = await fetch(`${API}/api/runs/${id}`);
@@ -1314,6 +1310,7 @@ export default function App() {
       setProgress("Done!");
       setRuns((p) => [d, ...p.filter((x) => x.id !== d.id)]);
       setRunId(d.id);
+      setShowDashboard(false);
       setCat("All");
       setStatusFilter("all");
       form.reset();
@@ -1338,6 +1335,7 @@ export default function App() {
     setRuns((p) => p.filter((x) => x.id !== id));
     if (runId === id) {
       setRunId(null);
+      setShowDashboard(true);
       setCat("All");
       setStatusFilter("all");
     }
@@ -1384,6 +1382,7 @@ export default function App() {
         setRuns((p) => [d, ...p.filter((x) => x.id !== d.id)]);
       }
       setRunId(d.id);
+      setShowDashboard(false);
       setCat("All");
       setStatusFilter("all");
       setTimeout(() => {
@@ -1673,79 +1672,201 @@ export default function App() {
     [runs],
   );
 
-  // One run row in the sidebar (the latest of a lineage). Reused for the
-  // project/stage tree; reads handlers + selection from the enclosing scope.
-  const runItem = (r: RunData) => (
-    <div
-      className={`run-item ${r.id === runId ? "active" : ""}`}
-      onClick={() => {
-        void refresh(r.id);
-        setCat("All");
-        setStatusFilter("all");
-        setMobileNav(false);
-      }}
+  // Recent current-version runs for the sidebar quick-switcher.
+  const recentRuns = useMemo(
+    () => filteredRuns.filter((r) => r.is_latest !== 0).slice(0, 25),
+    [filteredRuns],
+  );
+
+  // Open a run from the dashboard or the sidebar quick-switcher.
+  const openRun = (id: string) => {
+    setShowDashboard(false);
+    void refresh(id);
+    setCat("All");
+    setStatusFilter("all");
+    setMobileNav(false);
+  };
+
+  // Compact one-line run row for the sidebar quick-switcher (latest versions).
+  const recentItem = (r: RunData) => (
+    <button
+      key={r.id}
+      className={`recent-item ${r.id === runId && !showDashboard ? "active" : ""}`}
+      onClick={() => openRun(r.id)}
+      title={`${r.project_name} — ${r.original_filename}\n${formatDateTime(r.created_at)}`}
     >
-      <div
-        className="run-item-name"
-        title={`${r.original_filename}\n${formatDateTime(r.created_at)}`}
-      >
-        {r.original_filename || r.project_name}
+      <div className="recent-top">
+        {r.design_stage && <StageBadge stage={r.design_stage} variant="dark" />}
+        <span className="recent-name">{r.project_name}</span>
       </div>
-      <div className="run-item-date">{relativeDate(r.created_at)}</div>
-      <div className="run-item-meta">
-        {(r.version ?? 1) > 1 && <>v{r.version} &middot; </>}
-        {r.summary?.duration_seconds != null &&
-          formatDuration(r.summary.duration_seconds)}
-        {r.summary?.deep_mode === false && (
-          <>
-            {" "}
-            &middot; <em>mini</em>
-          </>
+      <div className="recent-sub">
+        {relativeDate(r.created_at)} &middot; {r.original_filename}
+      </div>
+    </button>
+  );
+
+  // One project card in the dashboard grid: stages, each with its run(s) and
+  // expandable version history.
+  const renderProjectCard = (pg: ProjectGroup) => (
+    <div className="pcard" key={pg.key}>
+      <div className="pcard-head">
+        <h3 className="pcard-name" title={pg.name}>
+          {pg.name}
+        </h3>
+        <div className="pcard-meta">
+          {pg.createdBy && <span className="pcard-owner">{pg.createdBy}</span>}
+          <span>
+            {pg.runCount} run{pg.runCount === 1 ? "" : "s"}
+          </span>
+          {pg.lastActivity && <span>&middot; {relativeDate(pg.lastActivity)}</span>}
+        </div>
+      </div>
+      <div className="pcard-stages">
+        {pg.stages.map((sg) => (
+          <div className="pcard-stage" key={sg.stage || "none"}>
+            <div className="pcard-stage-head">
+              {sg.stage ? (
+                <StageBadge stage={sg.stage} />
+              ) : (
+                <span className="stage-none-l">Unstaged</span>
+              )}
+            </div>
+            <div className="pcard-runs">
+              {sg.lineages.map((ln) => {
+                const r = ln.latest;
+                const open = expandedVersions.has(ln.root);
+                return (
+                  <div className="pcard-lineage" key={ln.root}>
+                    <button
+                      className={`pcard-run ${r.id === runId && !showDashboard ? "active" : ""}`}
+                      onClick={() => openRun(r.id)}
+                    >
+                      <span className="pcard-run-main">
+                        <span
+                          className="pcard-run-file"
+                          title={r.original_filename}
+                        >
+                          {r.original_filename || r.project_name}
+                        </span>
+                        <span className="pcard-run-sub">
+                          {(r.version ?? 1) > 1 && <>v{r.version} &middot; </>}
+                          {relativeDate(r.created_at)}
+                          {(r.created_by || r.engineer_name) && (
+                            <> &middot; {r.created_by || r.engineer_name}</>
+                          )}
+                        </span>
+                      </span>
+                      <span className="pcard-run-pills">
+                        <span className="pill pill-p">
+                          {r.status_counts.Pass ?? 0}
+                        </span>
+                        <span className="pill pill-f">
+                          {r.status_counts.Fail ?? 0}
+                        </span>
+                        <span className="pill pill-r">
+                          {r.status_counts["Needs Review"] ?? 0}
+                        </span>
+                      </span>
+                    </button>
+                    <div className="pcard-run-actions">
+                      <button
+                        className="pcard-act"
+                        title="Re-analyze (saves a new version)"
+                        onClick={() => void reanalyze(r.id)}
+                        disabled={uploading}
+                      >
+                        &#8635; Re-analyze
+                      </button>
+                      {ln.versions.length > 1 && (
+                        <button
+                          className="pcard-act"
+                          onClick={() => toggleVersions(ln.root)}
+                        >
+                          {open ? "▾" : "▸"} {ln.versions.length} versions
+                        </button>
+                      )}
+                      <button
+                        className="pcard-act pcard-act-del"
+                        title="Delete this version"
+                        onClick={() => void deleteRun(r.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    {open && ln.versions.length > 1 && (
+                      <div className="pcard-vers">
+                        {ln.versions.map((v) => (
+                          <button
+                            key={v.id}
+                            className={`pcard-ver ${v.id === runId && !showDashboard ? "active" : ""}`}
+                            onClick={() => openRun(v.id)}
+                          >
+                            <span className="pcard-ver-num">
+                              v{v.version ?? 1}
+                            </span>
+                            <span className="pcard-ver-date">
+                              {relativeDate(v.created_at)}
+                            </span>
+                            {v.is_latest ? (
+                              <span className="ver-tag">current</span>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderDashboard = () => (
+    <div className="dashboard">
+      <div className="dash-head">
+        <div>
+          <h1 className="dash-title">Projects</h1>
+          <p className="dash-sub">
+            {projectGroups.length} project
+            {projectGroups.length === 1 ? "" : "s"} &middot; {runs.length} run
+            {runs.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        {runs.length > 5 && (
+          <input
+            className="dash-search"
+            type="text"
+            placeholder="Search projects, runs, engineers…"
+            value={runSearch}
+            onChange={(e) => setRunSearch(e.target.value)}
+          />
         )}
       </div>
-      {(r.created_by || r.engineer_name) && (
-        <div className="run-item-eng">{r.created_by || r.engineer_name}</div>
+      {projectGroups.length ? (
+        <div className="pcard-grid">{projectGroups.map(renderProjectCard)}</div>
+      ) : runs.length ? (
+        <div className="dim">No projects match &ldquo;{runSearch}&rdquo;.</div>
+      ) : (
+        <div className="welcome">
+          <div className="welcome-icon">&#9889;</div>
+          <h2>Upload a planset PDF to start</h2>
+          <p>
+            {CATEGORIES.length * 7}+ checks across {CATEGORIES.length} categories.
+            AI-powered engineering validation with NEC code references.
+          </p>
+          <a
+            className="hdr-btn"
+            href={`${API}/api/due-diligence-template`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            &#8681; Download Due Diligence Template
+          </a>
+        </div>
       )}
-      <div className="run-item-pills">
-        <span className="pill pill-p">
-          {r.issues
-            ? r.issues.filter((i) => i.status === "Pass").length
-            : (r.status_counts.Pass ?? 0)}
-        </span>
-        <span className="pill pill-f">
-          {r.issues
-            ? r.issues.filter((i) => i.status === "Fail").length
-            : (r.status_counts.Fail ?? 0)}
-        </span>
-        <span className="pill pill-r">
-          {r.issues
-            ? r.issues.filter((i) => i.status === "Needs Review").length
-            : (r.status_counts["Needs Review"] ?? 0)}
-        </span>
-      </div>
-      <div className="run-item-actions">
-        <button
-          className="run-act"
-          title="Re-analyze (saves a new version)"
-          onClick={(e) => {
-            e.stopPropagation();
-            void reanalyze(r.id);
-          }}
-          disabled={uploading}
-        >
-          &#8635;
-        </button>
-        <button
-          className="run-act run-act-del"
-          title="Delete this version"
-          onClick={(e) => {
-            e.stopPropagation();
-            void deleteRun(r.id);
-          }}
-        >
-          &times;
-        </button>
-      </div>
     </div>
   );
 
@@ -2076,102 +2197,37 @@ export default function App() {
             </form>
 
             <div className="run-list">
-              <div className="run-list-head">
-                <span className="run-list-title">Projects</span>
+              <button
+                className={`side-projects-btn ${showDashboard ? "active" : ""}`}
+                onClick={() => {
+                  setShowDashboard(true);
+                  setMobileNav(false);
+                }}
+              >
+                <span className="side-projects-icon">&#128193;</span>
+                All Projects
                 {projectGroups.length > 0 && (
-                  <span className="run-list-count">{projectGroups.length}</span>
+                  <span className="side-projects-count">
+                    {projectGroups.length}
+                  </span>
                 )}
+              </button>
+              <div className="run-list-head">
+                <span className="run-list-title">Recent</span>
               </div>
               {runs.length > 5 && (
                 <input
                   className="run-search"
                   type="text"
-                  placeholder={"Search projects, runs, engineers…"}
+                  placeholder={"Search…"}
                   value={runSearch}
                   onChange={(e) => setRunSearch(e.target.value)}
                 />
               )}
-              {projectGroups.map((pg) => {
-                const open = !collapsedProjects.has(pg.key);
-                return (
-                  <div key={pg.key} className="proj-group">
-                    <button
-                      className="proj-head"
-                      onClick={() => toggleProject(pg.key)}
-                      title={pg.createdBy ? `Owner: ${pg.createdBy}` : undefined}
-                    >
-                      <span className="proj-caret">
-                        {open ? "▾" : "▸"}
-                      </span>
-                      <span className="proj-name">{pg.name}</span>
-                      <span className="proj-count">{pg.runCount}</span>
-                    </button>
-                    {open &&
-                      pg.stages.map((sg) => (
-                        <div key={sg.stage || "none"} className="stage-group">
-                          <div className="stage-group-head">
-                            {sg.stage ? (
-                              <StageBadge stage={sg.stage} variant="dark" />
-                            ) : (
-                              <span className="stage-none">Unstaged</span>
-                            )}
-                          </div>
-                          {sg.lineages.map((ln) => (
-                            <div key={ln.root} className="lineage">
-                              {runItem(ln.latest)}
-                              {ln.versions.length > 1 && (
-                                <>
-                                  <button
-                                    className="ver-toggle"
-                                    onClick={() => toggleVersions(ln.root)}
-                                  >
-                                    {expandedVersions.has(ln.root)
-                                      ? "▾"
-                                      : "▸"}{" "}
-                                    {ln.versions.length} versions
-                                  </button>
-                                  {expandedVersions.has(ln.root) && (
-                                    <div className="ver-list">
-                                      {ln.versions.map((v) => (
-                                        <button
-                                          key={v.id}
-                                          className={`ver-item ${v.id === runId ? "active" : ""}`}
-                                          onClick={() => {
-                                            void refresh(v.id);
-                                            setCat("All");
-                                            setStatusFilter("all");
-                                            setMobileNav(false);
-                                          }}
-                                        >
-                                          <span className="ver-num">
-                                            v{v.version ?? 1}
-                                          </span>
-                                          <span className="ver-date">
-                                            {relativeDate(v.created_at)}
-                                          </span>
-                                          {v.is_latest ? (
-                                            <span className="ver-tag">
-                                              current
-                                            </span>
-                                          ) : null}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                  </div>
-                );
-              })}
+              {recentRuns.map((r) => recentItem(r))}
               {!runs.length && <div className="dim">No runs yet</div>}
-              {runs.length > 0 && !projectGroups.length && (
-                <div className="dim">
-                  No projects match &ldquo;{runSearch}&rdquo;
-                </div>
+              {runs.length > 0 && !recentRuns.length && (
+                <div className="dim">No runs match &ldquo;{runSearch}&rdquo;</div>
               )}
             </div>
           </>
@@ -2891,7 +2947,9 @@ export default function App() {
           </div>
         )}
 
-        {!run ? (
+        {showDashboard ? (
+          renderDashboard()
+        ) : !run ? (
           !showProjDetails ? (
             <div className="welcome">
               <div className="welcome-icon">&#9889;</div>
@@ -2909,6 +2967,12 @@ export default function App() {
             {/* ── Header ── */}
             <header className="hdr">
               <div className="hdr-left">
+                <button
+                  className="hdr-back"
+                  onClick={() => setShowDashboard(true)}
+                >
+                  &#8249; All Projects
+                </button>
                 <div className="hdr-title-row">
                   <h1 className="hdr-title">{run.project_name}</h1>
                   {run.design_stage && <StageBadge stage={run.design_stage} />}
