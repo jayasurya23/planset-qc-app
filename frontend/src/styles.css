@@ -522,6 +522,11 @@ select.si option, select.si optgroup { background: var(--dark2); color: #fff; }
 .compare-banner em { color: var(--red-fg); font-style: normal; font-weight: 600; }
 .compare-banner-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .compare-banner-actions .ib { background: rgba(255,255,255,.5); border: 1px solid var(--blue); }
+.compare-banner .cmp-stage { font-weight: 800; }
+.compare-suggest { flex-shrink: 0; border: 1px solid var(--blue); background: var(--blue-bg); color: var(--blue-fg); border-radius: 8px; padding: 5px 12px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.compare-suggest:hover { background: var(--blue); color: #fff; }
+.pcard-compare { display: block; margin: 10px 14px 4px; padding: 7px 12px; border: 1px solid var(--blue); background: var(--blue-bg); color: var(--blue-fg); border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; text-align: center; }
+.pcard-compare:hover { background: var(--blue); color: #fff; }
 
 /* Diff sections */
 .diff-section { margin-bottom: 16px; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; background: var(--surface); }
