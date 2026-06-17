@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import type {
   Issue,
+  Me,
   RunData,
   RunFeedback,
   RunRating,
@@ -37,13 +38,63 @@ const STATUSES: Status[] = [
   "Overridden / Accepted by QC Engineer",
 ];
 const DESIGN_STAGES: Array<{ value: string; label: string }> = [
-  { value: "", label: "All stages (no gating)" },
+  { value: "", label: "Auto-detect from title block" },
   { value: "30", label: "30%" },
   { value: "60", label: "60% / IFP" },
   { value: "90", label: "90%" },
   { value: "IFC", label: "IFC" },
   { value: "AsBuilt", label: "As-Built" },
 ];
+// Canonical stage labels + ordering, shared by the badges and the project
+// sidebar grouping. Mirrors backend rule_registry.STAGE_ORDER.
+const STAGE_LABELS: Record<string, string> = {
+  "30": "30%",
+  "60": "60%",
+  "90": "90%",
+  IFC: "IFC",
+  AsBuilt: "As-Built",
+};
+const STAGE_ORDER: Record<string, number> = {
+  "30": 0,
+  "60": 1,
+  "90": 2,
+  IFC: 3,
+  AsBuilt: 4,
+};
+const stageRank = (s?: string | null) =>
+  s && s in STAGE_ORDER ? STAGE_ORDER[s] : 99;
+
+// Project sidebar grouping: Project → Stage → Lineage (a rerun chain keyed by
+// root_run_id) → versions.
+type Lineage = { root: string; latest: RunData; versions: RunData[] };
+type StageGroup = { stage: string; lineages: Lineage[] };
+type ProjectGroup = {
+  key: string;
+  name: string;
+  createdBy: string | null;
+  lastActivity: string;
+  runCount: number;
+  stages: StageGroup[];
+};
+
+function StageBadge({
+  stage,
+  variant = "light",
+}: {
+  stage?: string | null;
+  variant?: "light" | "dark";
+}) {
+  if (!stage) return null;
+  const key = String(stage);
+  return (
+    <span
+      className={`stage-badge stage-badge-${variant} stage-${key}`}
+      title={`Design stage: ${STAGE_LABELS[key] ?? key}`}
+    >
+      {STAGE_LABELS[key] ?? key}
+    </span>
+  );
+}
 const CATEGORIES = [
   "Drawing Index",
   "Title Block",
@@ -425,6 +476,34 @@ export default function App() {
   const [sideOpen, setSideOpen] = useState(true);
   const [mobileNav, setMobileNav] = useState(false);
   const [runSearch, setRunSearch] = useState("");
+  // Signed-in engineer (EasyAuth). Used to attribute runs and auto-fill the
+  // name picker. null until /api/me resolves.
+  const [me, setMe] = useState<Me | null>(null);
+  // Project sidebar: projects are expanded by default (preserving the old
+  // "see all runs" feel); collapsing adds to this set. Version history under a
+  // lineage is collapsed by default and opened per root_run_id.
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleProject = useCallback((id: string) => {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const [expandedVersions, setExpandedVersions] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleVersions = useCallback((root: string) => {
+    setExpandedVersions((prev) => {
+      const next = new Set(prev);
+      if (next.has(root)) next.delete(root);
+      else next.add(root);
+      return next;
+    });
+  }, []);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [showProjDetails, setShowProjDetails] = useState(false);
   const [pd, setPd] = useState<Partial<ProjectDetails>>({});
@@ -767,6 +846,30 @@ export default function App() {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  // Resolve the signed-in engineer once. In production the EasyAuth sidecar
+  // injects identity; locally /api/me returns nulls (DEV_USER_EMAIL fallback).
+  // Auto-fill the name picker when the user hasn't chosen one yet.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/api/me`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m: Me | null) => {
+        if (cancelled || !m) return;
+        setMe(m);
+        const display = (m.name || m.email || "").trim();
+        if (display && !engineerName.trim()) {
+          const resolved = rememberEngineer(display);
+          setEngineerName(resolved || display);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only: auto-fill should reflect the name as it was at load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const run = useMemo(
@@ -1171,7 +1274,7 @@ export default function App() {
   const reanalyze = async (id: string) => {
     if (
       !confirm(
-        "Re-run analysis on this PDF? The current results will be replaced.",
+        "Re-run analysis on this PDF? This saves a new version; the current one is kept in history.",
       )
     )
       return;
@@ -1200,7 +1303,14 @@ export default function App() {
       const d = await pollProgress(upload_id);
       setProgressPct(100);
       setProgress("Done!");
-      setRuns((p) => [d, ...p.filter((x) => x.id !== id && x.id !== d.id)]);
+      // Non-destructive: refetch so the new version AND the now-superseded
+      // prior version (is_latest flipped server-side) both reflect correctly.
+      try {
+        const all = await (await fetch(`${API}/api/runs`)).json();
+        setRuns(all);
+      } catch {
+        setRuns((p) => [d, ...p.filter((x) => x.id !== d.id)]);
+      }
       setRunId(d.id);
       setCat("All");
       setStatusFilter("all");
@@ -1406,9 +1516,166 @@ export default function App() {
         (r) =>
           (r.project_name || "").toLowerCase().includes(runQuery) ||
           (r.original_filename || "").toLowerCase().includes(runQuery) ||
-          (r.engineer_name || "").toLowerCase().includes(runQuery),
+          (r.engineer_name || "").toLowerCase().includes(runQuery) ||
+          (r.created_by || "").toLowerCase().includes(runQuery),
       )
     : runs;
+
+  // Group the flat run list into Project → Stage → Lineage (rerun chain) for
+  // the sidebar. Everything is derived from /api/runs, which now carries
+  // project_id / design_stage / version / is_latest / root_run_id.
+  const projectGroups: ProjectGroup[] = useMemo(() => {
+    const byProj = new Map<string, RunData[]>();
+    for (const r of filteredRuns) {
+      const key =
+        r.project_id || `name:${(r.project_name || "").trim().toLowerCase()}`;
+      const arr = byProj.get(key);
+      if (arr) arr.push(r);
+      else byProj.set(key, [r]);
+    }
+    const projects: ProjectGroup[] = [];
+    for (const [key, prs] of byProj) {
+      // Lineages by root_run_id (a rerun chain shares a root).
+      const byRoot = new Map<string, RunData[]>();
+      for (const r of prs) {
+        const root = r.root_run_id || r.id;
+        const arr = byRoot.get(root);
+        if (arr) arr.push(r);
+        else byRoot.set(root, [r]);
+      }
+      const lineages: Lineage[] = [];
+      for (const [root, vers] of byRoot) {
+        const versions = [...vers].sort(
+          (a, b) =>
+            (b.version ?? 1) - (a.version ?? 1) ||
+            (b.created_at > a.created_at ? 1 : -1),
+        );
+        const latest = versions.find((v) => v.is_latest) ?? versions[0];
+        lineages.push({ root, latest, versions });
+      }
+      // Group lineages by their latest run's stage.
+      const byStage = new Map<string, Lineage[]>();
+      for (const ln of lineages) {
+        const s = ln.latest.design_stage || "";
+        const arr = byStage.get(s);
+        if (arr) arr.push(ln);
+        else byStage.set(s, [ln]);
+      }
+      const stages: StageGroup[] = [...byStage.entries()]
+        .map(([stage, lins]) => ({
+          stage,
+          lineages: lins.sort((a, b) =>
+            b.latest.created_at > a.latest.created_at ? 1 : -1,
+          ),
+        }))
+        .sort((a, b) => stageRank(a.stage) - stageRank(b.stage));
+      const first = prs[0];
+      const lastActivity = prs.reduce(
+        (m, r) => (r.created_at > m ? r.created_at : m),
+        "",
+      );
+      const createdBy =
+        prs.map((r) => r.created_by).find(Boolean) ||
+        prs.map((r) => r.engineer_name).find(Boolean) ||
+        null;
+      projects.push({
+        key,
+        name: first.project_name || "(untitled project)",
+        createdBy,
+        lastActivity,
+        runCount: prs.length,
+        stages,
+      });
+    }
+    projects.sort((a, b) => (b.lastActivity > a.lastActivity ? 1 : -1));
+    return projects;
+  }, [filteredRuns]);
+
+  // Distinct existing project names for the upload form's datalist, so an
+  // engineer reuses an exact name (and the run joins that project).
+  const projectNames = useMemo(
+    () =>
+      Array.from(
+        new Set(runs.map((r) => (r.project_name || "").trim()).filter(Boolean)),
+      ).sort((a, b) => a.localeCompare(b)),
+    [runs],
+  );
+
+  // One run row in the sidebar (the latest of a lineage). Reused for the
+  // project/stage tree; reads handlers + selection from the enclosing scope.
+  const runItem = (r: RunData) => (
+    <div
+      className={`run-item ${r.id === runId ? "active" : ""}`}
+      onClick={() => {
+        void refresh(r.id);
+        setCat("All");
+        setStatusFilter("all");
+        setMobileNav(false);
+      }}
+    >
+      <div
+        className="run-item-name"
+        title={`${r.original_filename}\n${formatDateTime(r.created_at)}`}
+      >
+        {r.original_filename || r.project_name}
+      </div>
+      <div className="run-item-date">{relativeDate(r.created_at)}</div>
+      <div className="run-item-meta">
+        {(r.version ?? 1) > 1 && <>v{r.version} &middot; </>}
+        {r.summary?.duration_seconds != null &&
+          formatDuration(r.summary.duration_seconds)}
+        {r.summary?.deep_mode === false && (
+          <>
+            {" "}
+            &middot; <em>mini</em>
+          </>
+        )}
+      </div>
+      {(r.created_by || r.engineer_name) && (
+        <div className="run-item-eng">{r.created_by || r.engineer_name}</div>
+      )}
+      <div className="run-item-pills">
+        <span className="pill pill-p">
+          {r.issues
+            ? r.issues.filter((i) => i.status === "Pass").length
+            : (r.status_counts.Pass ?? 0)}
+        </span>
+        <span className="pill pill-f">
+          {r.issues
+            ? r.issues.filter((i) => i.status === "Fail").length
+            : (r.status_counts.Fail ?? 0)}
+        </span>
+        <span className="pill pill-r">
+          {r.issues
+            ? r.issues.filter((i) => i.status === "Needs Review").length
+            : (r.status_counts["Needs Review"] ?? 0)}
+        </span>
+      </div>
+      <div className="run-item-actions">
+        <button
+          className="run-act"
+          title="Re-analyze (saves a new version)"
+          onClick={(e) => {
+            e.stopPropagation();
+            void reanalyze(r.id);
+          }}
+          disabled={uploading}
+        >
+          &#8635;
+        </button>
+        <button
+          className="run-act run-act-del"
+          title="Delete this version"
+          onClick={(e) => {
+            e.stopPropagation();
+            void deleteRun(r.id);
+          }}
+        >
+          &times;
+        </button>
+      </div>
+    </div>
+  );
 
   // ── Render ──
   return (
@@ -1513,13 +1780,27 @@ export default function App() {
                     <option value="__add__">+ Add new engineer…</option>
                   </select>
                 )}
+                {me?.email && (
+                  <div
+                    className="eng-signed-in"
+                    title="Signed in via Microsoft Entra — runs are attributed to this account"
+                  >
+                    ✓ {me.email}
+                  </div>
+                )}
               </div>
               <input
                 value={projName}
                 onChange={(e) => setProjName(e.target.value)}
-                placeholder="Project name"
+                placeholder="Project (reuse a name to group runs)"
                 className="si"
+                list="known-projects"
               />
+              <datalist id="known-projects">
+                {projectNames.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
               <label
                 className={`planset-drop ${plansetDragOver ? "planset-drop-over" : ""} ${plansetFile ? "planset-drop-filled" : ""}`}
                 onDragOver={(e) => {
@@ -1722,96 +2003,101 @@ export default function App() {
 
             <div className="run-list">
               <div className="run-list-head">
-                <span className="run-list-title">Analysis Runs</span>
-                {runs.length > 0 && (
-                  <span className="run-list-count">{runs.length}</span>
+                <span className="run-list-title">Projects</span>
+                {projectGroups.length > 0 && (
+                  <span className="run-list-count">{projectGroups.length}</span>
                 )}
               </div>
               {runs.length > 5 && (
                 <input
                   className="run-search"
                   type="text"
-                  placeholder={"Search runs…"}
+                  placeholder={"Search projects, runs, engineers…"}
                   value={runSearch}
                   onChange={(e) => setRunSearch(e.target.value)}
                 />
               )}
-              {filteredRuns.map((r) => (
-                <div
-                  key={r.id}
-                  className={`run-item ${r.id === runId ? "active" : ""}`}
-                  onClick={() => {
-                    void refresh(r.id);
-                    setCat("All");
-                    setStatusFilter("all");
-                    setMobileNav(false);
-                  }}
-                >
-                  <div
-                    className="run-item-name"
-                    title={`${r.project_name}\n${formatDateTime(r.created_at)}`}
-                  >
-                    {r.project_name}
-                  </div>
-                  <div className="run-item-date">{relativeDate(r.created_at)}</div>
-                  <div className="run-item-meta">
-                    {r.original_filename}
-                    {r.summary?.duration_seconds != null && (
-                      <> &middot; {formatDuration(r.summary.duration_seconds)}</>
-                    )}
-                    {r.summary?.deep_mode === false && (
-                      <> &middot; <em>mini</em></>
-                    )}
-                  </div>
-                  {r.engineer_name && (
-                    <div className="run-item-eng">{r.engineer_name}</div>
-                  )}
-                  <div className="run-item-pills">
-                    <span className="pill pill-p">
-                      {r.issues
-                        ? r.issues.filter((i) => i.status === "Pass").length
-                        : (r.status_counts.Pass ?? 0)}
-                    </span>
-                    <span className="pill pill-f">
-                      {r.issues
-                        ? r.issues.filter((i) => i.status === "Fail").length
-                        : (r.status_counts.Fail ?? 0)}
-                    </span>
-                    <span className="pill pill-r">
-                      {r.issues
-                        ? r.issues.filter((i) => i.status === "Needs Review")
-                            .length
-                        : (r.status_counts["Needs Review"] ?? 0)}
-                    </span>
-                  </div>
-                  <div className="run-item-actions">
+              {projectGroups.map((pg) => {
+                const open = !collapsedProjects.has(pg.key);
+                return (
+                  <div key={pg.key} className="proj-group">
                     <button
-                      className="run-act"
-                      title="Re-analyze"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void reanalyze(r.id);
-                      }}
-                      disabled={uploading}
+                      className="proj-head"
+                      onClick={() => toggleProject(pg.key)}
+                      title={pg.createdBy ? `Owner: ${pg.createdBy}` : undefined}
                     >
-                      &#8635;
+                      <span className="proj-caret">
+                        {open ? "▾" : "▸"}
+                      </span>
+                      <span className="proj-name">{pg.name}</span>
+                      <span className="proj-count">{pg.runCount}</span>
                     </button>
-                    <button
-                      className="run-act run-act-del"
-                      title="Delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void deleteRun(r.id);
-                      }}
-                    >
-                      &times;
-                    </button>
+                    {open &&
+                      pg.stages.map((sg) => (
+                        <div key={sg.stage || "none"} className="stage-group">
+                          <div className="stage-group-head">
+                            {sg.stage ? (
+                              <StageBadge stage={sg.stage} variant="dark" />
+                            ) : (
+                              <span className="stage-none">Unstaged</span>
+                            )}
+                          </div>
+                          {sg.lineages.map((ln) => (
+                            <div key={ln.root} className="lineage">
+                              {runItem(ln.latest)}
+                              {ln.versions.length > 1 && (
+                                <>
+                                  <button
+                                    className="ver-toggle"
+                                    onClick={() => toggleVersions(ln.root)}
+                                  >
+                                    {expandedVersions.has(ln.root)
+                                      ? "▾"
+                                      : "▸"}{" "}
+                                    {ln.versions.length} versions
+                                  </button>
+                                  {expandedVersions.has(ln.root) && (
+                                    <div className="ver-list">
+                                      {ln.versions.map((v) => (
+                                        <button
+                                          key={v.id}
+                                          className={`ver-item ${v.id === runId ? "active" : ""}`}
+                                          onClick={() => {
+                                            void refresh(v.id);
+                                            setCat("All");
+                                            setStatusFilter("all");
+                                            setMobileNav(false);
+                                          }}
+                                        >
+                                          <span className="ver-num">
+                                            v{v.version ?? 1}
+                                          </span>
+                                          <span className="ver-date">
+                                            {relativeDate(v.created_at)}
+                                          </span>
+                                          {v.is_latest ? (
+                                            <span className="ver-tag">
+                                              current
+                                            </span>
+                                          ) : null}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {!runs.length && <div className="dim">No runs yet</div>}
-              {runs.length > 0 && !filteredRuns.length && (
-                <div className="dim">No runs match &ldquo;{runSearch}&rdquo;</div>
+              {runs.length > 0 && !projectGroups.length && (
+                <div className="dim">
+                  No projects match &ldquo;{runSearch}&rdquo;
+                </div>
               )}
             </div>
           </>
@@ -2549,10 +2835,29 @@ export default function App() {
             {/* ── Header ── */}
             <header className="hdr">
               <div className="hdr-left">
-                <h1 className="hdr-title">{run.project_name}</h1>
+                <div className="hdr-title-row">
+                  <h1 className="hdr-title">{run.project_name}</h1>
+                  {run.design_stage && <StageBadge stage={run.design_stage} />}
+                  {(run.version ?? 1) > 1 && (
+                    <span className="hdr-version" title="Re-analysis version">
+                      v{run.version}
+                    </span>
+                  )}
+                  {run.is_latest === 0 && (
+                    <span
+                      className="hdr-superseded"
+                      title="A newer version of this run exists"
+                    >
+                      superseded
+                    </span>
+                  )}
+                </div>
                 <div className="hdr-meta">
                   {run.original_filename} &middot; {run.page_count} pages
                   &middot; {formatDateTime(run.created_at)}
+                  {(run.created_by || run.engineer_name) && (
+                    <> &middot; by {run.created_by || run.engineer_name}</>
+                  )}
                   &middot;{" "}
                   <code
                     className="run-id"
