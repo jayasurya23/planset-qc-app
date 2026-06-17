@@ -118,6 +118,22 @@ def _pretty_title_for(check_name: str) -> str:
     return check_name.replace("_", " ").title()
 
 
+def _sheet_title_matches(
+    title: str, keywords: tuple[str, ...], exclude: tuple[str, ...] = ()
+) -> bool:
+    """True when ``title`` contains any keyword and no exclude term.
+
+    Case-insensitive substring match. ``exclude`` lets a broad structural
+    keyword reject a different sheet type that happens to share a word — the
+    canonical case is "EQUIPMENT PAD" detail/feeder checks that must not claim
+    an "EQUIPMENT PAD GROUNDING" sheet (owned by the Grounding check).
+    """
+    t = (title or "").upper()
+    if not any(kw.upper() in t for kw in keywords):
+        return False
+    return not any(ex.upper() in t for ex in exclude)
+
+
 def _pick_page_for_finding(finding: dict, page_numbers: list[int]) -> int | None:
     """If the model reported which page of the batch the issue is on, return
     the corresponding actual PDF page number. Supports ``page_index`` (0-based
@@ -2466,14 +2482,21 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         return all_issues
 
     # ── Find pages by TITLE keywords (not E-number prefixes) ──
-    def find_pages(*keywords: str) -> list[int]:
-        """Return page numbers whose sheet title matches any keyword."""
-        results: list[int] = []
-        for p in pages:
-            title = (p.sheet_title or "").upper()
-            if any(kw.upper() in title for kw in keywords):
-                results.append(p.number)
-        return results
+    def find_pages(*keywords: str, exclude: tuple[str, ...] = ()) -> list[int]:
+        """Return page numbers whose sheet title matches any keyword.
+
+        ``exclude`` rejects titles that *also* contain a disqualifying term.
+        This stops a broad structural keyword from latching onto a different
+        sheet type — e.g. the "EQUIPMENT PAD" detail/feeder checks must not
+        claim an "EQUIPMENT PAD GROUNDING" electrical sheet (that belongs to
+        the Grounding check), which would emit false "pad dimensions missing"
+        fails on a sheet that legitimately shows none.
+        """
+        return [
+            p.number
+            for p in pages
+            if _sheet_title_matches(p.sheet_title or "", keywords, exclude)
+        ]
 
     # 1 ── Cover Sheet (always page 1) ─────────────────────────────────────
     all_issues.extend(
@@ -2695,7 +2718,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
 
     # 20 ── Equipment Area Feeder Plan ─────────────────────────────────
     eaf = find_pages("EQUIPMENT AREA", "EQUIPMENT PAD", "PAD FEEDER",
-                     "EQUIPMENT FEEDER")
+                     "EQUIPMENT FEEDER", exclude=("GROUNDING",))
     if eaf:
         all_issues.extend(
             _safe_call(
@@ -2719,7 +2742,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
 
     # 22 ── PAD / Slab Details ────────────────────────────────────────
     pad = find_pages("PAD DETAIL", "SLAB DETAIL", "CONCRETE PAD",
-                     "EQUIPMENT PAD", "FOUNDATION DETAIL")
+                     "EQUIPMENT PAD", "FOUNDATION DETAIL", exclude=("GROUNDING",))
     if pad:
         all_issues.extend(
             _safe_call(
