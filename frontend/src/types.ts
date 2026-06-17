@@ -207,6 +207,7 @@ export interface RunData {
   project_details?: Partial<ProjectDetails> | null
   engineer_name?: string | null
   // ── Projects / multi-user / rerun-versioning (Phase 1 backend) ──
+  run_name?: string | null
   project_id?: string | null
   design_stage?: string | null
   created_by?: string | null

@@ -104,6 +104,9 @@ def init_db() -> None:
             ("root_run_id",   "ALTER TABLE runs ADD COLUMN root_run_id TEXT"),
             ("version",       "ALTER TABLE runs ADD COLUMN version INTEGER"),
             ("is_latest",     "ALTER TABLE runs ADD COLUMN is_latest INTEGER"),
+            # Optional human-friendly label for a run (falls back to the PDF
+            # filename in the UI when unset).
+            ("run_name",      "ALTER TABLE runs ADD COLUMN run_name TEXT"),
         ]:
             try:
                 cur.execute(f"SELECT {col} FROM runs LIMIT 1")
@@ -347,8 +350,8 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 status_counts_json, categories_json,
                 project_details_json, engineer_name,
                 project_id, design_stage, created_by, created_by_id,
-                parent_run_id, root_run_id, version, is_latest
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                parent_run_id, root_run_id, version, is_latest, run_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run["id"],
@@ -372,6 +375,7 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 run.get("root_run_id") or run["id"],
                 run.get("version") or 1,
                 1 if run.get("is_latest", 1) else 0,
+                (run.get("run_name") or "").strip() or None,
             ),
         )
         cur.executemany(
@@ -620,10 +624,22 @@ def _run_card(row: sqlite3.Row) -> dict[str, Any]:
 
 
 _RUN_CARD_COLS = (
-    "id, project_id, project_name, original_filename, design_stage, version, "
-    "is_latest, parent_run_id, root_run_id, created_at, created_by, "
+    "id, project_id, project_name, original_filename, run_name, design_stage, "
+    "version, is_latest, parent_run_id, root_run_id, created_at, created_by, "
     "engineer_name, page_count, status_counts_json"
 )
+
+
+def update_run_name(run_id: str, run_name: str | None) -> dict[str, Any] | None:
+    """Set (or clear, when blank) a run's human-friendly name."""
+    name = (run_name or "").strip() or None
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE runs SET run_name = ? WHERE id = ?", (name, run_id))
+        if cur.rowcount == 0:
+            return None
+        conn.commit()
+    return get_run(run_id)
 
 
 def get_project_detail(project_id: str) -> dict[str, Any] | None:
