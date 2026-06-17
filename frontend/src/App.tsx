@@ -581,6 +581,19 @@ export default function App() {
       return next;
     });
   }, []);
+  // Dashboard project cards collapse by default (uniform height, no wasted
+  // space); expanding a card reveals its full run rows.
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleCard = useCallback((key: string) => {
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [showProjDetails, setShowProjDetails] = useState(false);
   const [pd, setPd] = useState<Partial<ProjectDetails>>({});
@@ -1746,20 +1759,68 @@ export default function App() {
 
   // One project card in the dashboard grid: stages, each with its run(s) and
   // expandable version history.
-  const renderProjectCard = (pg: ProjectGroup) => (
-    <div className="pcard" key={pg.key}>
-      <div className="pcard-head">
-        <h3 className="pcard-name" title={pg.name}>
-          {pg.name}
-        </h3>
-        <div className="pcard-meta">
-          {pg.createdBy && <span className="pcard-owner">{pg.createdBy}</span>}
-          <span>
-            {pg.runCount} run{pg.runCount === 1 ? "" : "s"}
-          </span>
-          {pg.lastActivity && <span>&middot; {relativeDate(pg.lastActivity)}</span>}
+  const renderProjectCard = (pg: ProjectGroup) => {
+    const expanded = expandedCards.has(pg.key);
+    return (
+    <div className={`pcard ${expanded ? "pcard-open" : ""}`} key={pg.key}>
+      <button className="pcard-head" onClick={() => toggleCard(pg.key)}>
+        <span className="pcard-caret">{expanded ? "▾" : "▸"}</span>
+        <div className="pcard-head-main">
+          <h3 className="pcard-name" title={pg.name}>
+            {pg.name}
+          </h3>
+          <div className="pcard-meta">
+            {pg.createdBy && (
+              <span className="pcard-owner">{pg.createdBy}</span>
+            )}
+            <span>
+              {pg.runCount} run{pg.runCount === 1 ? "" : "s"}
+            </span>
+            {pg.lastActivity && (
+              <span>&middot; {relativeDate(pg.lastActivity)}</span>
+            )}
+          </div>
         </div>
-      </div>
+      </button>
+      {!expanded ? (
+        <div className="pcard-summary">
+          {pg.stages.map((sg) => {
+            const latest = sg.lineages[0]?.latest;
+            return (
+              <button
+                className="pcard-sum-row"
+                key={sg.stage || "none"}
+                onClick={() => latest && openRun(latest.id)}
+                title={latest ? `Open latest: ${runLabel(latest)}` : undefined}
+              >
+                {sg.stage ? (
+                  <StageBadge stage={sg.stage} />
+                ) : (
+                  <span className="stage-none-l">Unstaged</span>
+                )}
+                {latest && (
+                  <span className="pcard-run-pills">
+                    <span className="pill pill-p">
+                      {latest.status_counts.Pass ?? 0}
+                    </span>
+                    <span className="pill pill-f">
+                      {latest.status_counts.Fail ?? 0}
+                    </span>
+                    <span className="pill pill-r">
+                      {latest.status_counts["Needs Review"] ?? 0}
+                    </span>
+                  </span>
+                )}
+                {sg.lineages.length > 1 && (
+                  <span className="pcard-sum-more">
+                    +{sg.lineages.length - 1}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
       <div className="pcard-stages">
         {pg.stages.map((sg) => (
           <div className="pcard-stage" key={sg.stage || "none"}>
@@ -1867,8 +1928,10 @@ export default function App() {
           </div>
         ))}
       </div>
+      )}
     </div>
-  );
+    );
+  };
 
   const renderDashboard = () => (
     <div className="dashboard">
@@ -1881,15 +1944,33 @@ export default function App() {
             {runs.length === 1 ? "" : "s"}
           </p>
         </div>
-        {runs.length > 5 && (
-          <input
-            className="dash-search"
-            type="text"
-            placeholder="Search projects, runs, engineers…"
-            value={runSearch}
-            onChange={(e) => setRunSearch(e.target.value)}
-          />
-        )}
+        <div className="dash-actions">
+          {projectGroups.length > 0 && (
+            <button
+              className="dash-toggle"
+              onClick={() =>
+                setExpandedCards((prev) =>
+                  prev.size >= projectGroups.length
+                    ? new Set()
+                    : new Set(projectGroups.map((p) => p.key)),
+                )
+              }
+            >
+              {expandedCards.size >= projectGroups.length
+                ? "Collapse all"
+                : "Expand all"}
+            </button>
+          )}
+          {runs.length > 5 && (
+            <input
+              className="dash-search"
+              type="text"
+              placeholder="Search projects, runs, engineers…"
+              value={runSearch}
+              onChange={(e) => setRunSearch(e.target.value)}
+            />
+          )}
+        </div>
       </div>
       {projectGroups.length ? (
         <div className="pcard-grid">{projectGroups.map(renderProjectCard)}</div>
