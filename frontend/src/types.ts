@@ -206,4 +206,20 @@ export interface RunData {
   issues: Issue[]
   project_details?: Partial<ProjectDetails> | null
   engineer_name?: string | null
+  // ── Projects / multi-user / rerun-versioning (Phase 1 backend) ──
+  project_id?: string | null
+  design_stage?: string | null
+  created_by?: string | null
+  created_by_id?: string | null
+  parent_run_id?: string | null
+  root_run_id?: string | null
+  version?: number | null
+  is_latest?: number | boolean | null
+}
+
+/** Signed-in engineer, from GET /api/me (EasyAuth identity). */
+export interface Me {
+  email: string | null
+  user_id: string | null
+  name: string | null
 }
