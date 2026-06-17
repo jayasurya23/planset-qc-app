@@ -340,6 +340,78 @@ function GeminiBar({
   );
 }
 
+function initials(s: string): string {
+  const t = (s || "").trim();
+  if (!t) return "?";
+  const local = t.replace(/@.*/, "");
+  const parts = local.split(/[\s._-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return local.slice(0, 2).toUpperCase();
+}
+
+// Top-right account widget. In production the Azure Container Apps EasyAuth
+// sidecar handles the actual Microsoft Entra sign-in (/.auth/login/aad) and
+// sign-out (/.auth/logout); this surfaces the signed-in identity and those
+// controls. When unauthenticated (or locally), it shows a Sign in button.
+function ProfileMenu({ me }: { me: Me | null }) {
+  const [open, setOpen] = useState(false);
+  if (!me || !me.email) {
+    const back = encodeURIComponent(
+      typeof window !== "undefined"
+        ? window.location.pathname + window.location.search
+        : "/",
+    );
+    return (
+      <div className="profile-widget">
+        <a
+          className="profile-signin"
+          href={`/.auth/login/aad?post_login_redirect_uri=${back}`}
+        >
+          Sign in
+        </a>
+      </div>
+    );
+  }
+  const label = me.name || me.email;
+  return (
+    <div className="profile-widget">
+      <button
+        className="profile-btn"
+        onClick={() => setOpen((o) => !o)}
+        title={me.email ?? undefined}
+      >
+        <span className="profile-avatar">{initials(label)}</span>
+        <span className="profile-name">{label}</span>
+        <span className="profile-caret">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          <div className="profile-backdrop" onClick={() => setOpen(false)} />
+          <div className="profile-menu" role="menu">
+            <div className="profile-menu-head">
+              <span className="profile-avatar profile-avatar-lg">
+                {initials(label)}
+              </span>
+              <div className="profile-menu-id">
+                <div className="profile-menu-name">{label}</div>
+                {me.name && me.email && me.name !== me.email && (
+                  <div className="profile-menu-email">{me.email}</div>
+                )}
+              </div>
+            </div>
+            <a
+              className="profile-menu-item"
+              href="/.auth/logout?post_logout_redirect_uri=/"
+            >
+              Sign out
+            </a>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function StatusBtn({
   current,
   target,
@@ -1680,6 +1752,8 @@ export default function App() {
   // ── Render ──
   return (
     <div className="app">
+      {/* ── Top-right account / sign-in widget ── */}
+      <ProfileMenu me={me} />
       {/* ── Global top-bar waiting animation ── */}
       {uploading && (
         <WaitingAnimation pct={progressPct} label={progress} />
