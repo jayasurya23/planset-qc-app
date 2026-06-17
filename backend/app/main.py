@@ -8,17 +8,20 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .analyzer import analyze_pdf, make_issue, utc_now
+from .auth import current_user
 from .db import (
-    DATA_DIR, delete_run, get_issue_run_id, get_run, init_db,
+    DATA_DIR, delete_run, get_issue_run_id, get_or_create_project,
+    get_project, get_project_detail, get_run, get_run_versions, init_db,
     insert_issue_feedback, insert_manual_issue, insert_run,
-    insert_run_feedback, latest_run_feedback, list_runs, update_issue,
+    insert_run_feedback, latest_run_feedback, list_projects, list_runs,
+    save_run_version, update_issue,
 )
 from .exporter import export_due_diligence, export_run_to_excel
 from .progress import clear_progress, get_progress, set_progress
@@ -367,9 +370,29 @@ async def api_parse_supporting_docs(
     return {"supporting_docs": out}
 
 
+@app.get("/api/me")
+def api_me(user: dict = Depends(current_user)) -> dict:
+    """The signed-in engineer (from EasyAuth, or DEV_USER_EMAIL locally)."""
+    return user
+
+
 @app.get("/api/runs")
 def api_list_runs() -> list[dict]:
     return list_runs()
+
+
+@app.get("/api/projects")
+def api_list_projects() -> list[dict]:
+    """Projects with a per-stage summary, newest activity first."""
+    return list_projects()
+
+
+@app.get("/api/projects/{project_id}")
+def api_get_project(project_id: str) -> dict:
+    proj = get_project_detail(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj
 
 
 @app.get("/api/runs/{run_id}")
@@ -378,6 +401,12 @@ def api_get_run(run_id: str) -> dict:
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@app.get("/api/runs/{run_id}/versions")
+def api_run_versions(run_id: str) -> list[dict]:
+    """All rerun versions in this run's lineage, oldest → newest."""
+    return get_run_versions(run_id)
 
 
 @app.get("/api/progress/{upload_id}")
@@ -398,9 +427,17 @@ def _run_analysis_bg(
     original_filename: str, pd: dict | None, use_deep: bool = True,
     supporting_docs: list[dict] | None = None,
     design_stage: str | None = None,
-    engineer_name: str | None = None,
+    extra_meta: dict | None = None,
 ) -> None:
-    """Run analysis in a background thread, updating progress along the way."""
+    """Run analysis in a background thread, updating progress along the way.
+
+    ``extra_meta`` carries orchestration fields stamped onto the run before it
+    is saved — attribution (engineer_name/created_by/created_by_id), project
+    linkage (project_id), and rerun versioning (parent_run_id/root_run_id/
+    version/is_latest). After a successful save, the predecessor identified by
+    parent_run_id (if any) is marked superseded — done here, not at request
+    time, so a failed reanalysis leaves the prior version intact and current.
+    """
     try:
         def on_progress(step: str, detail: str, pct: int) -> None:
             set_progress(upload_id, step, detail, pct)
@@ -415,11 +452,18 @@ def _run_analysis_bg(
             supporting_docs=supporting_docs,
             design_stage=design_stage,
         )
-        if engineer_name:
-            run["engineer_name"] = engineer_name
+        for key, val in (extra_meta or {}).items():
+            if val is not None:
+                run[key] = val
 
         set_progress(upload_id, "saving", "Saving results...", 95)
-        insert_run(run, issues)
+        # A rerun (predecessor present) is versioned atomically from the
+        # lineage's current state; a fresh analysis is a plain insert.
+        predecessor_run_id = (extra_meta or {}).get("parent_run_id")
+        if predecessor_run_id:
+            save_run_version(run, issues, predecessor_run_id)
+        else:
+            insert_run(run, issues)
         saved = get_run(run["id"])
 
         set_progress(upload_id, "done", "Complete!", 100)
@@ -438,12 +482,14 @@ _VALID_STAGES = {"30", "60", "90", "IFC", "AsBuilt"}
 @app.post("/api/analyze")
 async def api_analyze(
     project_name: str | None = Form(None),
+    project_id: str | None = Form(None),
     project_details: str | None = Form(None),
     use_deep: str | None = Form("true"),
     supporting_docs: str | None = Form(None),
     design_stage: str | None = Form(None),
     engineer_name: str | None = Form(None),
     file: UploadFile = File(...),
+    user: dict = Depends(current_user),
 ) -> dict:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Please upload a PDF file")
@@ -507,10 +553,32 @@ async def api_analyze(
 
     eng = (engineer_name or "").strip() or None
 
+    # Identity: prefer the signed-in user (trustworthy behind EasyAuth in prod);
+    # the engineer_name form field is only a display fallback for local dev.
+    created_by = user.get("email") or eng
+    created_by_id = user.get("user_id")
+    eng_display = eng or user.get("name") or user.get("email")
+
+    # Link every run to a project so the project browser works even before the
+    # explicit picker (Phase 2). Honor a valid explicit project_id, else match
+    # or create one from the (cleaned) project name.
+    proj_name = (project_name or "").strip() or Path(file.filename).stem
+    if project_id and get_project(project_id):
+        resolved_project_id = project_id
+    else:
+        resolved_project_id = get_or_create_project(proj_name, created_by)
+
+    extra_meta = {
+        "engineer_name": eng_display,
+        "created_by": created_by,
+        "created_by_id": created_by_id,
+        "project_id": resolved_project_id,
+    }
+
     # Launch in background thread — return upload_id immediately
     t = threading.Thread(
         target=_run_analysis_bg,
-        args=(upload_id, pdf_path, project_name, file.filename, pd, deep_flag, sd, stage, eng),
+        args=(upload_id, pdf_path, proj_name, file.filename, pd, deep_flag, sd, stage, extra_meta),
         daemon=True,
     )
     t.start()
@@ -518,6 +586,7 @@ async def api_analyze(
     return {
         "upload_id": upload_id, "status": "running",
         "deep_mode": deep_flag, "design_stage": stage,
+        "project_id": resolved_project_id,
     }
 
 
@@ -560,6 +629,7 @@ async def api_reanalyze(
     run_id: str,
     use_deep: str | None = Form("true"),
     engineer_name: str | None = Form(None),
+    user: dict = Depends(current_user),
 ) -> dict:
     old_run = get_run(run_id)
     if not old_run:
@@ -572,32 +642,55 @@ async def api_reanalyze(
     project_name = old_run["project_name"]
     original_filename = old_run["original_filename"]
 
+    # Non-destructive rerun: the new run is the next VERSION in the same lineage.
+    # The old run and its on-disk artifacts are preserved; it is flagged
+    # not-latest only after the new version saves (in _run_analysis_bg), so a
+    # failed reanalysis leaves the prior version intact and current.
     upload_id = str(uuid.uuid4())
     new_run_dir = RUNS_DIR / upload_id
     new_run_dir.mkdir(parents=True, exist_ok=True)
     new_pdf_path = new_run_dir / Path(original_filename).name
     shutil.copy2(old_pdf_path, new_pdf_path)
 
-    old_run_dir = old_pdf_path.parent
-    delete_run(run_id)
-    if old_run_dir.exists() and old_run_dir != new_run_dir:
-        shutil.rmtree(old_run_dir, ignore_errors=True)
-
     set_progress(upload_id, "analyze", "Re-running analysis...", 10)
 
     deep_flag = (use_deep or "true").strip().lower() not in ("false", "0", "no", "off")
 
-    eng = (engineer_name or "").strip() or old_run.get("engineer_name")
+    eng = (engineer_name or "").strip() or None
+    created_by = user.get("email") or eng or old_run.get("created_by")
+    created_by_id = user.get("user_id") or old_run.get("created_by_id")
+    eng_display = (eng or user.get("name") or user.get("email")
+                   or old_run.get("engineer_name"))
+
+    project_id = old_run.get("project_id") or get_or_create_project(
+        project_name or original_filename, created_by)
+    # Force the prior stage so a rerun stays the same stage submission rather
+    # than risking a different auto-detection.
+    old_stage = old_run.get("design_stage")
+
+    # parent_run_id signals "this is a rerun" + identifies the lineage; the
+    # actual version number, root and predecessor are resolved atomically from
+    # the lineage's current tip in db.save_run_version at save time.
+    extra_meta = {
+        "engineer_name": eng_display,
+        "created_by": created_by,
+        "created_by_id": created_by_id,
+        "project_id": project_id,
+        "parent_run_id": run_id,
+    }
 
     t = threading.Thread(
         target=_run_analysis_bg,
         args=(upload_id, new_pdf_path, project_name, original_filename, None,
-              deep_flag, None, None, eng),
+              deep_flag, None, old_stage, extra_meta),
         daemon=True,
     )
     t.start()
 
-    return {"upload_id": upload_id, "status": "running", "deep_mode": deep_flag}
+    return {
+        "upload_id": upload_id, "status": "running",
+        "deep_mode": deep_flag, "parent_run_id": run_id,
+    }
 
 
 @app.patch("/api/issues/{issue_id}")
