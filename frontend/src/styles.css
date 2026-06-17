@@ -343,8 +343,24 @@ select.si option, select.si optgroup { background: var(--dark2); color: #fff; }
 .dash-search { min-width: 240px; font-size: 13px; }
 .pcard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; align-items: start; }
 .pcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2); box-shadow: var(--shadow); overflow: hidden; }
-.pcard-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+.pcard-head { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--border); background: none; padding: 14px 16px; cursor: pointer; color: var(--text); }
+.pcard-head:hover { background: var(--surface2); }
+.pcard.pcard-open .pcard-head { background: var(--surface2); }
+.pcard-caret { font-size: 10px; color: var(--text3); padding-top: 5px; flex: 0 0 auto; }
+.pcard-head-main { min-width: 0; flex: 1; }
 .pcard-name { font-size: 17px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard-summary { display: flex; flex-direction: column; }
+.pcard-sum-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--border); background: none; cursor: pointer; padding: 9px 16px; color: var(--text); }
+.pcard-sum-row:last-child { border-bottom: 0; }
+.pcard-sum-row:hover { background: var(--blue-bg); }
+.pcard-sum-more { font-size: 11px; color: var(--text3); font-weight: 700; }
+.pcard-summary .pcard-run-pills { margin-left: auto; }
+.pcard-summary .pill-p { background: var(--green-bg); color: var(--green-fg); }
+.pcard-summary .pill-f { background: var(--red-bg); color: var(--red-fg); }
+.pcard-summary .pill-r { background: var(--amber-bg); color: var(--amber-fg); }
+.dash-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dash-toggle { border: 1px solid var(--border); background: #fff; color: var(--text2); border-radius: 8px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.dash-toggle:hover { border-color: var(--brand); color: var(--brand); }
 .pcard-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 5px; font-size: 12px; color: var(--text3); }
 .pcard-owner { font-weight: 700; color: #fff; background: rgba(173,31,43,.85); border-radius: 9px; padding: 1px 9px; }
 .pcard-stages { display: flex; flex-direction: column; }
