@@ -1140,43 +1140,6 @@ export default function App() {
     return { fixed, newly, drift, same, removed };
   }, [run, compareRun]);
 
-  // Runs offered in the "Compare with" picker: same-project siblings first,
-  // ordered by stage (the natural cross-stage comparison), then other runs.
-  const compareOptions = useMemo(() => {
-    const siblings: RunData[] = [];
-    const others: RunData[] = [];
-    if (!run) return { siblings, others };
-    const pid = run.project_id;
-    for (const r of runs) {
-      if (r.id === runId) continue;
-      if (pid && r.project_id === pid) siblings.push(r);
-      else others.push(r);
-    }
-    siblings.sort(
-      (a, b) =>
-        stageRank(a.design_stage) - stageRank(b.design_stage) ||
-        (b.created_at > a.created_at ? 1 : -1),
-    );
-    return { siblings, others: others.slice(0, 30) };
-  }, [runs, runId, run]);
-
-  // The best sibling at a *different* stage to one-click compare against:
-  // the nearest earlier stage (so before→after reads forward), else the
-  // nearest later stage.
-  const compareSuggestion = useMemo(() => {
-    if (!run) return null;
-    const cur = stageRank(run.design_stage);
-    const earlier = compareOptions.siblings.filter(
-      (r) => stageRank(r.design_stage) < cur,
-    );
-    const later = compareOptions.siblings.filter(
-      (r) => stageRank(r.design_stage) > cur,
-    );
-    if (earlier.length) return earlier[earlier.length - 1];
-    if (later.length) return later[0];
-    return null;
-  }, [run, compareOptions]);
-
   // Group findings by rule for the issue list. Same rule firing on
   // multiple pages (e.g. "TBD in equipment list" on Row 11, 12, 14)
   // collapses to one card by default. Strip ``stage_deferred_`` and
@@ -1859,27 +1822,6 @@ export default function App() {
         </div>
       ) : (
       <div className="pcard-stages">
-        {pg.stages.length >= 2 &&
-          (() => {
-            const earlier = pg.stages[pg.stages.length - 2];
-            const later = pg.stages[pg.stages.length - 1];
-            const e = earlier.lineages[0]?.latest;
-            const l = later.lineages[0]?.latest;
-            if (!e || !l) return null;
-            return (
-              <button
-                className="pcard-compare"
-                title="Diff the two most recent stages of this project (fixed / persisting / new findings)"
-                onClick={() => {
-                  setCompareRunId(e.id);
-                  openRun(l.id);
-                }}
-              >
-                ⇄ Compare {STAGE_LABELS[earlier.stage] || "no stage"} &rarr;{" "}
-                {STAGE_LABELS[later.stage] || "no stage"}
-              </button>
-            );
-          })()}
         {pg.stages.map((sg) => (
           <div className="pcard-stage" key={sg.stage || "none"}>
             <div className="pcard-stage-head">
@@ -3574,27 +3516,13 @@ export default function App() {
                 {compareRun && diff && (
                   <div className="compare-banner">
                     <div className="compare-banner-text">
-                      <strong>Stage diff</strong> ·{" "}
-                      <span className="cmp-stage">
-                        {STAGE_LABELS[compareRun.design_stage ?? ""] ?? "no stage"}
-                        {(compareRun.version ?? 1) > 1
-                          ? ` v${compareRun.version}`
-                          : ""}
-                      </span>{" "}
-                      &rarr;{" "}
-                      <span className="cmp-stage">
-                        {STAGE_LABELS[run.design_stage ?? ""] ?? "no stage"}
-                        {(run.version ?? 1) > 1 ? ` v${run.version}` : ""}
-                      </span>
-                      {run.project_id &&
-                      run.project_id === compareRun.project_id ? (
-                        <> &middot; {run.project_name}</>
+                      <strong>Diff mode</strong> · comparing{" "}
+                      <code>{compareRun.id.slice(0, 8)}</code> →{" "}
+                      <code>{run.id.slice(0, 8)}</code>
+                      {run.original_filename === compareRun.original_filename ? (
+                        <> · same file ({run.original_filename})</>
                       ) : (
-                        <>
-                          {" "}
-                          &middot;{" "}
-                          <em>different projects — comparison may be misleading</em>
-                        </>
+                        <> · <em>different files — diff may be misleading</em></>
                       )}
                     </div>
                     <div className="compare-banner-actions">
@@ -3638,45 +3566,21 @@ export default function App() {
                       }}
                     >
                       <option value="">(pick a run)</option>
-                      {compareOptions.siblings.length > 0 && (
-                        <optgroup label="This project — other stages / versions">
-                          {compareOptions.siblings.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {STAGE_LABELS[r.design_stage ?? ""] ?? "no stage"}
-                              {(r.version ?? 1) > 1 ? ` v${r.version}` : ""}
-                              {" · "}
-                              {runLabel(r)}
-                              {" · "}
-                              {new Date(r.created_at).toLocaleDateString()}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {compareOptions.others.length > 0 && (
-                        <optgroup label="Other projects">
-                          {compareOptions.others.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.project_name || "(no project)"}
-                              {" — "}
-                              {STAGE_LABELS[r.design_stage ?? ""] ?? "no stage"}
-                              {" · "}
-                              {runLabel(r)}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
+                      {runs
+                        .filter((r) => r.id !== runId)
+                        .slice(0, 30)
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.project_name || "(no project name)"}
+                            {" — "}
+                            {r.original_filename}
+                            {" · "}
+                            {new Date(r.created_at).toLocaleDateString()}
+                            {" · "}
+                            {r.id.slice(0, 8)}
+                          </option>
+                        ))}
                     </select>
-                    {compareSuggestion && (
-                      <button
-                        className="compare-suggest"
-                        onClick={() => setCompareRunId(compareSuggestion.id)}
-                        title={`Diff this run against its ${STAGE_LABELS[compareSuggestion.design_stage ?? ""] ?? "other-stage"} submission`}
-                      >
-                        ⇄ Compare to{" "}
-                        {STAGE_LABELS[compareSuggestion.design_stage ?? ""] ??
-                          "other stage"}
-                      </button>
-                    )}
                   </div>
                 )}
 
