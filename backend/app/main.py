@@ -21,7 +21,7 @@ from .db import (
     get_project, get_project_detail, get_run, get_run_versions, init_db,
     insert_issue_feedback, insert_manual_issue, insert_run,
     insert_run_feedback, latest_run_feedback, list_projects, list_runs,
-    save_run_version, update_issue,
+    save_run_version, update_issue, update_run_name,
 )
 from .exporter import export_due_diligence, export_run_to_excel
 from .progress import clear_progress, get_progress, set_progress
@@ -87,6 +87,10 @@ def on_startup() -> None:
 class IssueUpdate(BaseModel):
     status: str
     override_comment: str | None = None
+
+
+class RunRename(BaseModel):
+    run_name: str | None = None
 
 
 class ManualIssueCreate(BaseModel):
@@ -409,6 +413,15 @@ def api_run_versions(run_id: str) -> list[dict]:
     return get_run_versions(run_id)
 
 
+@app.patch("/api/runs/{run_id}")
+def api_rename_run(run_id: str, payload: RunRename) -> dict:
+    """Set or clear a run's human-friendly name."""
+    updated = update_run_name(run_id, payload.run_name)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return updated
+
+
 @app.get("/api/progress/{upload_id}")
 def api_progress(upload_id: str) -> dict:
     p = get_progress(upload_id)
@@ -483,6 +496,7 @@ _VALID_STAGES = {"30", "60", "90", "IFC", "AsBuilt"}
 async def api_analyze(
     project_name: str | None = Form(None),
     project_id: str | None = Form(None),
+    run_name: str | None = Form(None),
     project_details: str | None = Form(None),
     use_deep: str | None = Form("true"),
     supporting_docs: str | None = Form(None),
@@ -573,6 +587,7 @@ async def api_analyze(
         "created_by": created_by,
         "created_by_id": created_by_id,
         "project_id": resolved_project_id,
+        "run_name": (run_name or "").strip() or None,
     }
 
     # Launch in background thread — return upload_id immediately
@@ -677,6 +692,7 @@ async def api_reanalyze(
         "created_by_id": created_by_id,
         "project_id": project_id,
         "parent_run_id": run_id,
+        "run_name": old_run.get("run_name"),
     }
 
     t = threading.Thread(

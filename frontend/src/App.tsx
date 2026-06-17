@@ -349,6 +349,16 @@ function initials(s: string): string {
   return local.slice(0, 2).toUpperCase();
 }
 
+// A run's display label: its custom name, else the PDF filename.
+function runLabel(r: RunData): string {
+  return (
+    (r.run_name || "").trim() ||
+    r.original_filename ||
+    r.project_name ||
+    "Untitled run"
+  );
+}
+
 // Top-right account widget. In production the Azure Container Apps EasyAuth
 // sidecar handles the actual Microsoft Entra sign-in (/.auth/login/aad) and
 // sign-out (/.auth/logout); this surfaces the signed-in identity and those
@@ -466,6 +476,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState("");
   const [projName, setProjName] = useState("");
+  const [runName, setRunName] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editStatus, setEditStatus] = useState<Status>("Pass");
   const [editComment, setEditComment] = useState("");
@@ -1282,6 +1293,7 @@ export default function App() {
     const fd = new FormData();
     fd.append("file", plansetFile);
     if (projName.trim()) fd.append("project_name", projName.trim());
+    if (runName.trim()) fd.append("run_name", runName.trim());
     if (pdHasValues) fd.append("project_details", JSON.stringify(pd));
     fd.append("use_deep", deepMode ? "true" : "false");
     if (designStage) fd.append("design_stage", designStage);
@@ -1315,6 +1327,7 @@ export default function App() {
       setStatusFilter("all");
       form.reset();
       setProjName("");
+      setRunName("");
       setPlansetFile(null);
       setTimeout(() => {
         setProgress("");
@@ -1687,6 +1700,32 @@ export default function App() {
     setMobileNav(false);
   };
 
+  // Rename a run (blank clears back to the PDF filename).
+  const renameRun = async (r: RunData) => {
+    const next = window.prompt(
+      "Run name (leave blank to use the PDF filename):",
+      r.run_name || "",
+    );
+    if (next === null) return;
+    const name = next.trim();
+    try {
+      const res = await fetch(`${API}/api/runs/${r.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_name: name || null }),
+      });
+      if (!res.ok) return;
+      const updated: RunData = await res.json();
+      setRuns((p) =>
+        p.map((x) =>
+          x.id === r.id ? { ...x, run_name: updated.run_name ?? null } : x,
+        ),
+      );
+    } catch {
+      /* ignore network errors — the name just won't change */
+    }
+  };
+
   // Compact one-line run row for the sidebar quick-switcher (latest versions).
   const recentItem = (r: RunData) => (
     <button
@@ -1700,7 +1739,7 @@ export default function App() {
         <span className="recent-name">{r.project_name}</span>
       </div>
       <div className="recent-sub">
-        {relativeDate(r.created_at)} &middot; {r.original_filename}
+        {relativeDate(r.created_at)} &middot; {runLabel(r)}
       </div>
     </button>
   );
@@ -1744,9 +1783,9 @@ export default function App() {
                       <span className="pcard-run-main">
                         <span
                           className="pcard-run-file"
-                          title={r.original_filename}
+                          title={`${runLabel(r)}\n${r.original_filename}`}
                         >
-                          {r.original_filename || r.project_name}
+                          {runLabel(r)}
                         </span>
                         <span className="pcard-run-sub">
                           {(r.version ?? 1) > 1 && <>v{r.version} &middot; </>}
@@ -1769,6 +1808,13 @@ export default function App() {
                       </span>
                     </button>
                     <div className="pcard-run-actions">
+                      <button
+                        className="pcard-act"
+                        title="Rename this run"
+                        onClick={() => void renameRun(r)}
+                      >
+                        &#9998; Rename
+                      </button>
                       <button
                         className="pcard-act"
                         title="Re-analyze (saves a new version)"
@@ -1996,6 +2042,12 @@ export default function App() {
                   <option key={n} value={n} />
                 ))}
               </datalist>
+              <input
+                value={runName}
+                onChange={(e) => setRunName(e.target.value)}
+                placeholder="Run name (optional — defaults to file name)"
+                className="si"
+              />
               <label
                 className={`planset-drop ${plansetDragOver ? "planset-drop-over" : ""} ${plansetFile ? "planset-drop-filled" : ""}`}
                 onDragOver={(e) => {
@@ -2991,7 +3043,8 @@ export default function App() {
                   )}
                 </div>
                 <div className="hdr-meta">
-                  {run.original_filename} &middot; {run.page_count} pages
+                  <span title={run.original_filename}>{runLabel(run)}</span>{" "}
+                  &middot; {run.page_count} pages
                   &middot; {formatDateTime(run.created_at)}
                   {(run.created_by || run.engineer_name) && (
                     <> &middot; by {run.created_by || run.engineer_name}</>
@@ -3065,6 +3118,13 @@ export default function App() {
                   )}
               </div>
               <div className="hdr-right">
+                <button
+                  className="hdr-btn"
+                  onClick={() => void renameRun(run)}
+                  title="Rename this run"
+                >
+                  &#9998; Rename
+                </button>
                 <button
                   className="hdr-btn"
                   onClick={() => void reanalyze(run.id)}

@@ -199,5 +199,24 @@ i4 = auth.resolve_identity(None, None, "not-valid-base64!!")
 check("auth: garbage blob is safe", i4["email"] is None and i4["user_id"] is None)
 
 
+# ── 8. Run naming ───────────────────────────────────────────────────────────
+NR = str(uuid.uuid4())
+nr = _make_run(NR, p1, created_at="2026-03-01T00:00:00+00:00")
+nr["run_name"] = "  Initial 60% review  "
+db.insert_run(nr, [])
+check("run_name stored + trimmed", db.get_run(NR)["run_name"] == "Initial 60% review")
+
+renamed = db.update_run_name(NR, "Post-comment review")
+check("update_run_name renames", renamed and renamed["run_name"] == "Post-comment review")
+check("rename persisted", db.get_run(NR)["run_name"] == "Post-comment review")
+db.update_run_name(NR, "   ")
+check("blank run_name clears to None", db.get_run(NR)["run_name"] is None)
+check("rename of unknown run returns None", db.update_run_name("nope", "x") is None)
+
+NR2 = str(uuid.uuid4())
+db.insert_run(_make_run(NR2, p1, created_at="2026-03-02T00:00:00+00:00"), [])
+check("run_name defaults to None when unset", db.get_run(NR2)["run_name"] is None)
+
+
 print(f"\n{_passed} passed, {_failed} failed")
 sys.exit(1 if _failed else 0)
