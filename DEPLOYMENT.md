@@ -97,25 +97,39 @@ If a revision is unhealthy, read logs:
 ## 3. Lock access to your organization (Entra)
 
 Built-in auth puts a Microsoft sign-in in front of the whole app — no code change.
+The sign-in **wiring lives in `infra/main.bicep`** (an `authConfigs` resource, param
+`enableEntraAuth`, default `true`), so a full redeploy of the template preserves the
+gate instead of silently dropping it. You only create the Entra **app registration**
+once, then pass its client secret to the deploy.
+
+**One-time — create the app registration** (needs the app's FQDN for the redirect URI):
 
 ```powershell
-$FQDN   = az containerapp show -n $APP -g $RG --query properties.configuration.ingress.fqdn -o tsv
-$TENANT = az account show --query tenantId -o tsv
+$FQDN = az containerapp show -n $APP -g $RG --query properties.configuration.ingress.fqdn -o tsv
 
-# App registration for the sign-in (single-tenant = org-only):
 $AUTHID = az ad app create --display-name "Castillo QAQC Automation - Auth" `
   --sign-in-audience AzureADMyOrg `
   --web-redirect-uris "https://$FQDN/.auth/login/aad/callback" --query appId -o tsv
 az ad sp create --id $AUTHID
 $SECRET = az ad app credential reset --id $AUTHID --query password -o tsv
-
-# Wire it into the Container App and require sign-in:
-az containerapp auth microsoft update -n $APP -g $RG `
-  --client-id $AUTHID --client-secret $SECRET `
-  --issuer "https://login.microsoftonline.com/$TENANT/v2.0" --yes
-az containerapp auth update -n $APP -g $RG `
-  --unauthenticated-client-action RedirectToLoginPage --redirect-provider azureactivedirectory
 ```
+
+`authClientId` / `authTenantId` are already filled into `infra/main.parameters.json`.
+The wiring is then applied by **(re)deploying the template**, passing the secret
+securely (never commit it):
+
+```powershell
+az deployment group create -g $RG --template-file infra/main.bicep `
+  --parameters infra/main.parameters.json `
+  --parameters openAiApiKey=$OPENAI_KEY authClientSecret=$SECRET
+```
+
+> The old imperative `az containerapp auth microsoft update` / `az containerapp auth
+> update` commands do the same thing and are no longer needed now that the
+> `authConfigs` resource is in Bicep. Note that the push-to-deploy CI
+> (`az containerapp update --image`) only rolls the image and never touches auth.
+> If you lose the secret, reset it (`az ad app credential reset --id <authClientId>`)
+> and redeploy the template.
 
 To later restrict to **specific people** rather than the whole tenant: in Entra →
 Enterprise applications → this app → Properties, set **Assignment required = Yes**,
