@@ -2512,6 +2512,9 @@ def analyze_pdf(
         "project_details": project_details,
         "duration_seconds": duration_seconds,
         "deep_mode": bool(use_deep),
+        # Promote the resolved stage (caller value or title-block auto-detect) to
+        # the top level so db.insert_run can store it as a queryable column.
+        "design_stage": design_stage,
     }
     doc.close()
     return run, issues
