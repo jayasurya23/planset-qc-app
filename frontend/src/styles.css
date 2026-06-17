@@ -313,6 +313,75 @@ select.si option, select.si optgroup { background: var(--dark2); color: #fff; }
   .hdr { padding-right: 52px; }
 }
 
+/* ════ Sidebar quick-switcher (All Projects + Recent) ════ */
+.side-projects-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.92); border-radius: 10px; padding: 9px 12px;
+  font-weight: 700; font-size: 13px; cursor: pointer; margin-bottom: 12px;
+}
+.side-projects-btn:hover { background: rgba(255,255,255,.1); }
+.side-projects-btn.active { background: rgba(173,31,43,.85); border-color: rgba(173,31,43,.9); }
+.side-projects-icon { font-size: 14px; }
+.side-projects-count { margin-left: auto; font-size: 11px; font-weight: 700; background: rgba(255,255,255,.14); border-radius: 9px; padding: 1px 8px; }
+.recent-item {
+  display: block; width: 100%; text-align: left; border: 0; cursor: pointer;
+  background: rgba(255,255,255,.04); color: #fff; border-radius: 9px;
+  padding: 8px 11px; margin-bottom: 5px;
+}
+.recent-item:hover { background: rgba(255,255,255,.09); }
+.recent-item.active { background: rgba(255,255,255,.13); box-shadow: inset 0 0 0 1px rgba(173,31,43,.6); }
+.recent-top { display: flex; align-items: center; gap: 7px; }
+.recent-name { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-sub { font-size: 11px; color: rgba(255,255,255,.42); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ════ Projects dashboard (main content) ════ */
+.dashboard { display: flex; flex-direction: column; gap: 18px; }
+.dash-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.dash-title { font-size: 24px; font-weight: 800; }
+.dash-sub { color: var(--text2); font-size: 13px; margin-top: 2px; }
+.dash-search { min-width: 240px; font-size: 13px; }
+.pcard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; align-items: start; }
+.pcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2); box-shadow: var(--shadow); overflow: hidden; }
+.pcard-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+.pcard-name { font-size: 17px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 5px; font-size: 12px; color: var(--text3); }
+.pcard-owner { font-weight: 700; color: #fff; background: rgba(173,31,43,.85); border-radius: 9px; padding: 1px 9px; }
+.pcard-stages { display: flex; flex-direction: column; }
+.pcard-stage { padding: 12px 18px; border-bottom: 1px solid var(--border); }
+.pcard-stage:last-child { border-bottom: 0; }
+.pcard-stage-head { margin-bottom: 8px; }
+.stage-none-l { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); }
+.pcard-runs { display: flex; flex-direction: column; gap: 8px; }
+.pcard-lineage { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.pcard-run { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: var(--surface2); cursor: pointer; padding: 10px 12px; }
+.pcard-run:hover { background: var(--blue-bg); }
+.pcard-run.active { background: var(--blue-bg); box-shadow: inset 3px 0 0 var(--brand); }
+.pcard-run-main { flex: 1; min-width: 0; }
+.pcard-run-file { display: block; font-weight: 700; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard-run-sub { display: block; font-size: 11px; color: var(--text3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard-run-pills { display: flex; gap: 4px; flex: 0 0 auto; }
+.pcard-run-pills .pill-p { background: var(--green-bg); color: var(--green-fg); }
+.pcard-run-pills .pill-f { background: var(--red-bg); color: var(--red-fg); }
+.pcard-run-pills .pill-r { background: var(--amber-bg); color: var(--amber-fg); }
+.pcard-run-actions { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.pcard-act { border: 1px solid var(--border); background: #fff; color: var(--text2); border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pcard-act:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.pcard-act:disabled { opacity: .5; cursor: not-allowed; }
+.pcard-act-del { margin-left: auto; }
+.pcard-act-del:hover { border-color: var(--red); color: var(--red-fg); }
+.pcard-vers { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface2); }
+.pcard-ver { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; font-size: 12px; cursor: pointer; text-align: left; color: var(--text2); }
+.pcard-ver:hover { border-color: var(--brand); }
+.pcard-ver.active { background: var(--blue-bg); border-color: var(--blue); }
+.pcard-ver-num { font-weight: 700; min-width: 26px; }
+.pcard-ver-date { color: var(--text3); flex: 1; }
+.pcard-ver .ver-tag { color: var(--green-fg); background: var(--green-bg); }
+
+/* ════ Run header back link ════ */
+.hdr-back { border: 0; background: none; color: var(--text2); font-size: 13px; font-weight: 600; cursor: pointer; padding: 0 0 6px; }
+.hdr-back:hover { color: var(--brand); }
+
 /* ════ Content ════ */
 .content { flex: 1; padding: 24px 32px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
 
