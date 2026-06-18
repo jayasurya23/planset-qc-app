@@ -8,19 +8,14 @@
 
 The **Planset QC Tool** is an internal, web-hosted application that automatically reviews a
 solar PV planset against Castillo's engineering rules and flags issues for a Project Engineer
-(PE) to resolve. It runs **~200+ automated checks across 29 sheet categories**[^checks],
-reads values out of the drawings (text *and* diagrams), cross-checks values between pages, and
-lets you attach supporting documents (CESIR, PVSyst, BOD, datasheets) so findings are grounded
-in the project's own data.
+(PE) to resolve. It runs a **comprehensive set of automated checks across all the major sheet
+categories**, reads values out of the drawings (text *and* diagrams), cross-checks values
+between pages, and lets you attach supporting documents (CESIR, PVSyst, BOD, datasheets) so
+findings are grounded in the project's own data.
 
 It is a **first-pass accelerator for self-QC and review** — it does not replace engineering
 judgment or a stamped review. Every finding is a prompt for a human to confirm, correct, or
 override.
-
-[^checks]: The app's welcome screen advertises "≈203+ checks across 29 categories." Some
-checks fire multiple times (once per affected sheet/row), so the count of individual findings
-on a given planset is typically higher. *(If the official launch figure should read "600+",
-update this line and §10.1.)*
 
 ---
 
@@ -37,7 +32,7 @@ flowchart TD
         direction TB
         A1["Sign in (Castillo email)"] --> A2["Create / select Project,<br/>name the run, set design stage"]
         A2 --> A3["Upload planset PDF +<br/>supporting docs (CESIR, PVSyst,<br/>BOD, datasheets)"]
-        A3 --> A4["Tool auto-runs the checks<br/>(29 categories)"]
+        A3 --> A4["Tool runs the automated<br/>QC checks"]
         A4 --> A5["PE reviews AI findings vs<br/>Tech Specs · Scope of Work ·<br/>Client Requirements"]
         A5 --> A6{"All flagged issues<br/>resolved?"}
         A6 -- No --> A7["Correct the planset →<br/>Re-analyze (new version)"]
@@ -124,7 +119,7 @@ flowchart TD
 The run view opens with:
 - **Score cards** — Total Checks, Actual Checks (Deferred excluded), Pass / Fail / Review counts,
   Pages, and a Completion (pass-rate) figure.
-- **Category navigation** — all 29 categories with per-category **Fail / Needs-Review / Pass /
+- **Category navigation** — every category with per-category **Fail / Needs-Review / Pass /
   Deferred** counts. Click a category to filter the list.
 - **Findings list** — each finding shows its status, severity, page, AI evidence, and (when
   available) a page preview with the relevant region highlighted. Tools above the list let you
@@ -211,7 +206,7 @@ with the per-finding "report a problem" tags — is how we tune accuracy. Please
 
 ## 10. Reference
 
-### 10.1 What the tool checks (29 categories)
+### 10.1 What the tool checks
 Drawing Index · Title Block · Cover Sheet · System Information Table · General Notes · Site Plan ·
 Pole Line Up · Engineered Equipment List · AC Single Line Diagram · DC Line Diagram ·
 Three Line Diagram · Relay and Inverter Settings · AUX SLD · Communication Diagram · Feeder Plan ·
