@@ -2455,6 +2455,19 @@ def analyze_pdf(
             "cross-sheet verification failed — keeping findings unfiltered"
         )
 
+    # Consolidate same-concept findings that multiple check engines flag
+    # independently (e.g. a grounding NEC item raised by ai_gnd_ + ai_gnd_deep_ +
+    # gnd_) into a single finding, keeping the most severe status — so dense
+    # electrical sheets don't inflate the review list with duplicates. Guarded.
+    try:
+        from .dedup_findings import consolidate_overlapping_findings
+        issues = consolidate_overlapping_findings(issues)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "finding consolidation failed — keeping findings unmerged"
+        )
+
     _progress("summary", "Building summary...", 90)
     status_counts = Counter(issue["status"] for issue in issues)
     by_category = defaultdict(lambda: {"total": 0, "Pass": 0, "Fail": 0, "Needs Review": 0, "Overridden / Accepted by QC Engineer": 0})
