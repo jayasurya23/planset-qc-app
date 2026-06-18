@@ -128,5 +128,41 @@ check("transformer grounding keyword",
       concept_signature("Grounding Diagram", "Transformer secondary grounding connection") == "Grounding Diagram::transformer_grounding")
 
 
+# ── 9. System-info / electrical / datasheet overlaps ────────────────────────
+mod = [
+    f("E-001", "calc_module_count_consistency", "Module count consistency", status="Pass"),
+    f("E-001", "xref_total_module_count", "Total module count", status="Needs Review"),
+]
+out = consolidate_overlapping_findings(mod)
+check("module count (calc+xref) merged", len(out) == 1)
+check("module count keeps most severe (NR)", out and out[0]["status"] == "Needs Review")
+
+ratio = [
+    f("E-001", "calc_dc_ac_ratio", "DC/AC ratio math"),
+    f("E-001", "xref_dc_ac_ratio", "DC/AC ratio"),
+]
+check("dc/ac ratio merged", len(consolidate_overlapping_findings(ratio)) == 1)
+
+totals = [
+    f("E-001", "v4_e_001_total_dc_capacity_kwdc", "Total DC capacity (kWdc)"),
+    f("E-001", "xref_total_ac_capacity", "Total AC capacity (kVA)"),
+]
+check("DC vs AC totals NOT conflated", len(consolidate_overlapping_findings(totals)) == 2)
+
+dsheets = [
+    f("E-900", "v4_e_900_module_datasheet_current_approved", "Module datasheet = current approved"),
+    f("E-900", "xref_inverter_datasheet", "Inverter datasheet = current approved"),
+]
+check("module vs inverter datasheet NOT conflated", len(consolidate_overlapping_findings(dsheets)) == 2)
+
+vd = [
+    f("Electrical Sheet", "ai_elec_Voltage drop", "Voltage drop summary present (DC, AC, MV)"),
+    f("Electrical Sheet", "elec_vdrop", "Voltage drop summary populated"),
+    f("Electrical Sheet", "electrical_voltage_drop", "Voltage drop within limits"),
+]
+out = consolidate_overlapping_findings(vd)
+check("voltage drop (3 engines) merged to 1", len(out) == 1, str(len(out)))
+
+
 print(f"\n{_passed} passed, {_failed} failed")
 sys.exit(1 if _failed else 0)

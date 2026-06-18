@@ -40,6 +40,19 @@ _KEYWORD_GROUPS: list[tuple[str, tuple[str, ...]]] = [
     ("ct_vt_arrangement", ("ct/vt arrangement", "ct vt arrangement", "ct/pt arrangement",
                            "ct & vt", "ct and vt")),
     ("meter_accuracy", ("meter accuracy",)),
+    # System-information totals — checked by calc_* (deterministic math), v4_e
+    # (vision rule) and xref (cross-reference). Keep DC / AC / ratio / count
+    # distinct so DC and AC totals are never conflated.
+    ("dc_ac_ratio", ("dc/ac ratio", "dc ac ratio", "dc-ac ratio")),
+    ("total_dc_capacity", ("total dc capacity", "total dc kw", "total dc (")),
+    ("total_ac_capacity", ("total ac capacity", "total ac kw", "total ac (")),
+    ("module_count", ("module count",)),
+    # Electrical schedule items (ai_elec / ai_elec_deep / deterministic elec).
+    ("voltage_drop", ("voltage drop",)),
+    ("conduit_fill", ("conduit fill",)),
+    # Equipment datasheet currency (v4_e vs xref) — module vs inverter distinct.
+    ("module_datasheet", ("module datasheet",)),
+    ("inverter_datasheet", ("inverter datasheet",)),
 ]
 
 _SEVERITY = {"Fail": 4, "Needs Review": 3, "Pass": 2, "Deferred": 1}
