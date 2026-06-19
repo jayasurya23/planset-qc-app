@@ -61,11 +61,20 @@ These stop the duplicates from being *generated* (and save AI calls), but each
 risks coverage if done blindly, so each must pass the same
 *concepts-before == concepts-after* gate on real runs before shipping.
 
-1. **Make single-page vs deep AI checks mutually exclusive.** `ai_gnd`/`ai_gnd_deep`
-   and `ai_relay`/`ai_relay_deep` send the *identical* prompt; `ai_elec`/`ai_elec_deep`
-   cover the same sections. The single-page check runs on a page already inside the
-   deep multi-page set, so gating the single-page **off when the deep runs** is
-   lossless and saves an AI call. *(gemini_analyzer.py: deep dispatch ~:2787/:2802/:2814.)*
+1. **✅ SHIPPED (PR #21) — Make single-page vs deep AI checks mutually exclusive.**
+   `ai_gnd`/`ai_gnd_deep` and `ai_relay`/`ai_relay_deep` send the *identical* prompt;
+   `ai_elec`/`ai_elec_deep` cover the same sections. The single-page check runs on a
+   page already inside the deep multi-page set, so gating the single-page **off when
+   the deep runs** is lossless and saves an AI call. Implemented as
+   `_deep_supersedes_single(single, deep, cap)` — skip the single **only** when the
+   deep will run (its set has >1 page) AND the single's page ∈ `deep[:cap]`; otherwise
+   the single is kept, so coverage can never be lost. *(gemini_analyzer.py: gates at
+   `ai_elec`/`ai_gnd`/`ai_relay` dispatch.)*
+   **Empirical proof (re-analyzed run `8345e356` → `9bd51774`):** Grounding collapsed
+   from 26 findings across 4 engines (`ai_gnd`:9, `ai_gnd_deep`:10, `gnd`:5,
+   `grounding`:2) to **10** (`ai_gnd_deep`:9, `grounding`:1) with **0 grounding
+   concepts lost**; Electrical & Relay categories lost 0 concepts; run total 221→189
+   (−32 duplicate instances). The 5-test gate suite + full suite are green.
 2. **Let `calc_*` own the System-Info math** (module count, total DC/AC, DC/AC ratio)
    and retire the `v4_e_001_*` vision variants via the existing `disabled_rules`
    list in `stage_overrides.yaml` — calc is deterministic and exact. *(Confirm the
@@ -94,6 +103,16 @@ risks coverage if done blindly, so each must pass the same
 - **Track A: live** — grounding + the system-info/electrical/datasheet concepts are
   consolidated on every analysis, proven lossless. 24 unit tests in
   `scripts/test_dedup_findings.py`.
-- **Track B: backlog** — the source retirements above, each to be shipped only after
-  its coverage-equivalence check passes on the run corpus. Item 1 (single/deep
-  mutual exclusion) is the highest-value, lowest-risk next step.
+- **Track B item 1: ✅ live** — single/deep AI mutual exclusion shipped (PR #21) and
+  empirically proven lossless on a real re-analysis (grounding 26→10 findings, 0
+  concepts lost; run 221→189). 5 gate unit tests in `scripts/test_page_targeting.py`.
+- **Track B items 2–6: backlog** — the remaining source retirements above, each to be
+  shipped only after its coverage-equivalence check passes on the run corpus.
+
+> **Verification note:** the coverage check compares the *concept set* of a finding
+> using `concept_signature`. For AI vision engines (e.g. `ai_sld`) the model phrases
+> findings differently on each run and does not always reprint a literal "NEC 250.x"
+> article number, so a per-run concept-set diff can show spurious "losses" in
+> *untouched* categories from ordinary model non-determinism. Scope the
+> coverage check to the categories the change actually gates (and confirm the concept
+> is still covered under a different phrasing) rather than reading a raw global diff.
