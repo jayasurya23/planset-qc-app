@@ -134,6 +134,24 @@ def _sheet_title_matches(
     return not any(ex.upper() in t for ex in exclude)
 
 
+def _deep_supersedes_single(
+    single_pages: list[int], deep_pages: list[int], cap: int
+) -> bool:
+    """True when a multi-page "deep" review already covers a single-page review.
+
+    A deep review runs only when it has >1 page and checks ``deep_pages[:cap]``
+    with the same (or an equivalent) prompt. When the single-page review's page
+    is inside that set, the single-page review is a pure duplicate and can be
+    skipped with NO loss of coverage. If the single's page is NOT in the deep's
+    checked set, this returns False and the single-page review is kept.
+    """
+    return (
+        bool(single_pages)
+        and len(deep_pages) > 1
+        and single_pages[0] in deep_pages[:cap]
+    )
+
+
 def _pick_page_for_finding(finding: dict, page_numbers: list[int]) -> int | None:
     """If the model reported which page of the batch the issue is on, return
     the corresponding actual PDF page number. Supports ``page_index`` (0-based
@@ -2614,7 +2632,13 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     # 11 ── Electrical Sheets ────────────────────────────────────────────
     es = find_pages("CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE",
                     "AMPACITY", "WIRE SCHEDULE")
-    if es:
+    # Skip this single-page review when the deep multi-page review (step 25)
+    # will run and already covers this page — it checks the same schedule
+    # sections, so the single would only duplicate it. Coverage-safe: skipped
+    # only when es[0] is inside the deep's checked page set.
+    _es_deep = find_pages("CIRCUIT SCHEDULE", "ELECTRICAL SCHEDULE", "CABLE SCHEDULE",
+                          "AMPACITY", "WIRE SCHEDULE", "E-300", "CALC SHEET")
+    if es and not _deep_supersedes_single(es, _es_deep, 4):
         all_issues.extend(
             _safe_call(
                 _gemini_page_check, doc, es[0], _prompt(_ELECTRICAL_SHEET_PROMPT),
@@ -2634,7 +2658,12 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
 
     # 13 ── Grounding ────────────────────────────────────────────────────
     gnd = find_pages("GROUNDING", "GROUND PLAN", "GND", "EARTHING")
-    if gnd:
+    # Skip when the deep grounding trace (step 26) covers this page — it sends
+    # the IDENTICAL _GROUNDING_PROMPT over the page set, so the single-page
+    # review is a pure duplicate. Coverage-safe: skipped only when gnd[0] is in
+    # the deep's checked pages.
+    _gnd_deep = find_pages("GROUNDING", "GROUND", "GND", "EARTHING")
+    if gnd and not _deep_supersedes_single(gnd, _gnd_deep, 3):
         all_issues.extend(
             _safe_call(
                 _gemini_page_check, doc, gnd[0], _prompt(_GROUNDING_PROMPT),
@@ -2645,7 +2674,10 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     # 14 ── Relay and Inverter Settings ────────────────────────────────
     rs = find_pages("RELAY", "INVERTER SETTING",
                     "IEEE 1547", "PROTECTION SETTING")
-    if rs:
+    # Step 27 runs the deep version (identical _RELAY_SETTINGS_PROMPT) over the
+    # same page set, so skip the single-page review when that will run — rs[0]
+    # is always within the deep's first pages.
+    if rs and not _deep_supersedes_single(rs, rs, 3):
         all_issues.extend(
             _safe_call(
                 _gemini_page_check, doc, rs[0], _prompt(_RELAY_SETTINGS_PROMPT),
