@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import type {
   Issue,
   Me,
@@ -617,10 +617,14 @@ export default function App() {
   // immediately. Adding via "+ Add new engineer..." appends to the list
   // and persists for next time.
   const DEFAULT_ENGINEERS = ["Jay", "Manjil", "Sam"];
-  const [engineerName, setEngineerName] = useState<string>(() => {
-    if (typeof localStorage === "undefined") return "";
-    return localStorage.getItem("engineer_name") || "";
-  });
+  // Attribution defaults to the signed-in identity (set from /api/me below).
+  // The field stays editable so a run can be logged under a different name, but
+  // that override is session-only — it is NOT persisted, so every load defaults
+  // back to the authenticated castillope.com identity.
+  const [engineerName, setEngineerName] = useState<string>("");
+  // Flips true once the user manually overrides the name, so the identity
+  // default from /api/me doesn't clobber their choice.
+  const nameTouchedRef = useRef(false);
   const [knownEngineers, setKnownEngineers] = useState<string[]>(() => {
     let saved: string[] = [];
     if (typeof localStorage !== "undefined") {
@@ -651,10 +655,6 @@ export default function App() {
     }
     return merged;
   });
-  useEffect(() => {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem("engineer_name", engineerName);
-  }, [engineerName]);
   const rememberEngineer = useCallback((name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return trimmed;
@@ -687,6 +687,7 @@ export default function App() {
       return;
     }
     const resolved = rememberEngineer(trimmed);
+    nameTouchedRef.current = true;
     setEngineerName(resolved || trimmed);
     setAddingEngineer(false);
     setNewEngineerDraft("");
@@ -942,7 +943,8 @@ export default function App() {
 
   // Resolve the signed-in engineer once. In production the EasyAuth sidecar
   // injects identity; locally /api/me returns nulls (DEV_USER_EMAIL fallback).
-  // Auto-fill the name picker when the user hasn't chosen one yet.
+  // The signed-in name (from the user's Entra ID) is the DEFAULT attribution —
+  // it wins over any prior value unless the user has overridden it this session.
   useEffect(() => {
     let cancelled = false;
     fetch(`${API}/api/me`)
@@ -951,7 +953,7 @@ export default function App() {
         if (cancelled || !m) return;
         setMe(m);
         const display = (m.name || m.email || "").trim();
-        if (display && !engineerName.trim()) {
+        if (display && !nameTouchedRef.current) {
           const resolved = rememberEngineer(display);
           setEngineerName(resolved || display);
         }
@@ -1671,9 +1673,11 @@ export default function App() {
         (m, r) => (r.created_at > m ? r.created_at : m),
         "",
       );
+      // Prefer the human name (engineer_name, now the signed-in display name)
+      // over created_by (the email identity key) for display.
       const createdBy =
-        prs.map((r) => r.created_by).find(Boolean) ||
         prs.map((r) => r.engineer_name).find(Boolean) ||
+        prs.map((r) => r.created_by).find(Boolean) ||
         null;
       projects.push({
         key,
@@ -1852,7 +1856,7 @@ export default function App() {
                           {(r.version ?? 1) > 1 && <>v{r.version} &middot; </>}
                           {relativeDate(r.created_at)}
                           {(r.created_by || r.engineer_name) && (
-                            <> &middot; {r.created_by || r.engineer_name}</>
+                            <> &middot; {r.engineer_name || r.created_by}</>
                           )}
                         </span>
                       </span>
@@ -2090,6 +2094,7 @@ export default function App() {
                         setAddingEngineer(true);
                         setNewEngineerDraft("");
                       } else {
+                        nameTouchedRef.current = true;
                         setEngineerName(v);
                       }
                     }}
@@ -2105,9 +2110,9 @@ export default function App() {
                 {me?.email && (
                   <div
                     className="eng-signed-in"
-                    title="Signed in via Microsoft Entra — runs are attributed to this account"
+                    title={`Signed in via Microsoft Entra — runs are attributed to this account${me.email ? ` (${me.email})` : ""}`}
                   >
-                    ✓ {me.email}
+                    ✓ Signed in as {me.name || me.email}
                   </div>
                 )}
               </div>
@@ -3128,7 +3133,7 @@ export default function App() {
                   &middot; {run.page_count} pages
                   &middot; {formatDateTime(run.created_at)}
                   {(run.created_by || run.engineer_name) && (
-                    <> &middot; by {run.created_by || run.engineer_name}</>
+                    <> &middot; by {run.engineer_name || run.created_by}</>
                   )}
                   &middot;{" "}
                   <code
