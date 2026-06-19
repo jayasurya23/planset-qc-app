@@ -75,19 +75,43 @@ risks coverage if done blindly, so each must pass the same
    `grounding`:2) to **10** (`ai_gnd_deep`:9, `grounding`:1) with **0 grounding
    concepts lost**; Electrical & Relay categories lost 0 concepts; run total 221→189
    (−32 duplicate instances). The 5-test gate suite + full suite are green.
-2. **Let `calc_*` own the System-Info math** (module count, total DC/AC, DC/AC ratio)
-   and retire the `v4_e_001_*` vision variants via the existing `disabled_rules`
-   list in `stage_overrides.yaml` — calc is deterministic and exact. *(Confirm the
-   active ruleset is a V4 set first; the default `rules.yaml` has no `v4_*`.)*
-3. **Collapse within-V4 variant pairs** (E-900 datasheet current vs current-approved;
-   E-002 color; E-011 pole sequence) — keep one rule per concept via `disabled_rules`.
-4. **Drop the `*_legacy` supplement prompts** (`ai_*_legacy`) when a V4 ruleset is
-   active — V4 already covers those sheets.
-5. **Cover Sheet / Title Block:** the deterministic layer reads title-block text
-   *exactly and for free*, so it should own field *presence*; trim the `ai_cover`
-   prompt to only what needs the drawing read. (Do **not** simply delete the
-   deterministic checks — that exact text read is unique coverage.)
-6. **Dead code:** `_SYSTEM_INFO_PROMPT` is defined but never dispatched — remove.
+2. **❌ REJECTED on coverage-safety review — do NOT retire `v4_e_001_*` in favor of
+   `calc_*`.** On close reading the two are *not* equivalent. `calc_*` checks only
+   internal arithmetic on extracted specs (`calc_total_dc_math`: DC kW = Module Qty ×
+   STC W within 2%; `calc_module_count_consistency`: count = String Size × String Qty).
+   The `v4_e_001_*` vision rules bundle **cross-source agreement and limit checks the
+   math does not perform**: `total_module_count` requires *five* sources to agree
+   (stringing calc / PVCase / E-050 / PVSyst); `dc_ac_ratio` adds ≤ inverter-warranty
+   limit, ≤ client-BOD limit, and cross-set consistency; `total_ac_capacity` adds
+   = E-050 and interconnection-agreement match. Disabling them would **lose** that
+   coverage. The correct, lossless handler for this overlap is the already-shipped
+   **Track-A consolidation** (its keyword groups already cover `module_count`,
+   `dc_ac_ratio`, `total_dc_capacity`, `total_ac_capacity` — it keeps most-severe +
+   richest evidence, so the union of coverage survives in one finding). *Also note this
+   overlap is **V4-only**: in production `RULES_FILE` is unset → `rules.yaml` (legacy,
+   not a V4 set) → `calc_*`/`v4_*`/`xref` never dispatch, so there is no live duplicate.*
+3. **Collapse within-V4 variant pairs** (E-900 / E-002 / E-011) — **largely already
+   done**: `stage_overrides.yaml`'s `disabled_rules` has a curated "V3-vs-V4-ENH
+   duplicate sweep" plus targeted entries that already retire the within-V4 variant
+   pairs (Jaccard-similarity sweep, keeping the V4-ENH variant). V4-only and inert in
+   production. Re-audit only if a new ingest re-introduces variants.
+4. **Drop the `*_legacy` supplement prompts** — **moot in production**: no `ai_*_legacy`
+   findings appear in live runs (V4 ruleset not active). Revisit only if/when a V4 set
+   is enabled.
+5. **Cover Sheet / Title Block — DEFERRED (granular-vs-bundle, ~0 NR impact).** The
+   overlap is real (`ai_cover` per-field vs deterministic `cover_sheet_*` field
+   *bundles*; `ai_tb` per-page vs `title_block_*` "every page" checks) but it is **not**
+   a clean 1:1 same-concept duplicate: the deterministic checks *bundle* fields the AI
+   checks individually (`cover_sheet_epc_info` = "EPC Name, Address, Telephone" vs three
+   separate `ai_cover` fields). A signature-merge would over-merge distinct fields and
+   *reduce* granularity — a coverage loss. It is also almost entirely **Pass** findings
+   (in the audited run: 45 Pass / 1 NR / 3 Fail across both categories), so it does not
+   drive the Needs-Review inflation this audit targets. Leave to a future
+   *subsumption* pass (drop the redundant bundle only when all its granular AI fields
+   are present), not the merge mechanism.
+6. **✅ DONE — Dead code removed.** `_SYSTEM_INFO_PROMPT` (a ~150-line system-info vision
+   prompt defined but never dispatched) deleted from `gemini_analyzer.py`; imports +
+   full suite green.
 
 ### What each layer uniquely contributes (so we never retire unique coverage)
 - **Deterministic keyword/procedural** — exact, free, hallucination-proof reads of
@@ -106,8 +130,24 @@ risks coverage if done blindly, so each must pass the same
 - **Track B item 1: ✅ live** — single/deep AI mutual exclusion shipped (PR #21) and
   empirically proven lossless on a real re-analysis (grounding 26→10 findings, 0
   concepts lost; run 221→189). 5 gate unit tests in `scripts/test_page_targeting.py`.
-- **Track B items 2–6: backlog** — the remaining source retirements above, each to be
-  shipped only after its coverage-equivalence check passes on the run corpus.
+- **Track B item 2: ❌ rejected** — retiring `v4_e_001_*` for `calc_*` is *not*
+  lossless (v4 adds 5-source agreement + warranty/BOD limits + interconnection match);
+  Track-A consolidation already handles this overlap. V4-only / inert in prod anyway.
+- **Track B item 3: ✅ already handled** by the existing `disabled_rules` V3-vs-V4-ENH
+  sweep (V4-only).
+- **Track B item 4: moot** — no `*_legacy` prompts fire in production (V4 not active).
+- **Track B item 5: deferred** — Cover/Title overlap is granular-vs-bundle (over-merge
+  would lose granularity) and ~0 NR impact; needs a subsumption pass, not a merge.
+- **Track B item 6: ✅ done** — dead `_SYSTEM_INFO_PROMPT` removed.
+
+## 5. Production outcome (default `rules.yaml`, legacy AI + deterministic engines)
+After item 1 + Track A, the live re-analysis (`9bd51774`) shows the cross-engine
+duplicate problem is **resolved for the production configuration**: **28 Needs-Review,
+every one a *distinct* item from a *single* engine — zero residual same-concept
+multi-engine duplicates** (down from 41 NR on the original `8345e356`). The remaining
+NRs (SLD 10, 3LD 8, Grounding 4, Electrical 3, Labels 2, Cover 1) are genuine review
+items, not duplicates. Items 2–4 only ever applied to the non-default V4 ruleset
+(`RULES_FILE=rules_v4_draft.yaml`), which production does not use.
 
 > **Verification note:** the coverage check compares the *concept set* of a finding
 > using `concept_signature`. For AI vision engines (e.g. `ai_sld`) the model phrases
