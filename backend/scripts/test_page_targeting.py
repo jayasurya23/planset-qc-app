@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.gemini_analyzer import _sheet_title_matches
+from app.gemini_analyzer import _sheet_title_matches, _deep_supersedes_single
 
 
 _passed = 0
@@ -107,6 +107,20 @@ check("no keyword -> no match",
 
 check("default exclude is empty (keyword-only matches)",
       _sheet_title_matches("EQUIPMENT PAD GROUNDING", ("EQUIPMENT PAD",)))
+
+
+# ── single-page vs deep mutual exclusion (coverage-safe gate) ───────────────
+# True => the deep review covers the single's page, so the single can be skipped.
+check("skip single when its page is in the deep set",
+      _deep_supersedes_single([5], [3, 5, 7], 3) is True)
+check("KEEP single when deep has only 1 page (deep won't run)",
+      _deep_supersedes_single([5], [5], 3) is False)
+check("KEEP single when its page is pushed out of the deep cap",
+      _deep_supersedes_single([9], [1, 2, 3, 9], 3) is False)
+check("KEEP single when there is no single page",
+      _deep_supersedes_single([], [1, 2, 3], 3) is False)
+check("relay case (single == deep, >1 page) -> skip single",
+      _deep_supersedes_single([4, 6], [4, 6], 3) is True)
 
 
 print(f"\n{_passed} passed, {_failed} failed")
