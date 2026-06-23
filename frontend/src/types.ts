@@ -224,3 +224,32 @@ export interface Me {
   user_id: string | null
   name: string | null
 }
+
+export type JobStatus = 'queued' | 'running' | 'done' | 'error'
+
+/** A tracked analysis job from GET /api/jobs (the shared activity feed). */
+export interface Job {
+  id: string
+  kind: 'analyze' | 'reanalyze'
+  project_name: string | null
+  run_name: string | null
+  started_by: string | null
+  created_by: string | null
+  status: JobStatus
+  submitted_at: number
+  started_at: number | null
+  finished_at: number | null
+  run_id: string | null
+  error: string | null
+  queue_position: number | null
+  pct: number
+  step: string | null
+  detail: string | null
+}
+
+export interface JobsResponse {
+  jobs: Job[]
+  concurrency: number
+  queued: number
+  running: number
+}

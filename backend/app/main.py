@@ -25,6 +25,7 @@ from .db import (
 )
 from .exporter import export_due_diligence, export_run_to_excel
 from .progress import clear_progress, get_progress, set_progress
+from . import jobs
 
 APP_DIR = Path(__file__).resolve().parents[1]
 
@@ -428,6 +429,13 @@ def api_progress(upload_id: str) -> dict:
     return p or {"step": "waiting", "detail": "Waiting...", "pct": 0}
 
 
+@app.get("/api/jobs")
+def api_jobs() -> dict:
+    """Shared activity feed: every analysis in process (queued/running) plus
+    recently finished ones, across all engineers. Drives the Activity panel."""
+    return {"jobs": jobs.list_jobs(), **jobs.stats()}
+
+
 import threading
 
 # Track background analysis results: upload_id -> run_data or error
@@ -441,8 +449,11 @@ def _run_analysis_bg(
     supporting_docs: list[dict] | None = None,
     design_stage: str | None = None,
     extra_meta: dict | None = None,
-) -> None:
+) -> dict | None:
     """Run analysis in a background thread, updating progress along the way.
+
+    Returns the saved run dict on success (carries ``id``) or ``{"error": ...}``
+    on failure, so the job queue can record the outcome.
 
     ``extra_meta`` carries orchestration fields stamped onto the run before it
     is saved — attribution (engineer_name/created_by/created_by_id), project
@@ -482,11 +493,13 @@ def _run_analysis_bg(
         set_progress(upload_id, "done", "Complete!", 100)
         with _analysis_lock:
             _analysis_results[upload_id] = saved
+        return saved
     except Exception as exc:
         logging.getLogger(__name__).exception("Analysis failed for %s", upload_id)
         set_progress(upload_id, "error", f"Analysis failed: {exc}", 0)
         with _analysis_lock:
             _analysis_results[upload_id] = {"error": str(exc)}
+        return {"error": str(exc)}
 
 
 _VALID_STAGES = {"30", "60", "90", "IFC", "AsBuilt"}
@@ -590,16 +603,23 @@ async def api_analyze(
         "run_name": (run_name or "").strip() or None,
     }
 
-    # Launch in background thread — return upload_id immediately
-    t = threading.Thread(
-        target=_run_analysis_bg,
-        args=(upload_id, pdf_path, proj_name, file.filename, pd, deep_flag, sd, stage, extra_meta),
-        daemon=True,
+    # Enqueue on the bounded analysis queue — returns the upload_id immediately;
+    # the job runs when a slot is free (status 'queued' until then).
+    jobs.submit(
+        upload_id, "analyze",
+        {
+            "project_name": proj_name,
+            "run_name": extra_meta["run_name"],
+            "started_by": eng_display,
+            "created_by": created_by,
+        },
+        lambda: _run_analysis_bg(
+            upload_id, pdf_path, proj_name, file.filename, pd, deep_flag, sd, stage, extra_meta
+        ),
     )
-    t.start()
 
     return {
-        "upload_id": upload_id, "status": "running",
+        "upload_id": upload_id, "status": "queued",
         "deep_mode": deep_flag, "design_stage": stage,
         "project_id": resolved_project_id,
     }
@@ -695,16 +715,22 @@ async def api_reanalyze(
         "run_name": old_run.get("run_name"),
     }
 
-    t = threading.Thread(
-        target=_run_analysis_bg,
-        args=(upload_id, new_pdf_path, project_name, original_filename, None,
-              deep_flag, None, old_stage, extra_meta),
-        daemon=True,
+    jobs.submit(
+        upload_id, "reanalyze",
+        {
+            "project_name": project_name or original_filename,
+            "run_name": old_run.get("run_name"),
+            "started_by": eng_display,
+            "created_by": created_by,
+        },
+        lambda: _run_analysis_bg(
+            upload_id, new_pdf_path, project_name, original_filename, None,
+            deep_flag, None, old_stage, extra_meta
+        ),
     )
-    t.start()
 
     return {
-        "upload_id": upload_id, "status": "running",
+        "upload_id": upload_id, "status": "queued",
         "deep_mode": deep_flag, "parent_run_id": run_id,
     }
 
