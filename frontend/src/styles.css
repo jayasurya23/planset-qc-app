@@ -919,3 +919,87 @@ kbd { display: inline-block; padding: 2px 7px; font-family: ui-monospace, SFMono
   .card-row { flex-wrap: wrap; gap: 6px; }
   .card-actions { width: 100%; justify-content: flex-end; padding-top: 4px; }
 }
+
+/* ════ Shared run queue / Activity panel ════ */
+.activity {
+  position: fixed; right: 16px; bottom: 16px; z-index: 200;
+  width: 340px; max-width: calc(100vw - 32px);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r2); box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.activity-head {
+  display: flex; align-items: center; gap: 8px; width: 100%; border: 0;
+  background: var(--dark); color: #fff; cursor: pointer; padding: 10px 14px;
+  font-weight: 700; font-size: 13px;
+}
+.activity-title { display: inline-flex; align-items: center; gap: 8px; }
+.activity-badge {
+  background: var(--brand); color: #fff; font-size: 11px; font-weight: 700;
+  border-radius: 10px; padding: 1px 8px; min-width: 20px; text-align: center;
+}
+.activity-caret { margin-left: auto; color: rgba(255,255,255,.6); font-size: 11px; }
+.activity-spin {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.25); border-top-color: #fff;
+  animation: activity-spin .8s linear infinite;
+}
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+.activity-body { max-height: 50vh; overflow-y: auto; }
+.activity-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  border: 0; border-bottom: 1px solid var(--bg); background: var(--surface);
+  padding: 10px 14px; color: var(--text);
+}
+.activity-row.activity-done { cursor: pointer; }
+.activity-row.activity-done:hover { background: var(--blue-bg); }
+.activity-row:disabled { cursor: default; }
+.activity-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.activity-dot-queued { background: var(--text3); }
+.activity-dot-running { background: var(--amber); animation: activity-pulse 1.2s ease-in-out infinite; }
+.activity-dot-done { background: var(--green); }
+.activity-dot-error { background: var(--red); }
+@keyframes activity-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.activity-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.activity-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-sub { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-bar { height: 4px; border-radius: 2px; background: var(--bg); overflow: hidden; margin-top: 2px; }
+.activity-bar-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--amber), var(--green)); transition: width .5s ease; }
+.activity-pct { font-size: 11px; font-weight: 700; color: var(--amber-fg); flex: 0 0 auto; }
+.activity-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 14px; font-size: 11px; color: var(--text3);
+  background: var(--surface2); border-top: 1px solid var(--border);
+}
+.activity-alerts {
+  border: 1px solid var(--border); background: #fff; color: var(--text2);
+  border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.activity-alerts:hover { border-color: var(--brand); color: var(--brand); }
+.activity-alerts-on { color: var(--green-fg); font-weight: 600; }
+
+/* ════ Completion toasts (top-right, below the profile widget) ════ */
+.toasts {
+  position: fixed; top: 64px; right: 16px; z-index: 210;
+  display: flex; flex-direction: column; gap: 8px;
+  width: 340px; max-width: calc(100vw - 32px);
+}
+.toast {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 4px solid var(--text3); border-radius: var(--r);
+  box-shadow: var(--shadow-lg); animation: toast-in .2s ease;
+}
+@keyframes toast-in { from { transform: translateY(-8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.toast-done { border-left-color: var(--green); }
+.toast-error { border-left-color: var(--red); }
+.toast-queued { border-left-color: var(--blue); }
+.toast-body { flex: 1; min-width: 0; }
+.toast-title { font-weight: 700; font-size: 13px; color: var(--text); }
+.toast-detail { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
+.toast-action {
+  border: 0; background: var(--brand); color: #fff; border-radius: 6px;
+  padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; flex: 0 0 auto;
+}
+.toast-action:hover { background: var(--brand-dk); }
+.toast-close { border: 0; background: none; color: var(--text3); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; flex: 0 0 auto; }
+.toast-close:hover { color: var(--text); }

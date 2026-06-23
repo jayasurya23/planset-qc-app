@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import type {
   Issue,
+  Job,
+  JobsResponse,
   Me,
   RunData,
   RunFeedback,
@@ -448,6 +450,146 @@ function StatusBtn({
   );
 }
 
+// ── Shared "Activity" panel: every analysis in process, across all engineers.
+//    Polled from GET /api/jobs; persists wherever you scroll; click a finished
+//    run to open it.
+interface ToastItem {
+  key: string;
+  kind: "queued" | "done" | "error";
+  title: string;
+  detail?: string;
+  runId?: string | null;
+}
+
+function ActivityPanel({
+  jobs,
+  concurrency,
+  queuedCount,
+  runningCount,
+  onOpenRun,
+  desktopAlerts,
+  onEnableAlerts,
+  canDesktop,
+}: {
+  jobs: Job[];
+  concurrency: number;
+  queuedCount: number;
+  runningCount: number;
+  onOpenRun: (runId: string) => void;
+  desktopAlerts: boolean;
+  onEnableAlerts: () => void;
+  canDesktop: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  const active = jobs.filter((j) => j.status === "queued" || j.status === "running");
+  const finished = jobs
+    .filter((j) => j.status === "done" || j.status === "error")
+    .slice(-6)
+    .reverse();
+  const ordered: Job[] = [
+    ...active.filter((j) => j.status === "running"),
+    ...active
+      .filter((j) => j.status === "queued")
+      .sort((a, b) => (a.queue_position || 0) - (b.queue_position || 0)),
+    ...finished,
+  ];
+  if (ordered.length === 0) return null;
+  const activeCount = active.length;
+  const nameOf = (j: Job) => j.run_name || j.project_name || "Run";
+  const sub = (j: Job) => {
+    const who = j.started_by ? `${j.started_by} · ` : "";
+    const kind = j.kind === "reanalyze" ? "re-run" : "new run";
+    if (j.status === "queued") return `${who}${kind} · Queued #${j.queue_position}`;
+    if (j.status === "running") return `${who}Analyzing… ${j.detail || j.step || ""}`;
+    if (j.status === "done") return `${who}Complete — click to open`;
+    return `${who}Failed: ${j.detail || j.error || "error"}`;
+  };
+
+  return (
+    <div className="activity">
+      <button className="activity-head" onClick={() => setOpen((o) => !o)}>
+        <span className="activity-title">
+          {activeCount > 0 && <span className="activity-spin" />}
+          Activity
+        </span>
+        {activeCount > 0 && <span className="activity-badge">{activeCount}</span>}
+        <span className="activity-caret">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="activity-body">
+          {ordered.map((j) => (
+            <button
+              key={j.id}
+              className={`activity-row activity-${j.status}`}
+              onClick={() => j.status === "done" && j.run_id && onOpenRun(j.run_id)}
+              disabled={j.status !== "done"}
+              title={j.status === "done" ? "Open this run" : undefined}
+            >
+              <span className={`activity-dot activity-dot-${j.status}`} />
+              <span className="activity-info">
+                <span className="activity-name">{nameOf(j)}</span>
+                <span className="activity-sub">{sub(j)}</span>
+                {j.status === "running" && (
+                  <span className="activity-bar">
+                    <span className="activity-bar-fill" style={{ width: `${j.pct}%` }} />
+                  </span>
+                )}
+              </span>
+              {j.status === "running" && (
+                <span className="activity-pct">{Math.round(j.pct)}%</span>
+              )}
+            </button>
+          ))}
+          <div className="activity-foot">
+            <span>
+              Running {runningCount}/{concurrency}
+              {queuedCount ? ` · ${queuedCount} queued` : ""}
+            </span>
+            {canDesktop && !desktopAlerts && (
+              <button className="activity-alerts" onClick={onEnableAlerts}>
+                🔔 Desktop alerts
+              </button>
+            )}
+            {desktopAlerts && <span className="activity-alerts-on">🔔 Alerts on</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Toasts({
+  toasts,
+  onOpenRun,
+  onDismiss,
+}: {
+  toasts: ToastItem[];
+  onOpenRun: (runId: string) => void;
+  onDismiss: (key: string) => void;
+}) {
+  if (!toasts.length) return null;
+  return (
+    <div className="toasts">
+      {toasts.map((t) => (
+        <div key={t.key} className={`toast toast-${t.kind}`}>
+          <div className="toast-body">
+            <div className="toast-title">{t.title}</div>
+            {t.detail && <div className="toast-detail">{t.detail}</div>}
+          </div>
+          {t.kind === "done" && t.runId && (
+            <button className="toast-action" onClick={() => onOpenRun(t.runId!)}>
+              View
+            </button>
+          )}
+          <button className="toast-close" onClick={() => onDismiss(t.key)}>
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [runs, setRuns] = useState<RunData[]>([]);
   // Read ``?run=<id>`` from the URL on first render so deep links like
@@ -568,6 +710,19 @@ export default function App() {
   // Signed-in engineer (EasyAuth). Used to attribute runs and auto-fill the
   // name picker. null until /api/me resolves.
   const [me, setMe] = useState<Me | null>(null);
+  // ── Shared run queue / activity feed ──
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobStats, setJobStats] = useState({ concurrency: 0, queued: 0, running: 0 });
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [desktopAlerts, setDesktopAlerts] = useState(
+    typeof Notification !== "undefined" && Notification.permission === "granted",
+  );
+  const myJobIds = useRef<Set<string>>(new Set()); // jobs started in this tab
+  const notifiedJobs = useRef<Set<string>>(new Set()); // completions already alerted
+  const jobsSeeded = useRef(false); // first poll seeds (no spurious alerts on reload)
+  const baseTitleRef = useRef<string>(
+    typeof document !== "undefined" ? document.title : "Planset QC",
+  );
   // Version history under a lineage is collapsed by default, opened per
   // root_run_id, shown in the dashboard project cards.
   const [expandedVersions, setExpandedVersions] = useState<Set<string>>(
@@ -966,6 +1121,112 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Run-queue helpers: poll the shared feed, alert on my completions ──
+  const pushToast = useCallback((t: ToastItem) => {
+    setToasts((p) => [t, ...p.filter((x) => x.key !== t.key)].slice(0, 4));
+    setTimeout(() => setToasts((p) => p.filter((x) => x.key !== t.key)), 9000);
+  }, []);
+  const dismissToast = useCallback(
+    (key: string) => setToasts((p) => p.filter((x) => x.key !== key)),
+    [],
+  );
+  const flashTitle = useCallback((msg: string) => {
+    if (typeof document !== "undefined" && document.hidden) document.title = msg;
+  }, []);
+  // Restore the tab title when the user returns to the tab.
+  useEffect(() => {
+    const restore = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        document.title = baseTitleRef.current;
+      }
+    };
+    document.addEventListener("visibilitychange", restore);
+    window.addEventListener("focus", restore);
+    return () => {
+      document.removeEventListener("visibilitychange", restore);
+      window.removeEventListener("focus", restore);
+    };
+  }, []);
+  const enableDesktopAlerts = useCallback(async () => {
+    if (typeof Notification === "undefined") return;
+    try {
+      const perm = await Notification.requestPermission();
+      setDesktopAlerts(perm === "granted");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const notifyJob = useCallback(
+    (j: Job) => {
+      const name = j.run_name || j.project_name || "Run";
+      const okNotif =
+        desktopAlerts &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted";
+      if (j.status === "done") {
+        pushToast({ key: `${j.id}-done`, kind: "done", title: `✓ ${name} — analysis complete`, runId: j.run_id });
+        flashTitle(`✓ ${name} done`);
+        if (okNotif) {
+          try { new Notification("Planset QC — analysis complete", { body: `${name} is ready to review.` }); } catch { /* */ }
+        }
+      } else {
+        pushToast({ key: `${j.id}-error`, kind: "error", title: `✗ ${name} — analysis failed`, detail: j.detail || j.error || undefined });
+        flashTitle(`✗ ${name} failed`);
+        if (okNotif) {
+          try { new Notification("Planset QC — analysis failed", { body: `${name}: ${j.detail || "error"}` }); } catch { /* */ }
+        }
+      }
+    },
+    [pushToast, flashTitle, desktopAlerts],
+  );
+  // Poll the shared job feed; alert once on my completions, then refresh runs.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${API}/api/jobs`);
+        if (!r.ok || cancelled) return;
+        const data: JobsResponse = await r.json();
+        if (cancelled) return;
+        const list = data.jobs || [];
+        setJobs(list);
+        setJobStats({ concurrency: data.concurrency, queued: data.queued, running: data.running });
+        const mineFinished = list.filter(
+          (j) =>
+            (j.status === "done" || j.status === "error") &&
+            (myJobIds.current.has(j.id) || (me?.email != null && j.created_by === me.email)),
+        );
+        if (!jobsSeeded.current) {
+          // First poll (incl. after reload): don't alert for pre-existing completions.
+          mineFinished.forEach((j) => notifiedJobs.current.add(j.id));
+          jobsSeeded.current = true;
+          return;
+        }
+        const fresh = mineFinished.filter((j) => !notifiedJobs.current.has(j.id));
+        if (fresh.length) {
+          fresh.forEach((j) => {
+            notifiedJobs.current.add(j.id);
+            notifyJob(j);
+          });
+          try {
+            const rr = await fetch(`${API}/api/runs`);
+            if (rr.ok && !cancelled) setRuns(await rr.json());
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* transient — keep polling */
+      }
+    };
+    void tick();
+    const iv = setInterval(tick, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [me, notifyJob]);
+
   const run = useMemo(
     () => runs.find((r) => r.id === runId) ?? null,
     [runs, runId],
@@ -1265,41 +1526,6 @@ export default function App() {
   }, [run, cat]);
 
   // ── Polling helper ──
-  const pollProgress = useCallback(
-    (uploadId: string): Promise<RunData> =>
-      new Promise((resolve, reject) => {
-        const iv = setInterval(async () => {
-          try {
-            const r = await fetch(`${API}/api/progress/${uploadId}`);
-            if (!r.ok) {
-              clearInterval(iv);
-              reject(new Error(`Progress check failed: ${r.status}`));
-              return;
-            }
-            const p = await r.json();
-            setProgress(p.detail ?? p.step);
-            setProgressPct(p.pct ?? 0);
-            if (p.step === "done") {
-              clearInterval(iv);
-              const res = await fetch(`${API}/api/result/${uploadId}`);
-              if (!res.ok) {
-                reject(new Error(`Fetching result failed: ${res.status}`));
-                return;
-              }
-              resolve(await res.json());
-            } else if (p.step === "error") {
-              clearInterval(iv);
-              reject(new Error(p.detail ?? "Analysis failed"));
-            }
-          } catch (err) {
-            clearInterval(iv);
-            reject(err);
-          }
-        }, 1500);
-      }),
-    [],
-  );
-
   // ── Actions ──
   const upload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1319,38 +1545,27 @@ export default function App() {
       fd.append("engineer_name", engineerName.trim());
       rememberEngineer(engineerName);
     }
+    const jobLabel = runName.trim() || projName.trim() || plansetFile.name;
     setUploading(true);
-    setProgress("Uploading...");
-    setProgressPct(5);
     try {
       const r = await fetch(`${API}/api/analyze`, { method: "POST", body: fd });
       if (!r.ok) {
-        setProgress(`Error: ${await r.text()}`);
-        setProgressPct(0);
+        const msg = await r.text();
+        pushToast({ key: `up-${Date.now()}-error`, kind: "error", title: "Couldn't start analysis", detail: msg.slice(0, 160) });
         return;
       }
       const { upload_id } = await r.json();
-      setProgress("Analysis started...");
-      setProgressPct(10);
-      const d = await pollProgress(upload_id);
-      setProgressPct(100);
-      setProgress("Done!");
-      setRuns((p) => [d, ...p.filter((x) => x.id !== d.id)]);
-      setRunId(d.id);
-      setShowDashboard(false);
-      setCat("All");
-      setStatusFilter("all");
+      // Non-blocking: the analysis runs on the shared queue. Track it here so we
+      // can alert this tab on completion, reset the form, and let the user keep
+      // working or queue another run — the Activity panel watches the rest.
+      myJobIds.current.add(upload_id);
+      pushToast({ key: `${upload_id}-queued`, kind: "queued", title: `Queued: ${jobLabel}`, detail: "Tracking in Activity — you'll be alerted when it's done." });
       form.reset();
       setProjName("");
       setRunName("");
       setPlansetFile(null);
-      setTimeout(() => {
-        setProgress("");
-        setProgressPct(0);
-      }, 1200);
     } catch (err) {
-      setProgress(err instanceof Error ? err.message : "Failed. Check logs.");
-      setProgressPct(0);
+      pushToast({ key: `up-${Date.now()}-error`, kind: "error", title: "Couldn't start analysis", detail: err instanceof Error ? err.message : "Check logs." });
     } finally {
       setUploading(false);
     }
@@ -1376,9 +1591,11 @@ export default function App() {
       )
     )
       return;
+    const reLabel =
+      runs.find((x) => x.id === id)?.run_name ||
+      runs.find((x) => x.id === id)?.project_name ||
+      "Re-run";
     setUploading(true);
-    setProgress("Re-analyzing...");
-    setProgressPct(10);
     try {
       const rfd = new FormData();
       rfd.append("use_deep", deepMode ? "true" : "false");
@@ -1391,35 +1608,17 @@ export default function App() {
         body: rfd,
       });
       if (!r.ok) {
-        setProgress(`Error: ${await r.text()}`);
-        setProgressPct(0);
+        pushToast({ key: `re-${Date.now()}-error`, kind: "error", title: "Couldn't start re-analysis", detail: (await r.text()).slice(0, 160) });
         return;
       }
       const { upload_id } = await r.json();
-      setProgress("Re-analysis started...");
-      setProgressPct(15);
-      const d = await pollProgress(upload_id);
-      setProgressPct(100);
-      setProgress("Done!");
-      // Non-destructive: refetch so the new version AND the now-superseded
-      // prior version (is_latest flipped server-side) both reflect correctly.
-      try {
-        const all = await (await fetch(`${API}/api/runs`)).json();
-        setRuns(all);
-      } catch {
-        setRuns((p) => [d, ...p.filter((x) => x.id !== d.id)]);
-      }
-      setRunId(d.id);
-      setShowDashboard(false);
-      setCat("All");
-      setStatusFilter("all");
-      setTimeout(() => {
-        setProgress("");
-        setProgressPct(0);
-      }, 1200);
+      // Non-blocking: tracked by the Activity panel; the completion poller
+      // refreshes the run list (so the new version + superseded prior both
+      // reflect) and alerts this tab when it's done.
+      myJobIds.current.add(upload_id);
+      pushToast({ key: `${upload_id}-queued`, kind: "queued", title: `Queued re-run: ${reLabel}`, detail: "Tracking in Activity — you'll be alerted when it's done." });
     } catch (err) {
-      setProgress(err instanceof Error ? err.message : "Re-analysis failed.");
-      setProgressPct(0);
+      pushToast({ key: `re-${Date.now()}-error`, kind: "error", title: "Couldn't start re-analysis", detail: err instanceof Error ? err.message : "Check logs." });
     } finally {
       setUploading(false);
     }
@@ -2006,6 +2205,32 @@ export default function App() {
     <div className="app">
       {/* ── Top-right account / sign-in widget ── */}
       <ProfileMenu me={me} />
+      {/* ── Shared run queue / activity feed + completion toasts ── */}
+      <ActivityPanel
+        jobs={jobs}
+        concurrency={jobStats.concurrency}
+        queuedCount={jobStats.queued}
+        runningCount={jobStats.running}
+        onOpenRun={(rid) => {
+          setRunId(rid);
+          setShowDashboard(false);
+          setCat("All");
+          setStatusFilter("all");
+        }}
+        desktopAlerts={desktopAlerts}
+        onEnableAlerts={enableDesktopAlerts}
+        canDesktop={typeof Notification !== "undefined"}
+      />
+      <Toasts
+        toasts={toasts}
+        onOpenRun={(rid) => {
+          setRunId(rid);
+          setShowDashboard(false);
+          setCat("All");
+          setStatusFilter("all");
+        }}
+        onDismiss={dismissToast}
+      />
       {/* ── Global top-bar waiting animation ── */}
       {uploading && (
         <WaitingAnimation pct={progressPct} label={progress} />
