@@ -861,25 +861,42 @@ Only return the JSON array.
 """
 
 _ELEVATION_PROMPT = """\
-You are a QC engineer reviewing ELEVATION DETAILS of a solar PV planset.
+You are a QC engineer reviewing an ELEVATION sheet of a solar PV planset.
 
-Check:
-1. **Pile Spacing** – Is pile spacing dimensioned?
-2. **Pile Type** – Is the pile type noted (driven steel, helical, etc.)?
-3. **Pile Depth** – Is minimum pile embedment depth shown?
-4. **Clearance from Grade** – Is the minimum module clearance from grade shown?
-5. **Equipment Clearances** – Are front, side, and back clearances for inverters/equipment shown?
-6. **Clearances vs NEC 110.26(A)(1)** – READ the front/side/rear clearance
-   dimensions shown and VALIDATE them against the NEC working-space table
-   for the system voltage. For 0–150V to ground: Condition 1 = 3 ft,
-   Cond 2 = 3 ft, Cond 3 = 3 ft. For 151–600V: 3/3.5/4 ft.
+STEP 0 — IDENTIFY THIS SHEET'S SCOPE from its title and what it actually depicts.
+Elevation sheets come in distinct types, and each check below applies ONLY to the
+relevant type:
+  • PV ARRAY / RACKING elevation (modules on piles/trackers): pile spacing/type/
+    depth, module clearance-from-grade, and weather-sensor mounting apply.
+  • EQUIPMENT / MV / transformer / switchgear / pad-mount elevation: equipment
+    working clearances (NEC 110.26) and equipment dimensions apply; pile, module-
+    clearance, and weather-sensor items normally DO NOT belong on this sheet.
+  • CAB / combiner elevation: CAB spacing/sag/clearance and its support piles apply.
+
+SCOPE RULE (critical — prevents false failures): only mark a check "found": false
+(a deficiency) when that item genuinely belongs on THIS sheet's scope and is missing
+or wrong. For any check that is NOT within this sheet's scope, set "found": true with
+evidence "N/A — not within this sheet's scope" so it is NOT reported as a deficiency.
+Never fail an MV/equipment elevation for lacking pile, module-clearance, or weather-
+sensor detail that lives on the array/structural sheets.
+
+Checks (evaluate only those in scope per STEP 0):
+1. **Pile Spacing** — (array/CAB) Is pile spacing dimensioned?
+2. **Pile Type** — (array/CAB) Is the pile type noted (driven steel, helical, etc.)?
+3. **Pile Depth** — (array/CAB) Is minimum pile embedment depth shown?
+4. **Clearance from Grade** — (array) Is the minimum module clearance from grade shown?
+5. **Equipment Clearances** — (equipment) Are front, side, and back clearances for inverters/equipment shown?
+6. **Clearances vs NEC 110.26(A)(1)** — (equipment) READ the front/side/rear clearance
+   dimensions shown and VALIDATE them against the NEC working-space table for the
+   system voltage. For 0–150V to ground: 3/3/3 ft. For 151–600V: 3/3.5/4 ft.
    For 601–2500V: 3/4/5 ft. For 2501–9000V: 4/5/6 ft. For 9001–25000V: 5/6/9 ft.
-   Flag "Fail" with the required vs shown value if below minimum. DO NOT
-   check for the presence of an NEC table on the drawing — the NEC tables
-   are a validation REFERENCE, not required planset content.
-7. **Sweep/Bend Distance** – Are conduit sweep or bend distances noted?
-8. **CAB Details** – CAB spacing, sag, and clearance from grade shown?
-9. **Weather Sensors** – Are weather sensor mounting locations shown?
+   If the shown clearances MEET OR EXCEED the minimum, this is a PASS — set
+   "found": true. Only set "found": false when a clearance is BELOW the minimum
+   (give required vs shown). DO NOT check for the presence of an NEC table on the
+   drawing — the NEC tables are a validation REFERENCE, not required content.
+7. **Sweep/Bend Distance** — (array/CAB) Are conduit sweep or bend distances noted?
+8. **CAB Details** — (CAB) CAB spacing, sag, and clearance from grade shown?
+9. **Weather Sensors** — (array/site) Are weather sensor mounting locations shown?
 
 Return a JSON array:
 ```json
