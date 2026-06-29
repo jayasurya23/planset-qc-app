@@ -41,6 +41,28 @@ def _pick_openai_model(deep: bool) -> str:
     return _OPENAI_MODEL_DEEP if deep else _OPENAI_MODEL
 
 
+def _openai_sampling_kwargs() -> dict:
+    """Optional best-effort determinism control for the OpenAI calls.
+
+    Set OPENAI_SEED (int) to pass a chat-completion ``seed`` so identical inputs
+    return near-identical output — useful for reproducing a run and for clean
+    before/after regression diffs. This is BEST-EFFORT per OpenAI: a model or
+    infra update that changes ``system_fingerprint`` can still shift results,
+    and it does not resolve genuine model judgment differences on ambiguous
+    drawings. Unset -> normal sampling (default, unchanged behavior).
+
+    ``temperature`` is intentionally not exposed: the gpt-5.x reasoning models
+    ignore/reject it. Read at call time so it can be toggled without reimport.
+    """
+    seed = os.getenv("OPENAI_SEED")
+    if seed not in (None, ""):
+        try:
+            return {"seed": int(seed)}
+        except ValueError:
+            pass
+    return {}
+
+
 def _pick_gemini_model(deep: bool) -> str:
     return _GEMINI_MODEL_DEEP if deep else _GEMINI_MODEL
 
@@ -261,6 +283,7 @@ def _openai_page_image(
                 _b64_image(image_bytes, mime_type),
                 {"type": "text", "text": prompt},
             ]}],
+            **_openai_sampling_kwargs(),
         )
 
     response = _call_with_retry(_call)
@@ -281,6 +304,7 @@ def _openai_multiple_images(
         return client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": content}],
+            **_openai_sampling_kwargs(),
         )
 
     response = _call_with_retry(_call)
@@ -296,6 +320,7 @@ def _openai_text(prompt: str, deep: bool = False) -> str:
         return client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
+            **_openai_sampling_kwargs(),
         )
 
     response = _call_with_retry(_call)
