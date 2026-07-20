@@ -1,0 +1,5 @@
+# Only the shareable PDFs are version-controlled in this folder.
+# The editable Word masters and the local index stay on disk but untracked
+# (regenerate/edit locally; export to PDF to update the committed copies).
+*.docx
+README.md
