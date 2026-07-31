@@ -8,6 +8,7 @@ file is loaded once at import time and cached.  Every rule is exposed as a
 from __future__ import annotations
 
 import functools
+import hashlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -183,6 +184,95 @@ def load_rules() -> tuple[list[Rule], list[str]]:
 def active_rules_path() -> Path:
     """Which file is currently being loaded — useful for logging / UI."""
     return _resolve_rules_path()
+
+
+@functools.lru_cache(maxsize=1)
+def rules_fingerprint() -> dict[str, str]:
+    """Name + content hash of the active rules file.
+
+    Stamped onto each run's summary at analysis time so that chat-time rule
+    lookups can detect that the ruleset has changed since the run was graded
+    (the registry is mutable and unversioned — without this, an explanation
+    could cite a rule definition that did not produce the verdict).
+    """
+    path = _resolve_rules_path()
+    return {
+        "file": path.name,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Finding-source resolution
+#
+# Only ~21% of findings carry an item_key that exists in the registry (the
+# keyword / sheet_existence / electrical_calc rules). The rest are dynamic
+# keys minted by the vision prompts in gemini_analyzer (measured on run
+# d8a0b104: 78% of 212 findings, all prefixed ai_<family>_). This map lets
+# the chat layer answer "what check produced this finding?" for those too,
+# by pointing at the prompt that generated it.
+# ---------------------------------------------------------------------------
+
+# prefix -> (category, prompt constant name in gemini_analyzer)
+_VISION_FAMILIES: dict[str, tuple[str, str]] = {
+    "ai_sld_": ("AC Single Line Diagram", "_SLD_PROMPT"),
+    "ai_3ld_": ("Three Line Diagram", "_THREE_LINE_PROMPT"),
+    "ai_tb_": ("Title Block", "_TITLE_BLOCK_PROMPT"),
+    "ai_consistency_": ("Cross-Sheet Consistency", "_CROSS_SHEET_CONSISTENCY_PROMPT"),
+    "ai_cover_": ("Cover Sheet", "_COVER_SHEET_PROMPT"),
+    "ai_eaf_": ("Equipment Area Feeder Plan", "_EQUIP_AREA_FEEDER_PROMPT"),
+    "ai_pole_": ("Pole Line Up", "_POLE_LINEUP_PROMPT"),
+    "ai_poledet_": ("Pole Details", "_POLE_DETAILS_PROMPT"),
+    "ai_cab_": ("CAB or Cable Hanger Details", "_CAB_DETAILS_PROMPT"),
+    "ai_pad_": ("PAD / Slab Details", "_PAD_SLAB_PROMPT"),
+    "ai_gnd_deep_": ("Grounding Diagram", "_GROUNDING_PROMPT"),
+    "ai_gnd_": ("Grounding Diagram", "_GROUNDING_PROMPT"),
+    "ai_gndplan_": ("Overall Site Grounding Plan", "_GROUNDING_PLAN_PROMPT"),
+    "ai_support_docs_": ("Supporting Document Consistency", "_CROSS_SHEET_CONSISTENCY_PROMPT"),
+    "ai_aux_": ("AUX SLD", "_AUX_SLD_PROMPT"),
+    "ai_elev_": ("Elevation Details", "_ELEVATION_PROMPT"),
+    "ai_elec_deep_": ("Electrical Sheet", "_ELECTRICAL_SHEET_DEEP_PROMPT"),
+    "ai_elec_": ("Electrical Sheet", "_ELECTRICAL_SHEET_PROMPT"),
+    "ai_relay_deep_": ("Relay and Inverter Settings", "_RELAY_SETTINGS_PROMPT"),
+    "ai_relay_": ("Relay and Inverter Settings", "_RELAY_SETTINGS_PROMPT"),
+    "ai_dc_": ("DC Line Diagram", "_DC_DIAGRAM_PROMPT"),
+    "ai_comm_": ("Communication Diagram", "_COMM_DIAGRAM_PROMPT"),
+    "ai_cfp_": ("Communication Feeder Plan", "_COMM_FEEDER_PLAN_PROMPT"),
+    "ai_feeder_": ("Feeder Plan", "_FEEDER_PLAN_PROMPT"),
+    "ai_equip_": ("Engineered Equipment List", "_EQUIPMENT_LIST_PROMPT"),
+    "ai_labels_": ("Labels", "_LABELS_PROMPT"),
+    "ai_siteplan_": ("Site Plan", "_SITE_PLAN_PROMPT"),
+}
+
+# Longest prefix first so ai_gnd_deep_ resolves before ai_gnd_, etc.
+_VISION_FAMILIES_ORDERED = sorted(
+    _VISION_FAMILIES.items(), key=lambda kv: -len(kv[0]))
+
+
+def resolve_finding_source(item_key: str) -> dict[str, Any]:
+    """Explain which check produced a finding, for every kind of item_key.
+
+    Returns one of:
+      {"kind": "rule", "rule": Rule}                       — registry rule
+      {"kind": "vision_family", "family", "category",
+       "prompt_attr"}                                      — dynamic ai_* key;
+        prompt_attr names the prompt constant in gemini_analyzer (resolve
+        lazily with getattr to avoid importing the vision module here)
+      {"kind": "unknown"}                                  — nothing matched
+    """
+    rule = get_rule(item_key)
+    if rule is not None:
+        return {"kind": "rule", "rule": rule}
+    if item_key.startswith("ai_"):
+        for prefix, (category, prompt_attr) in _VISION_FAMILIES_ORDERED:
+            if item_key.startswith(prefix):
+                return {
+                    "kind": "vision_family",
+                    "family": prefix.rstrip("_"),
+                    "category": category,
+                    "prompt_attr": prompt_attr,
+                }
+    return {"kind": "unknown"}
 
 
 def get_rules() -> list[Rule]:

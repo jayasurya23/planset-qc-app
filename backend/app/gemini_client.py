@@ -336,10 +336,35 @@ def _openai_text(prompt: str, deep: bool = False) -> str:
     return response.choices[0].message.content or ""
 
 
+def _pdf_pages_as_images(file_bytes: bytes, max_pages: int = 8) -> list[bytes]:
+    """Render the first *max_pages* PDF pages to PNG bytes (PyMuPDF, 1.5x).
+
+    Same rendering approach supporting_docs.py uses. Returns [] if the PDF
+    can't be opened so callers can fall back gracefully.
+    """
+    try:
+        import fitz
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        images = []
+        for i in range(min(doc.page_count, max_pages)):
+            pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+            images.append(pix.tobytes("png"))
+        doc.close()
+        return images
+    except Exception:  # noqa: BLE001 — corrupt/locked PDF: degrade, don't crash
+        log.warning("PDF render for vision input failed", exc_info=True)
+        return []
+
+
 def _openai_document(file_bytes: bytes, mime_type: str, prompt: str, deep: bool = False) -> str:
-    # For PDFs/docs, OpenAI only supports images — convert to text fallback
+    # OpenAI chat vision takes images, not PDFs — render pages to PNGs so the
+    # model actually SEES the document (the old text-only fallback answered
+    # without any document content at all).
     if mime_type == "application/pdf":
-        return _openai_text(f"[Document content provided as context]\n\n{prompt}", deep=deep)
+        images = _pdf_pages_as_images(file_bytes)
+        if images:
+            return _openai_multiple_images(images, prompt, deep=deep)
+        return _openai_text(f"[Document could not be rendered]\n\n{prompt}", deep=deep)
     return _openai_page_image(file_bytes, prompt, mime_type, deep=deep)
 
 
@@ -510,6 +535,107 @@ def analyze_document(
     if AI_PROVIDER == "openai":
         return _openai_document(file_bytes, mime_type, prompt, deep=deep)
     return _gemini_document(file_bytes, mime_type, prompt, deep=deep)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Chat (streaming, multi-turn) — used by the QC copilot, NOT the analysis
+# pipeline. Deliberately decoupled: CHAT_PROVIDER / CHAT_MODEL are independent
+# of AI_PROVIDER so the tuned analysis stack stays frozen while the chat model
+# can be chosen (and A/B'd) separately.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _chat_provider() -> str:
+    return os.getenv("CHAT_PROVIDER", "openai").lower()
+
+
+def _chat_model() -> str:
+    m = os.getenv("CHAT_MODEL", "").strip()
+    if m:
+        return m
+    # Default to the deep analysis model of the chosen chat provider — chat is
+    # low-volume and quality-sensitive, so the stronger tier is the right floor.
+    if _chat_provider() == "anthropic":
+        return _ANTHROPIC_MODEL_DEEP
+    return _OPENAI_MODEL_DEEP
+
+
+def get_chat_config() -> dict[str, str]:
+    """Chat provider/model currently in effect, for logging and the UI."""
+    return {"provider": _chat_provider(), "model": _chat_model()}
+
+
+def stream_chat(messages: list[dict], system: str | None = None,
+                model: str | None = None):
+    """Stream a multi-turn chat completion as an event generator.
+
+    ``messages`` is a list of {"role": "user"|"assistant", "content": str}.
+    ``system`` is the system prompt (kept separate because Anthropic takes it
+    as a top-level param while OpenAI takes it as a leading message).
+    ``model`` overrides CHAT_MODEL for one call (used by the model bake-off).
+
+    Yields event dicts the SSE endpoint can forward directly:
+        {"type": "delta", "text": "..."}     — incremental text
+        {"type": "done", "model": ..., "usage": {prompt_tokens, completion_tokens}}
+
+    No mid-stream retry: a transient failure surfaces to the caller, which can
+    simply re-send the turn (chat turns are cheap and idempotent to retry).
+    """
+    provider = _chat_provider()
+    use_model = model or _chat_model()
+    if provider == "anthropic":
+        yield from _anthropic_stream_chat(messages, system, use_model)
+    else:
+        yield from _openai_stream_chat(messages, system, use_model)
+
+
+def _openai_stream_chat(messages: list[dict], system: str | None, model: str):
+    client = _get_openai()
+    msgs = ([{"role": "system", "content": system}] if system else []) + messages
+    stream = client.chat.completions.create(
+        model=model,
+        messages=msgs,
+        stream=True,
+        # Final chunk carries usage (empty choices) when this is set.
+        stream_options={"include_usage": True},
+        **_openai_sampling_kwargs(),
+    )
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield {"type": "delta", "text": delta.content}
+        u = getattr(chunk, "usage", None)
+        if u:
+            usage = {"prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                     "completion_tokens": getattr(u, "completion_tokens", 0) or 0}
+    with _usage_lock:
+        _usage["api_calls"] += 1
+        _usage["prompt_tokens"] += usage["prompt_tokens"]
+        _usage["completion_tokens"] += usage["completion_tokens"]
+        _usage["total_tokens"] += usage["prompt_tokens"] + usage["completion_tokens"]
+    yield {"type": "done", "model": model, "usage": usage}
+
+
+def _anthropic_stream_chat(messages: list[dict], system: str | None, model: str):
+    client = _get_anthropic()
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": _ANTHROPIC_MAX_TOKENS,
+        "messages": messages,
+    }
+    if system:
+        kwargs["system"] = system
+    with client.messages.stream(**kwargs) as stream:
+        for text in stream.text_stream:
+            yield {"type": "delta", "text": text}
+        final = stream.get_final_message()
+    _track_anthropic(final)
+    u = getattr(final, "usage", None)
+    yield {"type": "done", "model": model, "usage": {
+        "prompt_tokens": getattr(u, "input_tokens", 0) or 0 if u else 0,
+        "completion_tokens": getattr(u, "output_tokens", 0) or 0 if u else 0,
+    }}
 
 
 def get_active_models() -> dict[str, str]:

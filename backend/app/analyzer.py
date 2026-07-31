@@ -13,7 +13,10 @@ from typing import Iterable
 import fitz
 from PIL import Image, ImageDraw
 
-from .rule_registry import Rule, get_category_order, get_rules, get_rules_by_check_type
+from .rule_registry import (
+    Rule, get_category_order, get_rules, get_rules_by_check_type,
+    rules_fingerprint,
+)
 from .electrical_calcs import CALC_FUNCTIONS, run_calc
 
 # Match common engineering sheet number formats:
@@ -857,6 +860,8 @@ def make_issue(
     source_doc_page: int | None = None,
     source_doc_excerpt: str | None = None,
     locations: list[dict] | None = None,
+    nec_ref: str | None = None,
+    calc_computed: dict | None = None,
 ) -> dict:
     now = utc_now()
     return {
@@ -883,6 +888,13 @@ def make_issue(
         # 2+ locations; normal single-location findings keep this None so
         # existing rendering is unchanged.
         "locations": locations,
+        # Provenance for the chat copilot: the governing NEC article (from the
+        # rule definition) and, for electrical_calc findings, the intermediate
+        # values the calc derived (CalcResult.computed) — so "why did you flag
+        # this?" can be answered by showing/re-running the actual math instead
+        # of discarding it.
+        "nec_ref": nec_ref,
+        "calc_computed": calc_computed,
         "created_at": now,
         "updated_at": now,
     }
@@ -2381,6 +2393,8 @@ def analyze_pdf(
             snippet_path=sp,
             page_preview_path=pp,
             bbox=bbox_d,
+            nec_ref=rule.nec_ref,
+            calc_computed=result.computed or None,
         ))
 
     # PVSyst - external document. Emit as Deferred (not Needs Review) so it
@@ -2510,6 +2524,15 @@ def analyze_pdf(
         "design_stage": design_stage,
         "supporting_docs": supporting_docs or [],
         "call_timings": call_timings_sorted,
+        # The merged calc-input snapshot (auto-extracted specs overlaid with
+        # user-entered project details) — exactly what run_calc() saw. Persisted
+        # so a chat-time recompute can reproduce the run's verdicts instead of
+        # re-deriving inputs that may have changed.
+        "calc_inputs": pd,
+        # Ruleset fingerprint: detect at chat time that the rules file changed
+        # since this run was graded (mutable, unversioned registry).
+        "rules_file": rules_fingerprint()["file"],
+        "rules_sha256": rules_fingerprint()["sha256"],
     }
 
     run = {
