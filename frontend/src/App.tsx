@@ -590,6 +590,266 @@ function Toasts({
   );
 }
 
+// ── QC Copilot chat (Phase 1: read-only, grounded in the open run) ──────────
+// The chat explains, locates, and prioritizes findings; it cannot change a
+// status and nothing it says reaches the Excel export — the checklist stays
+// the system of record.
+
+interface ChatMsg {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  model?: string | null;
+}
+
+const CHAT_STARTERS = [
+  "What actually matters on this planset? Prioritize for the drafter.",
+  "Summarize the critical fails and group related findings.",
+  "Which sheets are missing or couldn't be read?",
+];
+
+function renderChatContent(
+  content: string,
+  citations: Record<string, string>,
+  onCite: (issueId: string) => void,
+) {
+  // Light formatting: ## headings, bullets, **bold**, [#abcdef12] chips.
+  return content.split("\n").map((line, li) => {
+    const isHead = /^#{1,3}\s/.test(line);
+    const isBullet = /^\s*[-•*]\s/.test(line);
+    const text = line.replace(/^#{1,3}\s/, "").replace(/^\s*[-•*]\s/, "");
+    const parts: React.ReactNode[] = [];
+    const rx = /\[#([0-9a-f]{8})\]|\*\*([^*]+)\*\*/g;
+    let last = 0;
+    let k = 0;
+    let m: RegExpExecArray | null;
+    while ((m = rx.exec(text))) {
+      if (m.index > last) parts.push(text.slice(last, m.index));
+      if (m[1]) {
+        const full = citations[m[1]];
+        parts.push(
+          full ? (
+            <button
+              key={`c${li}-${k++}`}
+              className="chat-cite"
+              title="Jump to this finding"
+              onClick={() => onCite(full)}
+            >
+              #{m[1].slice(0, 4)}
+            </button>
+          ) : (
+            <span key={`c${li}-${k++}`} className="chat-cite chat-cite-dead">
+              #{m[1].slice(0, 4)}
+            </span>
+          ),
+        );
+      } else if (m[2]) {
+        parts.push(<b key={`b${li}-${k++}`}>{m[2]}</b>);
+      }
+      last = rx.lastIndex;
+    }
+    if (last < text.length) parts.push(text.slice(last));
+    if (isHead) return <div key={li} className="chat-h">{parts}</div>;
+    if (isBullet) return <div key={li} className="chat-li">{parts}</div>;
+    if (!text.trim()) return <div key={li} className="chat-gap" />;
+    return <div key={li}>{parts}</div>;
+  });
+}
+
+function ChatPanel({
+  runId,
+  runLabel,
+  onCite,
+}: {
+  runId: string;
+  runLabel: string;
+  onCite: (issueId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  const [citations, setCitations] = useState<Record<string, string>>({});
+  const [input, setInput] = useState("");
+  const [streamText, setStreamText] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [model, setModel] = useState<string>("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // New run → reset and load its thread.
+    setMsgs([]);
+    setCitations({});
+    setErr(null);
+    setStreamText(null);
+    fetch(`${API}/api/runs/${runId}/chat`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => {
+        setMsgs(
+          (d.messages || []).map((m: any) => ({
+            id: m.id, role: m.role, content: m.content, model: m.model,
+          })),
+        );
+        setCitations(d.citations || {});
+        setModel(d.config?.model || "");
+      })
+      .catch(() => {});
+  }, [runId]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [msgs, streamText, open]);
+
+  async function send(text: string) {
+    const q = text.trim();
+    if (!q || busy) return;
+    setErr(null);
+    setBusy(true);
+    setInput("");
+    setMsgs((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: q }]);
+    setStreamText("");
+    let acc = "";
+    try {
+      const res = await fetch(`${API}/api/runs/${runId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: q }),
+      });
+      if (!res.ok || !res.body) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.detail || `HTTP ${res.status}`);
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          if (!raw.startsWith("data: ")) continue;
+          const ev = JSON.parse(raw.slice(6));
+          if (ev.type === "delta") {
+            acc += ev.text;
+            setStreamText(acc);
+          } else if (ev.type === "error") {
+            setErr(ev.message);
+          } else if (ev.type === "done") {
+            if (ev.citations) setCitations(ev.citations);
+            if (ev.model) setModel(ev.model);
+            if (acc) {
+              setMsgs((m) => [
+                ...m,
+                {
+                  id: ev.message_id || `a-${Date.now()}`,
+                  role: "assistant",
+                  content: acc,
+                  model: ev.model,
+                },
+              ]);
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Chat failed — please retry.");
+    } finally {
+      setStreamText(null);
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        className="chat-fab"
+        onClick={() => setOpen(true)}
+        title="Ask the QC copilot about this run"
+      >
+        💬 Ask this run
+      </button>
+    );
+  }
+  return (
+    <div className="chat-panel">
+      <div className="chat-head">
+        <div>
+          <div className="chat-head-title">QC Copilot</div>
+          <div className="chat-head-sub">
+            grounded in {runLabel}
+            {model ? ` · ${model}` : ""} · read-only
+          </div>
+        </div>
+        <button className="chat-close" onClick={() => setOpen(false)}>
+          ×
+        </button>
+      </div>
+      <div className="chat-scroll" ref={scrollRef}>
+        {msgs.length === 0 && streamText === null && (
+          <div className="chat-empty">
+            <div className="chat-empty-title">
+              Ask anything about this run's findings.
+            </div>
+            {CHAT_STARTERS.map((s) => (
+              <button key={s} className="chat-starter" onClick={() => send(s)}>
+                {s}
+              </button>
+            ))}
+            <div className="chat-note">
+              Answers cite findings like{" "}
+              <span className="chat-cite">#a1b2</span> — click one to jump to
+              the card. Statuses are only changed on the cards; the exported
+              checklist stays the record.
+            </div>
+          </div>
+        )}
+        {msgs.map((m) => (
+          <div key={m.id} className={`chat-msg chat-${m.role}`}>
+            {m.role === "assistant"
+              ? renderChatContent(m.content, citations, onCite)
+              : m.content}
+          </div>
+        ))}
+        {streamText !== null && (
+          <div className="chat-msg chat-assistant">
+            {streamText ? (
+              renderChatContent(streamText, citations, onCite)
+            ) : (
+              <span className="chat-thinking">thinking…</span>
+            )}
+          </div>
+        )}
+        {err && <div className="chat-err">{err}</div>}
+      </div>
+      <div className="chat-inputrow">
+        <textarea
+          className="chat-input"
+          value={input}
+          placeholder="Why is E-105 failing? What matters most?"
+          rows={2}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send(input);
+            }
+          }}
+          disabled={busy}
+        />
+        <button
+          className="chat-send"
+          onClick={() => send(input)}
+          disabled={busy || !input.trim()}
+        >
+          ➤
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [runs, setRuns] = useState<RunData[]>([]);
   // Read ``?run=<id>`` from the URL on first render so deep links like
@@ -1091,6 +1351,22 @@ export default function App() {
     setRuns((p) => [d, ...p.filter((x: RunData) => x.id !== id)]);
     setRunId(id);
   }, []);
+
+  // Hydrate full run detail for runs that only exist as list entries (no
+  // ``issues``). Covers deep links (?run=...) — which set runId on mount
+  // without going through openRun() — and list refreshes that replace a
+  // hydrated entry with a bare one.
+  const hydratingRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!runId) return;
+    const entry = runs.find((r) => r.id === runId);
+    if (!entry || entry.issues !== undefined) return;
+    if (hydratingRef.current === runId) return;
+    hydratingRef.current = runId;
+    void refresh(runId).finally(() => {
+      if (hydratingRef.current === runId) hydratingRef.current = null;
+    });
+  }, [runId, runs, refresh]);
 
   useEffect(() => {
     void load();
@@ -2231,6 +2507,28 @@ export default function App() {
         }}
         onDismiss={dismissToast}
       />
+      {/* ── QC copilot: per-run grounded chat (read-only) ── */}
+      {runId && !showDashboard && (
+        <ChatPanel
+          key={runId}
+          runId={runId}
+          runLabel={
+            runs.find((r) => r.id === runId)?.original_filename || "this run"
+          }
+          onCite={(issueId) => {
+            // Clear filters so the cited card is actually rendered, focus it,
+            // then scroll once the list has re-rendered.
+            setCat("All");
+            setStatusFilter("all");
+            setFocusedIssueId(issueId);
+            setTimeout(() => {
+              document
+                .getElementById(`issue-card-${issueId}`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }, 150);
+          }}
+        />
+      )}
       {/* ── Global top-bar waiting animation ── */}
       {uploading && (
         <WaitingAnimation pct={progressPct} label={progress} />

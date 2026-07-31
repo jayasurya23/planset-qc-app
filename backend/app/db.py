@@ -206,6 +206,25 @@ def init_db() -> None:
             )
             """
         )
+        # Chat copilot: one thread per run. Read-only grounding in Phase 1 —
+        # chat NEVER writes issue status; the exported checklist stays the
+        # system of record and chat content is excluded from the export.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_by TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id)
+            )
+            """
+        )
         _backfill_projects_and_versions(cur)
         conn.commit()
 
@@ -284,6 +303,46 @@ def _backfill_projects_and_versions(cur: sqlite3.Cursor) -> None:
             existing[key] = pid
         for rid in g["ids"]:
             cur.execute("UPDATE runs SET project_id = ? WHERE id = ?", (pid, rid))
+
+
+def insert_chat_message(msg: dict[str, Any]) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO chat_messages (
+                id, run_id, role, content, created_by, model,
+                prompt_tokens, completion_tokens, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                msg["id"], msg["run_id"], msg["role"], msg["content"],
+                msg.get("created_by"), msg.get("model"),
+                msg.get("prompt_tokens"), msg.get("completion_tokens"),
+                msg.get("created_at") or _now_iso(),
+            ),
+        )
+        conn.commit()
+
+
+def get_chat_messages(run_id: str) -> list[dict[str, Any]]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM chat_messages WHERE run_id = ? ORDER BY created_at, id",
+            (run_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def chat_thread_stats(run_id: str) -> dict[str, int]:
+    """Turn count + total completion tokens — drives the server-side ceilings."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, "
+            "COALESCE(SUM(completion_tokens), 0) AS completion_tokens "
+            "FROM chat_messages WHERE run_id = ? AND role = 'assistant'",
+            (run_id,),
+        ).fetchone()
+    return {"assistant_turns": row["n"], "completion_tokens": row["completion_tokens"]}
 
 
 def insert_issue_feedback(fb: dict[str, Any]) -> None:
@@ -496,6 +555,7 @@ def delete_run(run_id: str) -> bool:
         if not row:
             return False
         conn.execute("DELETE FROM issues WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM chat_messages WHERE run_id = ?", (run_id,))
         conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
         conn.commit()
     return True
