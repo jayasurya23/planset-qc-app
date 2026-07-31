@@ -1082,3 +1082,47 @@ kbd { display: inline-block; padding: 2px 7px; font-family: ui-monospace, SFMono
 .chat-send:disabled { opacity: .5; cursor: default; }
 .chat-send:not(:disabled):hover { background: var(--brand-dk); }
 @keyframes pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+
+/* ── Per-card "Ask AI" + chat topic pill ───────────────────────────────── */
+.card-ask {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text3);
+  border-radius: 7px; padding: 3px 10px; font-size: 11.5px; font-weight: 700;
+  cursor: pointer; margin-right: auto; /* park left, status buttons stay right */
+}
+.card-ask:hover { border-color: var(--brand); color: var(--brand); }
+/* Prominent on failing cards — that's where "ask more" matters most. */
+.card-fail .card-ask, .card-review .card-ask {
+  border-color: var(--brand); color: var(--brand); background: #fff;
+}
+.card-fail .card-ask:hover, .card-review .card-ask:hover {
+  background: var(--brand); color: #fff;
+}
+.chat-topic {
+  border-top: 1px solid var(--border); background: var(--bg); padding: 9px 12px;
+}
+.chat-topic-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.chat-topic-status {
+  flex: 0 0 auto; font-size: 10px; font-weight: 800; border-radius: 5px;
+  padding: 1px 7px; text-transform: uppercase; letter-spacing: .3px;
+}
+.chat-topic-fail { background: var(--red-bg); color: var(--red-fg); border: 1px solid var(--red); }
+.chat-topic-pass { background: var(--green-bg); color: var(--green-fg); border: 1px solid var(--green); }
+.chat-topic-review { background: var(--amber-bg); color: var(--amber-fg); border: 1px solid var(--amber); }
+.chat-topic-title {
+  flex: 1; min-width: 0; border: 0; background: none; text-align: left; cursor: pointer;
+  font-size: 12px; font-weight: 700; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chat-topic-title:hover { color: var(--brand); text-decoration: underline; }
+.chat-cite-static { cursor: default; }
+.chat-topic-clear {
+  flex: 0 0 auto; border: 0; background: none; color: var(--text3);
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.chat-topic-clear:hover { color: var(--text); }
+.chat-topic-asks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chat-topic-ask {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  border-radius: 12px; padding: 4px 10px; font-size: 11.5px; cursor: pointer;
+}
+.chat-topic-ask:hover { border-color: var(--brand); color: var(--brand); }

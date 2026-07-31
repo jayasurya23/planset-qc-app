@@ -656,14 +656,31 @@ function renderChatContent(
   });
 }
 
+interface ChatTopic {
+  issueId: string;
+  shortId: string;
+  title: string;
+  status: string;
+  category: string;
+  page: number | null;
+}
+
+const TOPIC_QUICK_ASKS = [
+  "Why was this flagged? Walk me through the basis.",
+  "What exactly should the drafter change to clear it?",
+  "Are there related findings I should look at together with this one?",
+];
+
 function ChatPanel({
   runId,
   runLabel,
   onCite,
+  askAbout,
 }: {
   runId: string;
   runLabel: string;
   onCite: (issueId: string) => void;
+  askAbout: { nonce: number; issue: Issue } | null;
 }) {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -673,7 +690,26 @@ function ChatPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [model, setModel] = useState<string>("");
+  const [topic, setTopic] = useState<ChatTopic | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // A card's "Ask" button targets the chat at that finding: open the panel,
+  // pin the finding as the conversation topic, focus the input.
+  useEffect(() => {
+    if (!askAbout) return;
+    const i = askAbout.issue;
+    setTopic({
+      issueId: i.id,
+      shortId: i.id.replace(/-/g, "").slice(0, 8),
+      title: i.title,
+      status: i.status,
+      category: i.category,
+      page: i.page_number ?? null,
+    });
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 120);
+  }, [askAbout]);
 
   useEffect(() => {
     // New run → reset and load its thread.
@@ -700,8 +736,14 @@ function ChatPanel({
   }, [msgs, streamText, open]);
 
   async function send(text: string) {
-    const q = text.trim();
+    let q = text.trim();
     if (!q || busy) return;
+    // A pinned topic scopes the question to that finding — the reference is
+    // part of the sent (and persisted) message, so the scoping is transparent
+    // in the thread history.
+    if (topic) {
+      q = `About [#${topic.shortId}] "${topic.title}" (${topic.status}, ${topic.category}${topic.page ? `, p.${topic.page}` : ""}): ${q}`;
+    }
     setErr(null);
     setBusy(true);
     setInput("");
@@ -823,11 +865,51 @@ function ChatPanel({
         )}
         {err && <div className="chat-err">{err}</div>}
       </div>
+      {topic && (
+        <div className="chat-topic">
+          <div className="chat-topic-row">
+            <span
+              className={`chat-topic-status chat-topic-${topic.status === "Fail" ? "fail" : topic.status === "Pass" ? "pass" : "review"}`}
+            >
+              {topic.status}
+            </span>
+            <button
+              className="chat-topic-title"
+              title="Jump to this finding"
+              onClick={() => onCite(topic.issueId)}
+            >
+              {topic.title}
+            </button>
+            <span className="chat-cite chat-cite-static">#{topic.shortId.slice(0, 4)}</span>
+            <button
+              className="chat-topic-clear"
+              title="Back to whole-run chat"
+              onClick={() => setTopic(null)}
+            >
+              ×
+            </button>
+          </div>
+          {!busy && (
+            <div className="chat-topic-asks">
+              {TOPIC_QUICK_ASKS.map((s) => (
+                <button key={s} className="chat-topic-ask" onClick={() => send(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="chat-inputrow">
         <textarea
+          ref={inputRef}
           className="chat-input"
           value={input}
-          placeholder="Why is E-105 failing? What matters most?"
+          placeholder={
+            topic
+              ? "Ask about this finding…"
+              : "Why is E-105 failing? What matters most?"
+          }
           rows={2}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -929,6 +1011,8 @@ export default function App() {
   // Keyboard-navigation focus on a single finding card. Set/cleared by
   // j/k handlers below; visualized via .card-focused CSS.
   const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
+  // Card "Ask" button → opens the QC copilot pinned to that finding.
+  const [chatAsk, setChatAsk] = useState<{ nonce: number; issue: Issue } | null>(null);
   const [showShortcuts, setShowShortcuts] = useState<boolean>(false);
   // Compare-mode state. When ``compareRunId`` is set we fetch that run
   // and render a diff against the currently-selected run. URL-synced
@@ -2512,6 +2596,7 @@ export default function App() {
         <ChatPanel
           key={runId}
           runId={runId}
+          askAbout={chatAsk}
           runLabel={
             runs.find((r) => r.id === runId)?.original_filename || "this run"
           }
@@ -4508,6 +4593,16 @@ export default function App() {
 
                           {/* Quick status */}
                           <div className="card-actions">
+                            <button
+                              className="card-ask"
+                              title="Ask the QC copilot about this finding"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setChatAsk({ nonce: Date.now(), issue });
+                              }}
+                            >
+                              💬 Ask AI
+                            </button>
                             <StatusBtn
                               current={issue.status}
                               target="Pass"

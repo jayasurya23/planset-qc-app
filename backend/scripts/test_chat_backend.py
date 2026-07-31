@@ -62,7 +62,15 @@ db.insert_run(
         "status_counts": {"Fail": 1, "Pass": 1}, "categories": [],
         "summary": {"design_stage": "60", "missing_from_pdf": ["E-203"],
                     "rules_file": "rules.yaml", "rules_sha256": "ab" * 32,
-                    "calc_inputs": {"module_voc": "49.8"}},
+                    "calc_inputs": {"module_voc": "49.8", "inverter_max_vdc": "1000"},
+                    "supporting_docs": [{
+                        "filename": "JKM555_datasheet.pdf",
+                        "doc_type": "module_datasheet",
+                        "summary": "Jinko 555W module electrical characteristics.",
+                        "specs": {"module_voc": "49.8", "module_isc": "13.98"},
+                        "raw_excerpt": "Voc 49.8V  Isc 13.98A  NOCT 45C",
+                        "page_count": 2,
+                    }]},
         "design_stage": "60",
     },
     [
@@ -89,6 +97,14 @@ check("ruleset fingerprint noted", "rules.yaml" in pack)
 check("missing-sheet fact included", "E-203" in pack)
 check("citation map is short->full id",
       qc_chat.citation_map(run)[sid_a] == ISSUE_A)
+u_start, u_end = pack.index("<untrusted-planset-data>"), pack.index("</untrusted-planset-data>")
+check("supporting doc grounded (filename + specs + excerpt)",
+      "JKM555_datasheet.pdf" in pack and "module_isc=13.98" in pack
+      and "NOCT 45C" in pack)
+check("supporting docs live INSIDE the untrusted delimiters",
+      u_start < pack.index("JKM555_datasheet.pdf") < u_end)
+check("calc inputs snapshot grounded inside delimiters",
+      u_start < pack.index("inverter_max_vdc=1000") < u_end)
 
 # ── 2. endpoints ────────────────────────────────────────────────────────────
 print("2. Endpoints (stubbed model):")
