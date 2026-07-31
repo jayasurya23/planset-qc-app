@@ -676,13 +676,22 @@ function ChatPanel({
   runLabel,
   onCite,
   askAbout,
+  onOpenChange,
 }: {
   runId: string;
   runLabel: string;
   onCite: (issueId: string) => void;
   askAbout: { nonce: number; issue: Issue } | null;
+  onOpenChange: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+
+  // Report open/closed to the app shell so the report content can reflow
+  // (reserve space for the drawer) instead of being covered by it.
+  useEffect(() => {
+    onOpenChange(open);
+    return () => onOpenChange(false);
+  }, [open, onOpenChange]);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [citations, setCitations] = useState<Record<string, string>>({});
   const [input, setInput] = useState("");
@@ -1013,6 +1022,9 @@ export default function App() {
   const [focusedIssueId, setFocusedIssueId] = useState<string | null>(null);
   // Card "Ask" button → opens the QC copilot pinned to that finding.
   const [chatAsk, setChatAsk] = useState<{ nonce: number; issue: Issue } | null>(null);
+  // Mirrors the drawer's open state so the layout reserves room for it
+  // (desktop) instead of letting it cover the report cards.
+  const [chatOpen, setChatOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState<boolean>(false);
   // Compare-mode state. When ``compareRunId`` is set we fetch that run
   // and render a diff against the currently-selected run. URL-synced
@@ -2562,7 +2574,7 @@ export default function App() {
 
   // ── Render ──
   return (
-    <div className="app">
+    <div className={`app${chatOpen ? " app-chat-open" : ""}`}>
       {/* ── Top-right account / sign-in widget ── */}
       <ProfileMenu me={me} />
       {/* ── Shared run queue / activity feed + completion toasts ── */}
@@ -2597,6 +2609,7 @@ export default function App() {
           key={runId}
           runId={runId}
           askAbout={chatAsk}
+          onOpenChange={setChatOpen}
           runLabel={
             runs.find((r) => r.id === runId)?.original_filename || "this run"
           }
