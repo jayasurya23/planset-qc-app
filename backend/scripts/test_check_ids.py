@@ -171,11 +171,27 @@ check("no fanout arg -> conservative suffix (never drop a finding)",
                        {"instance": "XFMR-1", "evidence": "a"})[0]
       == "ai_gnd_egc_size_250_122__xfmr_1")
 
-print("Families without a registry are untouched:")
+print("Families without a registry keep free-form names, but not free-form CASING:")
 k5, o5 = ci.canonical_key("ai_sld", "free_form_name_the_model_chose", {"evidence": "x"})
 check("free-form key preserved", k5 == "ai_sld_free_form_name_the_model_chose" and not o5)
 k6, _ = ci.canonical_key("ai_sld", "ai_sld_already_prefixed", {"evidence": "x"})
 check("no double prefix", k6 == "ai_sld_already_prefixed")
+# Bagby v8 vs v9: ai_tb emitted these exact pairs for the same checks on the
+# same sheet, halving that family's key stability by capitalisation alone.
+for a_name, b_name in (("date", "Date"),
+                       ("designer_name", "Designer name"),
+                       ("sov", "SOV"),
+                       ("Revision number", "revision_number"),
+                       ("EPC Logo", "epc_logo")):
+    ka, _ = ci.canonical_key("ai_tb_p23", a_name, {"evidence": "x"})
+    kb, _ = ci.canonical_key("ai_tb_p23", b_name, {"evidence": "x"})
+    check(f"{a_name!r} and {b_name!r} agree -> {ka}", ka == kb)
+check("distinct checks still get distinct keys",
+      ci.canonical_key("ai_tb_p23", "Date", {})[0]
+      != ci.canonical_key("ai_tb_p23", "Sheet Number", {})[0])
+check("an ordinal prefix does not change identity",
+      ci.canonical_key("ai_sld", "5. bus rating", {})[0]
+      == ci.canonical_key("ai_sld", "bus rating", {})[0])
 
 print("Report titles come from the registry:")
 check("enumerated check gets its human title",

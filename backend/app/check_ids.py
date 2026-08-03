@@ -349,8 +349,17 @@ def canonical_key(prefix: str, check_name: str, finding: dict[str, Any] | None =
     """
     family = family_for_prefix(prefix)
     if family is None:
+        # Un-enumerated family: the model still chooses the name, but it should
+        # not also choose the CASING. Measured on Bagby v8 vs v9, ai_tb emitted
+        # "date"/"Date", "designer_name"/"Designer name", "sov"/"SOV" for the
+        # same checks on the same sheet, halving that family's key stability on
+        # its own. Folding case and punctuation costs nothing and collapses
+        # those pairs; the model's original wording is kept for the title.
         name = str(check_name or "")
-        return (name if name.startswith(prefix) else f"{prefix}_{name}"), False
+        if name.startswith(prefix):
+            name = name[len(prefix):].lstrip("_")
+        folded = _normalize(name)
+        return f"{prefix}_{folded}" if folded else f"{prefix}_{name}", False
 
     key_prefix = _FAMILY_KEY_PREFIX.get(family, prefix)
     exploratory = bool((finding or {}).get("_exploratory"))
