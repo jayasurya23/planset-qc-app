@@ -1574,10 +1574,12 @@ rules:
     category: Electrical Sheet
     title: Voltage drop summary populated
     description: Voltage drop summary for DC, LV-AC, and MV should be populated (not blank).
-    severity: high
+    severity: low
     check_type: electrical_calc
     calc_function: validate_voltage_drop
-    nec_ref: "NEC 210.19(A) Informational Note No. 4, 215.2(A)(4) Informational Note No. 2"
+    # Informational Notes are advisory, not enforceable (NEC 90.5(C)) — this
+    # is a design criterion, so it never warrants a hard Fail.
+    nec_ref: "NEC 210.19(A) Informational Note, 215.2(A)(1) Informational Note (advisory per 90.5(C))"
     confidence: 0.85
 
   - key: elec_voltage_drop_content
@@ -1659,15 +1661,21 @@ rules:
     min_matches: 1
     confidence: 0.72
 
-  - key: electrical_vd_client_criteria
-    category: Electrical Sheet
-    title: Total voltage drop within client criteria
-    description: Total AC+DC voltage drop should be within client criteria (typically 3% max).
-    severity: high
-    check_type: electrical_calc
-    calc_function: validate_voltage_drop
-    nec_ref: "NEC 210.19(A) Informational Note No. 4"
-    confidence: 0.85
+  # RETIRED (2026-08-03 production audit): bound to the same calc_function as
+  # electrical_voltage_drop, so every run emitted the identical text twice —
+  # 30 findings across 9 of 11 projects, none resolvable. There is also no
+  # "client criteria" input anywhere in the system, so the title promised a
+  # comparison that could not happen. Re-enable only with a real per-project
+  # VD limit and extracted cable lengths to compare against.
+  # - key: electrical_vd_client_criteria
+  #   category: Electrical Sheet
+  #   title: Total voltage drop within client criteria
+  #   description: Total AC+DC voltage drop should be within client criteria (typically 3% max).
+  #   severity: high
+  #   check_type: electrical_calc
+  #   calc_function: validate_voltage_drop
+  #   nec_ref: "NEC 210.19(A) Informational Note No. 4"
+  #   confidence: 0.85
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Inverter Zone Map

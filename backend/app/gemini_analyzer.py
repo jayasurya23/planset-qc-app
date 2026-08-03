@@ -180,6 +180,38 @@ def _pick_page_for_finding(finding: dict, page_numbers: list[int]) -> int | None
     return None
 
 
+def _is_conditional_presence(check_name: str) -> bool:
+    """True for title-block / cover items whose absence is routine, not a defect.
+
+    A DER number is a utility-assigned interconnection ID that does not exist
+    until the interconnection application is processed; SOV is a title-block
+    template field many firms do not use. Both are line items on the QC
+    checklist, so they stay visible — but they are not red-lines.
+    """
+    tokens = re.split(r"[^a-z0-9]+", check_name.lower())
+    if "sov" in tokens:
+        return True
+    return "der" in tokens and any(t in tokens for t in ("number", "no", "id", "num"))
+
+
+def _status_from_finding(status_raw: str, found: Any, check_name: str) -> str:
+    """Map a model finding onto a QC status.
+
+    ``found: false`` normally means the item is missing → Fail. For the
+    conditional items above it does not: the model frequently writes "no DER
+    number is shown, so this check is skipped" and the mapper converted its
+    own not-a-defect into a medium-severity Fail — 58 hard Fails across 11 of
+    11 production projects, every one of them noise.
+    """
+    if status_raw in ("Pass", "Fail", "Needs Review"):
+        return status_raw
+    if found is True:
+        return "Pass"
+    if found is False:
+        return "Needs Review" if _is_conditional_presence(check_name) else "Fail"
+    return "Needs Review"
+
+
 def _cross_page_check_names(
     findings: list[dict], page_numbers: list[int]
 ) -> set[str]:
@@ -635,7 +667,12 @@ Examine the TITLE BLOCK area (usually bottom-right corner, sometimes the
 right-side vertical strip on landscape D-size drawings) and check for the
 following items:
 
-1. **SOV** (Scope of Verification) present
+1. **SOV** (Scope of Verification) present — an OPTIONAL template field that
+   many firms do not use. Report it ONLY if a field explicitly labelled "SOV"
+   or "Scope of Verification" exists. If there is no such label, return
+   status "Needs Review" with value "" and evidence "no SOV field in this
+   title block" — do NOT report an unrelated field (project ID, sheet name,
+   appendix reference) as the SOV, and do NOT treat its absence as a defect.
 2. **Date** is shown
 3. **Designer name** is shown
 4. **Engineer name** is shown
@@ -889,7 +926,10 @@ You are a QC engineer reviewing the THREE LINE DIAGRAM (3LD) of a solar PV plans
 Check the following on this page:
 
 1. **Equipment Labels** – Are all equipment shown with labels and ratings?
-2. **No Cable Sizes** – The 3LD should NOT show cable sizes or FLA (those belong on the SLD)
+2. **Cable Sizes And FLA** – If the 3LD shows cable sizes or FLA, are they
+   internally consistent and plausible? Showing them is NORMAL and is NOT a
+   defect — never report their presence as a problem. If none are shown, that
+   is also fine (they belong on the SLD): report Pass.
 3. **CT/VT Arrangement** – Are CTs and VTs shown for metering? What ratios?
 4. **Breaker Phases** – Are breakers shown with correct phase count (3P vs 2P vs 1P)?
 5. **Transformer Windings** – Are LV and HV winding configurations shown (Delta/Wye)?
@@ -1845,14 +1885,7 @@ def _gemini_page_check(
         found = finding.get("found")
 
         # Determine status
-        if status_raw in ("Pass", "Fail", "Needs Review"):
-            status = status_raw
-        elif found is True:
-            status = "Pass"
-        elif found is False:
-            status = "Fail"
-        else:
-            status = "Needs Review"
+        status = _status_from_finding(status_raw, found, check_name)
 
         severity = finding.get("severity", "medium")
         if severity not in ("low", "medium", "high"):
@@ -2055,14 +2088,7 @@ def _gemini_multi_page_check(
         status_raw = finding.get("status", "")
         found = finding.get("found")
 
-        if status_raw in ("Pass", "Fail", "Needs Review"):
-            status = status_raw
-        elif found is True:
-            status = "Pass"
-        elif found is False:
-            status = "Fail"
-        else:
-            status = "Needs Review"
+        status = _status_from_finding(status_raw, found, check_name)
 
         severity = finding.get("severity", "medium")
         if severity not in ("low", "medium", "high"):
@@ -2501,6 +2527,44 @@ def run_gemini_checks(
                 "%s_review_incomplete", record["label"], prefix, prefix,
             )
 
+        # A review whose target sheet was taken by a more specific family says
+        # so, once. The alternative — running it against the sheet anyway —
+        # is what produced seven fabricated structural Fails per planset.
+        for gap in _routing_gaps:
+            owners = ", ".join(sorted({o for o in gap["taken_by"] if o}))
+            if gap["candidates"]:
+                why = (
+                    f"the only matching sheet(s) "
+                    f"({', '.join(str(p) for p in gap['candidates'])}) were "
+                    f"reviewed as {owners or 'another sheet type'} instead"
+                )
+            else:
+                why = "no sheet in this planset matched this review"
+            all_issues.append(make_issue(
+                run_id=run_id,
+                item_key=f"{gap['prefix']}_sheet_not_reviewed",
+                category=gap["category"],
+                title=f"{gap['label']}: no sheet available for this review",
+                description=(
+                    f"[AI] {gap['label']}: this review did not run — no "
+                    "matching sheet was available."
+                ),
+                status="Deferred",
+                severity="medium",
+                page_number=gap["candidates"][0] if gap["candidates"] else None,
+                evidence=(
+                    f"Deferred: {why}. Nothing was assessed against this "
+                    "checklist — treat it as unreviewed, not as passing. If "
+                    "the planset does contain such a sheet, its title did not "
+                    "match the expected keywords."
+                ),
+                confidence=1.0,
+            ))
+            logger.warning(
+                "Routing gap: %s found no unclaimed sheet (candidates %s, "
+                "taken by %s)", gap["prefix"], gap["candidates"], owners or "-",
+            )
+
         if out_dispatch is not None:
             out_dispatch.extend(_dispatch)
         return all_issues
@@ -2762,6 +2826,41 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
             if _sheet_title_matches(p.sheet_title or "", keywords, exclude)
         ]
 
+    # ── Page routing ────────────────────────────────────────────────────
+    # A sheet belongs to at most ONE review family. Two families each taking
+    # [0] of overlapping keyword sets used to land on the SAME sheet: on nine
+    # production runs the pad-detail and equipment-area families both reviewed
+    # the same page, so the seven structural pad checks ran against an inverter
+    # zone map and failed it for missing rebar, PSI and anchor bolts — content
+    # that sheet type can never carry. ~113 fabricated Fails traced to this.
+    #
+    # Disjoint keyword sets below are the primary fix; this claim table is the
+    # backstop that keeps any future overlap from silently repeating it.
+    _claimed_pages: dict[int, str] = {}
+    _routing_gaps: list[dict] = []
+
+    def claim_page(
+        candidates: list[int], prefix: str, category: str, label: str,
+    ) -> int | None:
+        """First unclaimed candidate page, or None with a recorded gap.
+
+        Returning None is a real answer: it means this planset has no sheet
+        for that review. Saying so once is honest; running the review against
+        somebody else's sheet and failing it is not.
+        """
+        for pn in candidates:
+            if pn not in _claimed_pages:
+                _claimed_pages[pn] = prefix
+                return pn
+        _routing_gaps.append({
+            "prefix": prefix,
+            "category": category,
+            "label": label,
+            "taken_by": [_claimed_pages.get(p) for p in candidates],
+            "candidates": candidates,
+        })
+        return None
+
     # 1 ── Cover Sheet (always page 1) ─────────────────────────────────────
     all_issues.extend(
         _safe_call(
@@ -2893,29 +2992,42 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         )
 
     # 12 ── Elevation Details ────────────────────────────────────────────
-    ev = find_pages("ELEVATION", "EQUIPMENT DETAIL", "EQUIPMENT ELEVATION")
-    if ev:
+    # A bare "ELEVATION" also names CAB-hanger and MV-equipment elevation
+    # sheets, which belong to their own families; reviewing them here produced
+    # array-elevation Fails against sheets that never claimed to show an array.
+    ev = find_pages("ELEVATION", "EQUIPMENT DETAIL", "EQUIPMENT ELEVATION",
+                    exclude=("CAB", "HANGER", "CABLE", "TRENCH", "POLE"))
+    ev_pg = claim_page(ev, "ai_elev", "Elevation Details", "Elevation Details")
+    if ev_pg:
         all_issues.extend(
             _safe_call(
-                _gemini_page_check, doc, ev[0], _prompt(_ELEVATION_PROMPT),
+                _gemini_page_check, doc, ev_pg, _prompt(_ELEVATION_PROMPT),
                 run_id, run_dir, "Elevation Details", "ai_elev", "Elevation Details Review",
             )
         )
 
     # 13 ── Grounding ────────────────────────────────────────────────────
-    gnd = find_pages("GROUNDING", "GROUND PLAN", "GND", "EARTHING")
+    # "GROUND PLAN" removed: that IS the Overall Site Grounding Plan family's
+    # sheet (step 24). Claiming it here put a grounding-DIAGRAM review on a
+    # site plan, which then reported NEC 250.66 / 250.102(C)(1) items as
+    # unverifiable while the deep grounding pass simultaneously found them on
+    # the real one-line — two contradictory answers in one report.
+    gnd = find_pages("GROUNDING", "GND", "EARTHING",
+                     exclude=("SITE", "OVERALL", "PLAN"))
     # Skip when the deep grounding trace (step 26) covers this page — it sends
     # the IDENTICAL _GROUNDING_PROMPT over the page set, so the single-page
     # review is a pure duplicate. Coverage-safe: skipped only when gnd[0] is in
     # the deep's checked pages.
     _gnd_deep = find_pages("GROUNDING", "GROUND", "GND", "EARTHING")
     if gnd and not _deep_supersedes_single(gnd, _gnd_deep, 3):
-        all_issues.extend(
-            _safe_call(
-                _gemini_page_check, doc, gnd[0], _prompt(_GROUNDING_PROMPT),
-                run_id, run_dir, "Grounding Diagram", "ai_gnd", "Grounding Review",
+        gnd_pg = claim_page(gnd, "ai_gnd", "Grounding Diagram", "Grounding Diagram")
+        if gnd_pg:
+            all_issues.extend(
+                _safe_call(
+                    _gemini_page_check, doc, gnd_pg, _prompt(_GROUNDING_PROMPT),
+                    run_id, run_dir, "Grounding Diagram", "ai_gnd", "Grounding Review",
+                )
             )
-        )
 
     # 14 ── Relay and Inverter Settings ────────────────────────────────
     rs = find_pages("RELAY", "INVERTER SETTING",
@@ -2995,12 +3107,17 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         )
 
     # 20 ── Equipment Area Feeder Plan ─────────────────────────────────
+    # Excludes keep the structural detail sheets with the pad family — this
+    # review is about equipment-area layout and working clearances, not rebar.
     eaf = find_pages("EQUIPMENT AREA", "EQUIPMENT PAD", "PAD FEEDER",
-                     "EQUIPMENT FEEDER", exclude=("GROUNDING",))
-    if eaf:
+                     "EQUIPMENT FEEDER",
+                     exclude=("GROUNDING", "DETAIL", "SLAB", "FOUNDATION"))
+    eaf_pg = claim_page(eaf, "ai_eaf", "Equipment Area Feeder Plan",
+                        "Equipment Area Feeder Plan")
+    if eaf_pg:
         all_issues.extend(
             _safe_call(
-                _gemini_page_check, doc, eaf[0], _prompt(_EQUIP_AREA_FEEDER_PROMPT),
+                _gemini_page_check, doc, eaf_pg, _prompt(_EQUIP_AREA_FEEDER_PROMPT),
                 run_id, run_dir, "Equipment Area Feeder Plan", "ai_eaf",
                 "Equipment Area Feeder Plan Review",
             )
@@ -3019,12 +3136,27 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         )
 
     # 22 ── PAD / Slab Details ────────────────────────────────────────
+    # Unambiguously structural titles first. "EQUIPMENT PAD" is NOT here: it
+    # equally names the feeder/plan sheet, which is what caused the collision.
+    # "REBAR"/"PAD SCHEDULE" are included because real structural sheets are
+    # titled that way (Bagby E-2xx "REBAR SCHEDULE MV PAD") and the narrower
+    # list alone would have skipped them — trading a false positive for a
+    # false negative, which is the worse trade.
     pad = find_pages("PAD DETAIL", "SLAB DETAIL", "CONCRETE PAD",
-                     "EQUIPMENT PAD", "FOUNDATION DETAIL", exclude=("GROUNDING",))
-    if pad:
+                     "FOUNDATION DETAIL", "REBAR", "PAD SCHEDULE",
+                     exclude=("GROUNDING", "FEEDER", "ZONE", "MAP", "PLAN"))
+    if not pad:
+        # Fallback: a plainly-titled "EQUIPMENT PAD" sheet that the feeder
+        # review did not take. Plansets often carry two (Rock Run p13 + p18) —
+        # the first is the plan, the second the detail. claim_page skips any
+        # page already spoken for, so this can only pick up the leftover.
+        pad = find_pages("EQUIPMENT PAD",
+                         exclude=("GROUNDING", "FEEDER", "ZONE", "MAP", "PLAN"))
+    pad_pg = claim_page(pad, "ai_pad", "PAD / Slab Details", "PAD / Slab Details")
+    if pad_pg:
         all_issues.extend(
             _safe_call(
-                _gemini_page_check, doc, pad[0], _prompt(_PAD_SLAB_PROMPT),
+                _gemini_page_check, doc, pad_pg, _prompt(_PAD_SLAB_PROMPT),
                 run_id, run_dir, "PAD / Slab Details", "ai_pad",
                 "PAD/Slab Details Review",
             )
@@ -3049,10 +3181,12 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     gp = [p for p in gp
           if "DIAGRAM" not in (pages[p - 1].sheet_title or "").upper()
           and "SLD" not in (pages[p - 1].sheet_title or "").upper()]
-    if gp:
+    gp_pg = claim_page(gp, "ai_gndplan", "Overall Site Grounding Plan",
+                       "Overall Site Grounding Plan")
+    if gp_pg:
         all_issues.extend(
             _safe_call(
-                _gemini_page_check, doc, gp[0], _prompt(_GROUNDING_PLAN_PROMPT),
+                _gemini_page_check, doc, gp_pg, _prompt(_GROUNDING_PLAN_PROMPT),
                 run_id, run_dir, "Overall Site Grounding Plan", "ai_gndplan",
                 "Overall Site Grounding Plan Review",
             )

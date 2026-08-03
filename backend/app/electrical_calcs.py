@@ -998,24 +998,43 @@ def validate_voltage_drop(pd: dict) -> CalcResult:
     computed["typical_ac_vd_pct"] = "0.5-1.5%"
     computed["typical_mv_vd_pct"] = "0.1-0.5%"
 
+    # Deferred, not Needs Review. Cable lengths are not extracted, so nothing
+    # is actually computed here — and voltage drop is a DESIGN criterion, not
+    # an enforceable limit: NEC 210.19(A) and 215.2(A)(1) carry the 3% / 5%
+    # figures in Informational Notes, which are not code requirements
+    # (NEC 90.5(C)). Flagging every planset for it put an unresolvable item on
+    # 9 of 11 projects.
     return CalcResult(
-        "Needs Review",
-        f"Voltage drop calculation requires cable lengths from electrical schedule. "
-        f"Total VD (DC+AC+MV) must be ≤ 3%. "
+        "Deferred",
+        f"Deferred: voltage drop is not computed — cable lengths are not "
+        f"extracted from the circuit schedule. "
         f"System: {dc_kw or '?'}kW DC, {ac_kva or '?'}kVA AC, {poi_v or '?'}V POI. "
+        f"Verify manually against the project's own VD criterion; the 3% branch "
+        f"/ 5% total figures in NEC 210.19(A) and 215.2(A)(1) are Informational "
+        f"Notes (advisory per NEC 90.5(C)), not enforceable limits. "
         f"Typical ranges: DC 0.5-1.5%, AC 0.5-1.5%, MV 0.1-0.5%.",
-        severity="medium",
+        severity="low",
         confidence=0.60,
         computed=computed,
     )
 
 
 def validate_conduit_fill(pd: dict) -> CalcResult:
-    """Check conduit fill guidance (< 40% for 3+ conductors per NEC Ch9 Table 1)."""
+    """Conduit fill (< 40% for 3+ conductors per NEC Ch.9 Table 1).
+
+    Deferred, not Needs Review. This function reads nothing from the planset —
+    computing real fill needs per-run conduit trade size plus conductor count
+    and insulation type from the circuit schedule, which is not extracted yet.
+    Emitting Needs Review made it flag 11 of 11 projects with byte-identical
+    text: a checklist item restated at the reviewer, not a finding. Deferred
+    says the same thing honestly and stays out of the problem list.
+    """
     return CalcResult(
-        "Needs Review",
-        "Conduit fill must be < 40% for 3+ conductors per NEC Chapter 9 Table 1. "
-        "Verify from electrical schedule that all conduit runs show fill percentage below 40%.",
+        "Deferred",
+        "Deferred: conduit fill is not computed — trade size, conductor count "
+        "and insulation type are not extracted from the circuit schedule. "
+        "Verify manually that fill stays below 40% for 3+ conductors "
+        "(NEC Chapter 9, Table 1).",
         severity="medium",
         confidence=0.60,
         computed={"max_fill_pct": 40.0, "nec_ref": "Chapter 9 Table 1"},
