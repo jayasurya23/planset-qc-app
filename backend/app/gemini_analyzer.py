@@ -1891,6 +1891,7 @@ def _gemini_page_check(
 
     issues: list[dict] = []
     seen_keys: set[str] = set()
+    fanout = check_ids.fanout_ids(item_key_prefix, findings)
     # Findings that came back with status Fail/NR but no usable bbox after
     # text search + AI-supplied bbox. Each entry remembers what's needed to
     # re-render its issue once the rescue pass returns a location.
@@ -1945,7 +1946,7 @@ def _gemini_page_check(
         # Families without a registry keep the previous free-form behaviour so
         # enumeration can roll out one family at a time.
         item_key, is_open = check_ids.canonical_key(
-            item_key_prefix, check_name, finding)
+            item_key_prefix, check_name, finding, fanout)
 
         # Per-call dedup: Gemini sometimes emits the same finding multiple
         # times in a single response (e.g. 3x "gen_placeholders" on one page).
@@ -2100,6 +2101,9 @@ def _gemini_multi_page_check(
     findings = _extract_json(raw)
 
     cross_page_checks = _cross_page_check_names(findings, page_numbers)
+    # Which enumerated ids the model reported twice — only those get an
+    # instance suffix, since its instance LABELS are not stable across runs.
+    fanout = check_ids.fanout_ids(item_key_prefix, findings)
 
     issues: list[dict] = []
     seen_keys: set[str] = set()
@@ -2152,7 +2156,7 @@ def _gemini_multi_page_check(
         # Families without a registry keep the previous free-form behaviour so
         # enumeration can roll out one family at a time.
         item_key, is_open = check_ids.canonical_key(
-            item_key_prefix, check_name, finding)
+            item_key_prefix, check_name, finding, fanout)
 
         # Per-call dedup, page-aware — see cross_page_checks above.
         claimed_page = _pick_page_for_finding(finding, page_numbers)
