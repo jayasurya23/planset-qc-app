@@ -1630,6 +1630,42 @@ def extract_specs_from_pages(
     return merged, provenance
 
 
+_OPEN_KEY_RE = re.compile(r"^(ai_[a-z0-9_]+?)_open_[0-9a-f]{8}$")
+
+
+def _exploratory_stats(issues: list[dict]) -> dict:
+    """How many findings landed outside the enumerated check IDs.
+
+    This is the release gate for enumeration. A fixed check list makes every
+    stability metric look better, and it does that just as effectively by
+    NARROWING what the tool looks for as by fixing identity churn. The
+    exploratory rate is the only signal that separates the two: if it collapses
+    toward zero after a family is enumerated, the registry is too tight and
+    real defects are going unreported. It is tracked, never minimized.
+    """
+    by_family: dict[str, int] = {}
+    for issue in issues:
+        m = _OPEN_KEY_RE.match(str(issue.get("item_key") or ""))
+        if m:
+            by_family[m.group(1)] = by_family.get(m.group(1), 0) + 1
+    return {"total": sum(by_family.values()), "by_family": by_family}
+
+
+def _check_ids_fingerprint() -> dict:
+    """Enumerated check-ID registry version, for the run summary.
+
+    Imported lazily: check_ids is only consulted by the vision layer, and a
+    broken registry must never stop an analysis from completing.
+    """
+    try:
+        from .check_ids import registry_fingerprint
+        return registry_fingerprint()
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception("check-id fingerprint failed")
+        return {"families": {}, "sha256": None}
+
+
 def analyze_pdf(
     pdf_path: Path,
     project_name: str | None,
@@ -2719,6 +2755,12 @@ def analyze_pdf(
         # since this run was graded (mutable, unversioned registry).
         "rules_file": rules_fingerprint()["file"],
         "rules_sha256": rules_fingerprint()["sha256"],
+        # Which enumerated check-ID registry graded this run. Changing the
+        # registry changes item_keys, so a later comparison needs to know
+        # whether the two runs were keyed the same way.
+        "check_ids": _check_ids_fingerprint(),
+        # Release gate for enumeration — see _exploratory_stats.
+        "exploratory": _exploratory_stats(issues),
     }
 
     run = {

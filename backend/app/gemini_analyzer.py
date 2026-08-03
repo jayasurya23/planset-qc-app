@@ -21,6 +21,7 @@ from typing import Any
 
 import fitz
 
+from . import check_ids
 from .analyzer import (
     PageInfo,
     default_footer_bbox,
@@ -210,6 +211,22 @@ def _status_from_finding(status_raw: str, found: Any, check_name: str) -> str:
     if found is False:
         return "Needs Review" if _is_conditional_presence(check_name) else "Fail"
     return "Needs Review"
+
+
+# Header used when the grounding family is driven by the enumerated registry.
+# The hand-written _GROUNDING_PROMPT stays as the fallback for as long as
+# check_ids.yaml has no grounding section, so enumeration is reversible by
+# emptying one YAML block.
+_GROUNDING_HEADER = """You are a senior electrical PE reviewing the GROUNDING sheets of a solar PV
+planset. READ the conductor sizes printed on the drawing and VALIDATE each one
+against the NEC tables quoted in the checks below. Do not guess a size you
+cannot read: read the callout, do the table lookup, then compare. Put the
+numbers you used in the evidence."""
+
+
+def _grounding_prompt() -> str:
+    """Registry-driven grounding prompt, falling back to the legacy constant."""
+    return check_ids.compose_prompt("grounding", _GROUNDING_HEADER) or _GROUNDING_PROMPT
 
 
 def _cross_page_check_names(
@@ -1879,8 +1896,13 @@ def _gemini_page_check(
     # re-render its issue once the rescue pass returns a location.
     rescue_pending: list[dict] = []
     for i, finding in enumerate(findings):
-        check_name = finding.get("check") or finding.get(
-            "field") or f"item_{i}"
+        # "title" is in the chain because the open_findings escape hatch in
+        # several prompts emits a title rather than a check name; without it
+        # those findings fell to the POSITIONAL f"item_{i}" fallback, which
+        # renames itself whenever the model reorders its response — the exact
+        # churn this work removes, on the findings we can least afford to lose.
+        check_name = (finding.get("check") or finding.get("field")
+                      or finding.get("title") or f"item_{i}")
         status_raw = finding.get("status", "")
         found = finding.get("found")
 
@@ -1919,10 +1941,11 @@ def _gemini_page_check(
         # Avoid the double-prefix rule_key bug: if the model already emitted a
         # fully-qualified check name (e.g. "gen_placeholders") that starts with
         # the category prefix, use it as-is.
-        if check_name.startswith(item_key_prefix):
-            item_key = check_name
-        else:
-            item_key = f"{item_key_prefix}_{check_name}"
+        # The registry, not the model, decides the key for enumerated families.
+        # Families without a registry keep the previous free-form behaviour so
+        # enumeration can roll out one family at a time.
+        item_key, is_open = check_ids.canonical_key(
+            item_key_prefix, check_name, finding)
 
         # Per-call dedup: Gemini sometimes emits the same finding multiple
         # times in a single response (e.g. 3x "gen_placeholders" on one page).
@@ -1939,7 +1962,8 @@ def _gemini_page_check(
             continue
         seen_keys.add(item_key)
 
-        title = _pretty_title_for(check_name)
+        title = (check_ids.title_for(item_key_prefix, check_name)
+                 or _pretty_title_for(check_name))
         issue_id = str(uuid.uuid4())
 
         # Generate page preview for Fail / Needs Review items. Highlight every
@@ -2083,8 +2107,13 @@ def _gemini_multi_page_check(
     # that has any rescue candidates, batching all findings for that page.
     rescue_by_page: dict[int, list[dict]] = {}
     for i, finding in enumerate(findings):
-        check_name = finding.get("check") or finding.get(
-            "field") or f"item_{i}"
+        # "title" is in the chain because the open_findings escape hatch in
+        # several prompts emits a title rather than a check name; without it
+        # those findings fell to the POSITIONAL f"item_{i}" fallback, which
+        # renames itself whenever the model reorders its response — the exact
+        # churn this work removes, on the findings we can least afford to lose.
+        check_name = (finding.get("check") or finding.get("field")
+                      or finding.get("title") or f"item_{i}")
         status_raw = finding.get("status", "")
         found = finding.get("found")
 
@@ -2119,10 +2148,11 @@ def _gemini_multi_page_check(
             )
 
         # Avoid the double-prefix rule_key bug.
-        if check_name.startswith(item_key_prefix):
-            item_key = check_name
-        else:
-            item_key = f"{item_key_prefix}_{check_name}"
+        # The registry, not the model, decides the key for enumerated families.
+        # Families without a registry keep the previous free-form behaviour so
+        # enumeration can roll out one family at a time.
+        item_key, is_open = check_ids.canonical_key(
+            item_key_prefix, check_name, finding)
 
         # Per-call dedup, page-aware — see cross_page_checks above.
         claimed_page = _pick_page_for_finding(finding, page_numbers)
@@ -2136,7 +2166,8 @@ def _gemini_multi_page_check(
             continue
         seen_keys.add(item_key)
 
-        title = _pretty_title_for(check_name)
+        title = (check_ids.title_for(item_key_prefix, check_name)
+                 or _pretty_title_for(check_name))
         issue_id = str(uuid.uuid4())
 
         # Attribute to the sheet the model named, so Pass rows point at the
@@ -3024,7 +3055,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         if gnd_pg:
             all_issues.extend(
                 _safe_call(
-                    _gemini_page_check, doc, gnd_pg, _prompt(_GROUNDING_PROMPT),
+                    _gemini_page_check, doc, gnd_pg, _prompt(_grounding_prompt()),
                     run_id, run_dir, "Grounding Diagram", "ai_gnd", "Grounding Review",
                 )
             )
@@ -3211,7 +3242,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     if gnd_all and len(gnd_all) > 1:
         all_issues.extend(
             _safe_call(
-                _gemini_multi_page_check, doc, gnd_all[:3], _prompt(_GROUNDING_PROMPT),
+                _gemini_multi_page_check, doc, gnd_all[:3], _prompt(_grounding_prompt()),
                 run_id, run_dir, "Grounding Diagram", "ai_gnd_deep",
                 "Grounding Deep Multi-Page Review",
             )
