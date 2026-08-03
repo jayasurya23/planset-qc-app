@@ -78,6 +78,20 @@ def _slug(value: object, limit: int = 24) -> str:
     return text[:limit]
 
 
+# What a MISSING subject means for a given check. Without this the model gets a
+# circular instruction: "answer Deferred when the subject is not present" is
+# exactly wrong for a check whose entire purpose is to notice that something is
+# not present (no ground rods drawn, no GEC callout).
+_ABSENCE_RULE = {
+    "defect": ("If this item is absent from the drawings, THAT IS THE DEFECT — "
+               "report Fail, do not report Deferred."),
+    "not_applicable": ("If this design genuinely has no such equipment, report "
+                       "Deferred and say which equipment is absent."),
+    "unknown": ("If you cannot tell whether the item is missing or merely not "
+                "shown on these sheets, report Needs Review."),
+}
+
+
 @dataclass(frozen=True)
 class CheckId:
     id: str
@@ -85,6 +99,7 @@ class CheckId:
     instruction: str
     nec_ref: str | None = None
     aliases: tuple[str, ...] = ()
+    absence_is: str = "unknown"
 
 
 def _normalize(name: str) -> str:
@@ -121,6 +136,7 @@ def _load() -> dict[str, tuple[CheckId, ...]]:
                 instruction=str(e.get("instruction") or "").strip(),
                 nec_ref=(str(e["nec_ref"]).strip() if e.get("nec_ref") else None),
                 aliases=tuple(str(a) for a in (e.get("aliases") or [])),
+                absence_is=str(e.get("absence_is") or "unknown"),
             ))
         if checks:
             out[family] = tuple(checks)
@@ -163,8 +179,13 @@ def checklist_block(family: str) -> str:
         "=== CHECKS ===",
         "Answer EVERY check below, exactly once, using its check_id verbatim in",
         'the "check" field. Do NOT invent, rename, re-case, pluralise or',
-        "paraphrase a check_id. If a check does not apply to this planset,",
-        'still answer it with status "Deferred" and say why.',
+        "paraphrase a check_id. Never skip a check and never stay silent about",
+        "one: a reader cannot tell an unanswered check from a clean sheet.",
+        "Each check states below what its ABSENCE means — follow that, not a",
+        "general rule.",
+        "If one check finds several offenders (three transformers, two",
+        'feeders), return one finding PER offender with an "instance" field',
+        "naming it. Do not merge them into one row — they get fixed separately.",
         "",
     ]
     for i, c in enumerate(checks, 1):
@@ -173,6 +194,9 @@ def checklist_block(family: str) -> str:
             lines.append(f"   Verify: {c.instruction}")
         if c.nec_ref:
             lines.append(f"   Reference: {c.nec_ref}")
+        rule = _ABSENCE_RULE.get(c.absence_is)
+        if rule:
+            lines.append(f"   If absent: {rule}")
     lines += [
         "",
         "=== ANYTHING ELSE YOU FIND ===",
@@ -186,6 +210,51 @@ def checklist_block(family: str) -> str:
         "leave it out. Reporting it is required, not optional.",
     ]
     return "\n".join(lines)
+
+
+_RESPONSE_BLOCK = '''
+Return ONE JSON object with two arrays:
+
+```json
+{
+  "findings": [
+    {
+      "check": "the check_id, copied exactly from the list above",
+      "instance": "which transformer/feeder/circuit this is about, or \\"\\"",
+      "status": "Pass|Fail|Needs Review|Deferred",
+      "value": "the value you read on the drawing (short)",
+      "evidence": "the lookup or comparison you performed, with the numbers",
+      "location": "sheet, table and row where you read it",
+      "location_text": "short literal searchable excerpt (3-30 chars)",
+      "severity": "low|medium|high"
+    }
+  ],
+  "open_findings": [
+    {
+      "check": "short descriptive name for a defect no check_id above covers",
+      "status": "Fail|Needs Review",
+      "value": "", "evidence": "", "location": "", "location_text": "",
+      "severity": "low|medium|high"
+    }
+  ]
+}
+```
+
+Return "open_findings": [] when you found nothing outside the list. Return
+both keys always. Return only the JSON object.'''
+
+
+def compose_prompt(family: str, header: str) -> str | None:
+    """Header + enumerated checklist + response schema, or None if unregistered.
+
+    Returning None lets each dispatch keep its hand-written prompt until its
+    family is enumerated, so the rollout is per-family and reversible by
+    emptying one YAML section.
+    """
+    block = checklist_block(family)
+    if not block:
+        return None
+    return f"{header.strip()}\n\n{block}\n{_RESPONSE_BLOCK}"
 
 
 def canonical_key(prefix: str, check_name: str, finding: dict[str, Any] | None = None,

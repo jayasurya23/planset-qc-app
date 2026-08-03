@@ -213,6 +213,22 @@ def _status_from_finding(status_raw: str, found: Any, check_name: str) -> str:
     return "Needs Review"
 
 
+# Header used when the grounding family is driven by the enumerated registry.
+# The hand-written _GROUNDING_PROMPT stays as the fallback for as long as
+# check_ids.yaml has no grounding section, so enumeration is reversible by
+# emptying one YAML block.
+_GROUNDING_HEADER = """You are a senior electrical PE reviewing the GROUNDING sheets of a solar PV
+planset. READ the conductor sizes printed on the drawing and VALIDATE each one
+against the NEC tables quoted in the checks below. Do not guess a size you
+cannot read: read the callout, do the table lookup, then compare. Put the
+numbers you used in the evidence."""
+
+
+def _grounding_prompt() -> str:
+    """Registry-driven grounding prompt, falling back to the legacy constant."""
+    return check_ids.compose_prompt("grounding", _GROUNDING_HEADER) or _GROUNDING_PROMPT
+
+
 def _cross_page_check_names(
     findings: list[dict], page_numbers: list[int]
 ) -> set[str]:
@@ -3039,7 +3055,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         if gnd_pg:
             all_issues.extend(
                 _safe_call(
-                    _gemini_page_check, doc, gnd_pg, _prompt(_GROUNDING_PROMPT),
+                    _gemini_page_check, doc, gnd_pg, _prompt(_grounding_prompt()),
                     run_id, run_dir, "Grounding Diagram", "ai_gnd", "Grounding Review",
                 )
             )
@@ -3226,7 +3242,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     if gnd_all and len(gnd_all) > 1:
         all_issues.extend(
             _safe_call(
-                _gemini_multi_page_check, doc, gnd_all[:3], _prompt(_GROUNDING_PROMPT),
+                _gemini_multi_page_check, doc, gnd_all[:3], _prompt(_grounding_prompt()),
                 run_id, run_dir, "Grounding Diagram", "ai_gnd_deep",
                 "Grounding Deep Multi-Page Review",
             )
