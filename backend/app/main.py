@@ -10,19 +10,21 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .analyzer import analyze_pdf, make_issue, utc_now
 from .auth import current_user
 from .db import (
-    DATA_DIR, delete_run, get_issue_run_id, get_or_create_project,
+    DATA_DIR, chat_thread_stats, delete_run, get_chat_messages,
+    get_issue_run_id, get_or_create_project,
     get_project, get_project_detail, get_run, get_run_versions, init_db,
-    insert_issue_feedback, insert_manual_issue, insert_run,
+    insert_chat_message, insert_issue_feedback, insert_manual_issue, insert_run,
     insert_run_feedback, latest_run_feedback, list_projects, list_runs,
     save_run_version, update_issue, update_run_name,
 )
+from . import chat as qc_chat
 from .exporter import export_due_diligence, export_run_to_excel
 from .progress import clear_progress, get_progress, set_progress
 from . import jobs
@@ -57,9 +59,18 @@ RUNS_DIR.mkdir(parents=True, exist_ok=True)
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Castillo Planset QC API", version="0.3.0")
+# CORS: explicit allowlist, not a wildcard. In production the SPA is served
+# same-origin by this app (behind EasyAuth), so CORS is only exercised by the
+# local Vite dev server; extra origins can be added via CORS_ORIGINS.
+_cors_origins = [
+    o.strip() for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:5173,http://localhost:5173",
+    ).split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -813,6 +824,96 @@ def api_get_run_feedback(run_id: str, engineer_name: str | None = None) -> dict:
     re-prompting people who've already rated)."""
     fb = latest_run_feedback(run_id, (engineer_name or "").strip() or None)
     return {"feedback": fb}
+
+
+# ── QC copilot chat (Phase 1: read-only, grounded) ────────────────────────
+
+
+class ChatMessageCreate(BaseModel):
+    message: str
+
+
+@app.get("/api/runs/{run_id}/chat")
+def api_chat_history(run_id: str, user: dict = Depends(current_user)) -> dict:
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    return {
+        "messages": get_chat_messages(run_id),
+        "config": qc_chat.chat_config(),
+        "citations": qc_chat.citation_map(run),
+        "stats": chat_thread_stats(run_id),
+    }
+
+
+@app.post("/api/runs/{run_id}/chat")
+def api_chat_send(
+    run_id: str,
+    payload: ChatMessageCreate,
+    user: dict = Depends(current_user),
+):
+    """Send one chat turn; the assistant reply streams back as SSE.
+
+    Read-only by design: the model has no tool that writes issue status, and
+    nothing persisted here is ever read by the Excel exporter — the checklist
+    remains the system of record.
+    """
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    text = (payload.message or "").strip()
+    if not text:
+        raise HTTPException(400, "Empty message")
+    refusal = qc_chat.check_ceilings(run_id, text)
+    if refusal:
+        raise HTTPException(429, refusal)
+
+    history = get_chat_messages(run_id)  # before this turn
+    insert_chat_message({
+        "id": str(uuid.uuid4()), "run_id": run_id, "role": "user",
+        "content": text, "created_by": user.get("email"),
+        "created_at": utc_now(),
+    })
+
+    def event_stream():
+        chunks: list[str] = []
+        usage: dict = {}
+        model = None
+        try:
+            for ev in qc_chat.stream_reply(run, history, text):
+                if ev["type"] == "delta":
+                    chunks.append(ev["text"])
+                    yield f"data: {json.dumps(ev)}\n\n"
+                elif ev["type"] == "done":
+                    usage = ev.get("usage") or {}
+                    model = ev.get("model")
+        except Exception as exc:  # noqa: BLE001 — surface, don't hang the stream
+            logging.getLogger(__name__).exception("chat stream failed")
+            yield "data: " + json.dumps(
+                {"type": "error",
+                 "message": f"Model call failed ({type(exc).__name__}); "
+                            "please retry."}) + "\n\n"
+        full = "".join(chunks)
+        message_id = None
+        if full:
+            message_id = str(uuid.uuid4())
+            insert_chat_message({
+                "id": message_id, "run_id": run_id, "role": "assistant",
+                "content": full, "model": model,
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "completion_tokens": usage.get("completion_tokens"),
+                "created_at": utc_now(),
+            })
+        yield "data: " + json.dumps({
+            "type": "done", "message_id": message_id, "model": model,
+            "usage": usage, "citations": qc_chat.citation_map(run),
+        }) + "\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/due-diligence-template")

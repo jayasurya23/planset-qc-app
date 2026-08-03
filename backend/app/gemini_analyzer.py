@@ -542,18 +542,20 @@ STEP 2 — VALIDATE using these engineering rules:
 8. Read kVA rating. VALIDATE: XFMR kVA must be ≥ total inverter kVA output. Calculate and compare.
 9. Read primary/secondary winding config (Delta/Wye), voltages, BIL.
    - For 15kV class: BIL should be 95kV. For 25kV: 125kV. For 34.5kV: 150kV.
-10. Read cooling type. For pad-mount: ONAN is standard (100% capacity). ONAN/ONAF = 100%/133%.
+10. Read cooling class AND insulating fluid (IEC 60076-2: the first letter is the fluid — O = mineral oil; K = less-flammable ester such as Envirotemp FR-3 / natural or synthetic ester). Recognize BOTH fluid families as standard, correct notation: for mineral-oil pad-mounts ONAN = base (100%) and ONAN/ONAF = 100%/133%; for ester / FR-3 pad-mounts the equivalents are KNAN (base, 100%) and KNAF (100%/133%). KNAN↔ONAN and KNAF↔ONAF differ ONLY in the fluid letter — the cooling stage and rating percentages are identical. Do NOT flag KNAN or KNAF as non-standard simply because it is not ONAN/ONAF. ONLY flag a genuine mismatch: a mineral-oil unit carrying a K-class, an ester/FR-3 unit carrying an O-class, a class that conflicts with the fluid named elsewhere on the sheet/datasheet, or a missing/contradictory class.
 11. Read impedance Z% and X/R. Standard Z% for 750-2500kVA is 5.75%. For 3750kVA: 5.75-6.0%.
 12. Is transformer internal fuse and load-break switch shown?
 
 **MV Equipment:**
-13. Read surge arrestor MCOV rating. VALIDATE against system voltage:
-    - 12470Y/7200 (4-wire multigrounded): MCOV should be 8.4kV
-    - 13200Y/7620: MCOV should be 10(8.4) or 9(7.65)
-    - 13800Y/7970: MCOV should be 10(8.4) and 12(10.2)
-    - 24940Y/14400: MCOV should be 18(15.3)
-    - 34500Y/19920: MCOV should be 27(22.0)
-14. Read recloser: make, continuous A, interrupting kA, BIL. For 15kV class: BIL typically 110kV, continuous 630-800A, interrupting 12.5-16kA.
+13. Read surge arrestor MCOV rating. VALIDATE against system voltage AND grounding class.
+    Determine the system grounding from the UTILITY/POI feeder (4-wire multigrounded vs ungrounded/impedance-grounded) — NOT from the PV step-up transformer winding config. For an effectively/multigrounded-neutral (MGN) system the minimum acceptable MCOV ≈ 1.05 × line-to-ground voltage, and a standard arrester one or two ratings up is also acceptable:
+    - 12470Y/7200 (4-wire multigrounded): ACCEPT 7.65kV (9kV arrester) OR 8.4kV (10kV arrester). [Min ≈ 1.05×7.2 = 7.56kV.]
+    - 13200Y/7620: ACCEPT 9(7.65) or 10(8.4).
+    - 13800Y/7970: ACCEPT 10(8.4) or 12(10.2).
+    - 24940Y/14400: ACCEPT 18(15.3).
+    - 34500Y/19920: ACCEPT 27(22.0).
+    Only FAIL when: grounding is confirmed MGN/effectively-grounded AND MCOV is below 1.05×line-to-ground; OR the system is ungrounded/impedance/uni-grounded AND the MCOV is sized only to line-to-ground (ungrounded systems require the higher line-to-line / TOV-based MCOV per IEEE C62.22). If the grounding class is NOT shown or derivable on the sheet, return Needs Review and request the feeder grounding — do NOT assume multigrounded and do NOT Pass.
+14. Read recloser: make, continuous A, interrupting kA, BIL. For 15kV class: BIL is 95kV OR 110kV (both standard per IEEE C37.06 — 95kV for 15kV max voltage, 110kV for 15.5kV; accept either, do NOT flag 95kV as a deviation). Only flag BIL BELOW 95kV (e.g. 75kV/60kV) as under-rated. Continuous 630-800A, interrupting 12.5-16kA.
 15. Read meter CT ratio and VT ratio. CT ratio should be appropriate for the FLA after transformer.
 16. Read meter accuracy class (should be 0.3 for revenue metering).
 17. Is GOAB labeled as "Main Service Disconnect"? Read its voltage and continuous A rating.

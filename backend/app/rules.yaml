@@ -914,8 +914,8 @@ rules:
 
   - key: three_line_equipment_content
     category: Three Line Diagram
-    title: Equipment labels with ratings (no cable sizes)
-    description: 3LD should show equipment labels with ratings but NOT cable sizes or FLA.
+    title: Equipment labels with ratings present
+    description: 3LD should show equipment labels with ratings (inverter, transformer, switchgear, protection). Whether cable sizes / FLA are improperly shown on the 3LD is judged separately by the 3LD vision check, which owns that verdict.
     severity: medium
     check_type: keyword
     search_scope: tld

@@ -134,6 +134,8 @@ def init_db() -> None:
                 source_doc_filename TEXT,
                 source_doc_page INTEGER,
                 source_doc_excerpt TEXT,
+                nec_ref TEXT,
+                calc_computed_json TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (run_id) REFERENCES runs(id)
@@ -148,6 +150,11 @@ def init_db() -> None:
             # Multi-location findings (cross-sheet consistency conflicts) store
             # their per-location list here as JSON (or NULL for normal findings).
             ("locations_json",      "ALTER TABLE issues ADD COLUMN locations_json TEXT"),
+            # Chat-copilot provenance: governing NEC article from the rule
+            # definition, and the calc's intermediate values (CalcResult.computed)
+            # for electrical_calc findings. NULL on older rows and non-calc rows.
+            ("nec_ref",             "ALTER TABLE issues ADD COLUMN nec_ref TEXT"),
+            ("calc_computed_json",  "ALTER TABLE issues ADD COLUMN calc_computed_json TEXT"),
         ]:
             try:
                 cur.execute(f"SELECT {col} FROM issues LIMIT 1")
@@ -196,6 +203,25 @@ def init_db() -> None:
                 number TEXT,
                 created_at TEXT NOT NULL,
                 created_by TEXT
+            )
+            """
+        )
+        # Chat copilot: one thread per run. Read-only grounding in Phase 1 —
+        # chat NEVER writes issue status; the exported checklist stays the
+        # system of record and chat content is excluded from the export.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_by TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id)
             )
             """
         )
@@ -277,6 +303,46 @@ def _backfill_projects_and_versions(cur: sqlite3.Cursor) -> None:
             existing[key] = pid
         for rid in g["ids"]:
             cur.execute("UPDATE runs SET project_id = ? WHERE id = ?", (pid, rid))
+
+
+def insert_chat_message(msg: dict[str, Any]) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO chat_messages (
+                id, run_id, role, content, created_by, model,
+                prompt_tokens, completion_tokens, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                msg["id"], msg["run_id"], msg["role"], msg["content"],
+                msg.get("created_by"), msg.get("model"),
+                msg.get("prompt_tokens"), msg.get("completion_tokens"),
+                msg.get("created_at") or _now_iso(),
+            ),
+        )
+        conn.commit()
+
+
+def get_chat_messages(run_id: str) -> list[dict[str, Any]]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM chat_messages WHERE run_id = ? ORDER BY created_at, id",
+            (run_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def chat_thread_stats(run_id: str) -> dict[str, int]:
+    """Turn count + total completion tokens — drives the server-side ceilings."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, "
+            "COALESCE(SUM(completion_tokens), 0) AS completion_tokens "
+            "FROM chat_messages WHERE run_id = ? AND role = 'assistant'",
+            (run_id,),
+        ).fetchone()
+    return {"assistant_turns": row["n"], "completion_tokens": row["completion_tokens"]}
 
 
 def insert_issue_feedback(fb: dict[str, Any]) -> None:
@@ -384,9 +450,9 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 id, run_id, category, item_key, title, description, severity, status, auto_status,
                 page_number, bbox_json, snippet_path, page_preview_path, evidence, confidence,
                 override_comment, source_doc_filename, source_doc_page, source_doc_excerpt,
-                locations_json, created_at, updated_at
+                locations_json, nec_ref, calc_computed_json, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -411,6 +477,9 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                     issue.get("source_doc_excerpt"),
                     json.dumps(issue.get("locations"), ensure_ascii=False)
                     if issue.get("locations") else None,
+                    issue.get("nec_ref"),
+                    json.dumps(issue.get("calc_computed"), ensure_ascii=False)
+                    if issue.get("calc_computed") else None,
                     issue["created_at"],
                     issue["updated_at"],
                 )
@@ -428,6 +497,9 @@ def row_to_issue(row: sqlite3.Row) -> dict[str, Any]:
     # normal findings have it NULL → locations stays None.
     loc_json = issue.pop("locations_json", None)
     issue["locations"] = json.loads(loc_json) if loc_json else None
+    # Decode calc provenance (electrical_calc findings only; NULL elsewhere).
+    calc_json = issue.pop("calc_computed_json", None)
+    issue["calc_computed"] = json.loads(calc_json) if calc_json else None
     return issue
 
 
@@ -483,6 +555,7 @@ def delete_run(run_id: str) -> bool:
         if not row:
             return False
         conn.execute("DELETE FROM issues WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM chat_messages WHERE run_id = ?", (run_id,))
         conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
         conn.commit()
     return True
