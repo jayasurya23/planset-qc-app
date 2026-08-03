@@ -1,1 +1,881 @@
-families: {}
+families:
+  grounding:
+  - id: full_grounding_path_rack_to_poi
+    title: Grounding path continuity across the supplied sheets (rack to POI)
+    instruction: 'Trace the equipment-grounding / bonding path in the order module and rack -> CAB ->
+      DCB / inverter -> AC panel or switchgear -> transformer -> POI, using ONLY the segments visible
+      in the images you were given. You are handed at most three grounding sheets and the path frequently
+      continues onto sheets that are not in this batch. FAIL only when a break, dead end or unlabeled
+      segment lies between two points that are BOTH visible in these images; quote the two points. When
+      the trace runs off the batch, do NOT call it a gap: answer Needs Review, name the sheet number or
+      title where the trace leaves the supplied images, and name the last device you could confirm.
+
+      PASS = every segment between visible endpoints is drawn and labeled AND the trace is complete from
+      the rack to the POI within these images. FAIL = a break, dead end or unlabeled segment between two
+      endpoints that are both visible here. NEEDS REVIEW = the trace leaves the supplied images, or a
+      segment is drawn but its label or termination is illegible. DEFERRED = the images you were given
+      contain no grounding-path content of any kind - on their face they are only a note sheet, a schedule
+      or an isolated detail, with no grounding one-line, riser or plan; name the sheets you were given.
+
+      PRECEDENCE (these branches would otherwise be satisfiable at the same time, and this family is routinely
+      handed only three sheets while the trace spans rack to POI): if every segment between visible endpoints
+      checks out BUT the trace leaves the supplied images, the answer is NEEDS REVIEW (scope-limited)
+      - name the exit sheet and the last confirmed device. Answer PASS only when the trace is complete
+      and labeled from the rack all the way to the POI within these images. FAIL outranks both: a break
+      between two visible endpoints is a Fail even where the trace also leaves the batch somewhere else.
+
+      ABSENCE RULE (absence_is = unknown): if you cannot see enough of the path to judge continuity, answer
+      Needs Review and name what you could not see. Never assume continuity, never Pass by default, and
+      never answer nothing. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION: it
+      is a default for checks that state no rule of their own. This check states its own ladder and PRECEDENCE
+      line above, and those govern wherever the two differ.
+
+      MULTI-INSTANCE: if several distinct breaks exist, emit one finding per break with the optional "instance"
+      field set to the two endpoints (for example "CAB-2 -> INV-2"); do not merge them into one row. Severity:
+      high for a break between two visible endpoints, medium for an unlabeled segment.'
+    absence_is: unknown
+    nec_ref: NEC 250.4(A)(2), 250.118, 250.134; firm QC checklist - Grounding Diagram item 1 (full circuit
+      trace, rack to POI)
+    aliases:
+    - Overall circuit trace from PV rack to POI
+    - PV rack to AC equipment grounding path
+    - PV rack to inverter/DC equipment grounding path
+  - id: pv_rack_module_egc_to_cab
+    title: PV module / rack equipment grounding conductor to the combiner
+    instruction: 'Read the EGC size and material printed between the module frames / racking and the combiner
+      (CAB), and read the module-to-rack bonding method (WEEB, listed lug, integrated grounding clip,
+      or racking listed and identified as an equipment grounding path under NEC 690.43(A) and (B)). Confirm
+      (a) a conductor size is actually called out, (b) the bonding method is stated rather than implied,
+      and (c) the size is not smaller than NEC Table 250.122 requires for the OCPD protecting that circuit.
+      Use the full copper and aluminium table quoted in check egc_sizing; a PV equipment grounding conductor
+      is sized by 250.122 through NEC 690.45 and shall not be smaller than 14 AWG. Grade an aluminium
+      conductor against the aluminium column and a copper conductor against the copper column.
+
+      NO OCPD IN THE CIRCUIT - NEC 690.45: where the PV source or PV output circuit has no overcurrent
+      device at all (common on unfused string circuits), do NOT answer Needs Review. Use an assumed overcurrent
+      device rated per NEC 690.9(B) on the circuit''s maximum current when applying Table 250.122, state
+      in the evidence that you assumed it and what value you used, and complete the lookup. Reserve Needs
+      Review for a circuit that clearly HAS an OCPD whose rating you cannot read.
+
+      VOLTAGE-DROP EXEMPTION - NEC 690.45: on PV SOURCE and PV OUTPUT circuits (module / string to CAB),
+      increases in EGC size to address VOLTAGE DROP are NOT required. Do not Fail a DC circuit whose current-carrying
+      conductors are upsized for voltage drop while its EGC stays at the plain Table 250.122 size. NEC
+      250.122(B) still applies in full to AC circuits, and to DC circuits upsized for a reason other than
+      voltage drop.
+
+      ROUTING - NEC 690.43(C): the array EGC must be contained within the same raceway or cable as, or
+      otherwise run with, the PV array circuit conductors where those conductors leave the vicinity of
+      the array. Where these sheets PLAINLY show the EGC leaving the array on a separate route from the
+      array circuit conductors, that is a Fail under 690.43(C); do NOT infer a separate route from the
+      mere absence of a routing detail.
+
+      FAIL = a grounding conductor drawn with no size callout, a size below the applicable Table 250.122
+      column for the protecting (or assumed) OCPD, a module-to-rack bond with no stated method, or a plainly
+      separate array-EGC route under 690.43(C). PASS = size, material and bonding method are all stated
+      and the size meets the table; show the lookup. NEEDS REVIEW = a size is shown but the rating of
+      an OCPD that clearly exists is not readable on these sheets so the lookup cannot be completed; say
+      which value is missing. DEFERRED = the images you were given contain no DC-side sheet at all (they
+      are AC / MV grounding sheets only); name the sheets.
+
+      ABSENCE RULE (absence_is = unknown): a solar planset always has modules and racking, so if the rack-to-CAB
+      grounding does not appear in these images you cannot tell whether it is missing from the design
+      or lives on a sheet outside this batch. Answer Needs Review, state which sheets you searched, and
+      do not Fail. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION: it is a default;
+      this check''s own ladder above governs wherever the two differ, and note that the DEFERRED branch
+      here is triggered by a positively observable fact (no DC-side sheet in the batch), not by absence
+      of grounding content.
+
+      MULTI-INSTANCE: emit one finding per array block or CAB circuit whose answer differs, with "instance"
+      set to the block or CAB tag as printed; never merge several blocks into one row. Severity: high
+      if undersized, medium if drawn unsized, medium if the bonding method is unstated, medium for a 690.43(C)
+      routing violation.'
+    absence_is: unknown
+    nec_ref: NEC 690.43(A), (B) and (C), 690.45, 690.9(B) (assumed OCPD where none is used), Table 250.122,
+      250.134
+    aliases:
+    - PV rack to CAB grounding conductor size
+    - PV rack grounding conductor size
+    - PV module/rack grounding to CAB
+    - PV rack to CAB grounding conductor
+    - PV module/rack grounding conductor
+    - PV module/rack grounding conductor sizing
+    - PV rack grounding conductor size (rack to CAB)
+    - PV rack grounding to CAB and CAB to DCB/inverter EGC
+  - id: cab_to_inverter_egc
+    title: CAB to DCB / inverter equipment grounding conductor
+    instruction: 'Read the EGC size and material for each segment from the combiner (CAB) to the DC recombiner
+      (DCB) and from the DCB to the inverter. Confirm each segment carries its own size callout and that
+      the size satisfies NEC Table 250.122 for the OCPD protecting that segment; use the full copper and
+      aluminium table quoted in check egc_sizing, and grade aluminium against the aluminium column. A
+      size that steps DOWN as the circuit moves toward a LARGER upstream OCPD is a Fail unless the drawing
+      states that the smaller conductor is protected by a smaller OCPD.
+
+      NO OCPD IN THE SEGMENT - NEC 690.45: where a PV output circuit segment has no overcurrent device
+      at all, do NOT answer Needs Review; use an assumed overcurrent device rated per NEC 690.9(B) on
+      that circuit''s maximum current when applying Table 250.122, state the assumption and the value
+      used, and complete the lookup.
+
+      VOLTAGE-DROP EXEMPTION - NEC 690.45: these are PV output circuits, so increases in EGC size to address
+      VOLTAGE DROP are NOT required. Do not Fail a CAB -> DCB or DCB -> inverter run whose current-carrying
+      conductors are upsized for voltage drop while its EGC remains at the plain Table 250.122 size. NEC
+      250.122(B) still applies to a DC circuit upsized for some other reason, and in full to the AC side.
+
+      FAIL = a missing size callout on a drawn segment, a size below the applicable table column, or an
+      unexplained step-down. PASS = each segment sized, material stated, at or above the table row; show
+      the lookup. NEEDS REVIEW = an OCPD that clearly protects a segment is not readable in these images.
+      DEFERRED = the images you were given contain no DC-side sheet at all (they are AC / MV grounding
+      sheets only); name the sheets.
+
+      ABSENCE RULE (absence_is = unknown): if the CAB -> DCB -> inverter grounding is simply not depicted
+      here, answer Needs Review naming the sheets you searched. Do not Fail and do not stay silent. SCOPE
+      OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION: it is a default; this check''s
+      ladder governs where the two differ, and the DEFERRED branch here is triggered by the positively
+      observable absence of any DC-side sheet, not by the absence of grounding content on one.
+
+      MULTI-INSTANCE: emit one finding per segment whose answer differs, with "instance" set as printed
+      (for example "CAB-3 -> DCB-1"); never merge segments. Severity: high if undersized, medium if drawn
+      unsized.'
+    absence_is: unknown
+    nec_ref: NEC 690.45, 690.9(B) (assumed OCPD where none is used), Table 250.122, 250.122(A)
+    aliases:
+    - CAB/rack to inverter DC grounding conductor
+    - EGC from CAB to DCB/inverter
+    - CAB to DCB/inverter grounding conductor size
+    - CAB/combiner to inverter grounding conductor size
+  - id: dc_grounding_matches_dc_sld
+    title: DC grounding section agrees with the DC single-line equipment configuration
+    instruction: 'Compare the equipment appearing in the DC grounding section - CAB quantity and tags,
+      DCB quantity and tags, inverter quantity and model, string counts - against the DC single-line information
+      actually available to you in THESE images: an embedded mini one-line, an equipment schedule, a keyed
+      note, or a device list on the grounding sheet.
+
+      FAIL = a device is grounded here that does not exist on the DC one-line, a device on the one-line
+      has no grounding shown, or a quantity, tag or model disagrees; quote BOTH values you compared. PASS
+      = every device, tag and quantity agrees; name what you compared. NEEDS REVIEW = a tag, model or
+      quantity is partially legible so the comparison cannot be completed. DEFERRED = no DC single-line,
+      equipment schedule or device list is present in the images you were given, so there is nothing to
+      compare against; give the one-line reason "DC single-line not in this image batch".
+
+      ABSENCE RULE (absence_is = not_applicable): the Deferred trigger for this check is the absence of
+      the COMPARISON SOURCE from this image batch, not the absence of equipment from the design. Do not
+      reconstruct the one-line from memory of other sheets and do not answer nothing. SCOPE OF ANY GENERIC
+      ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION: it is a default worded around equipment that
+      does not exist; this check''s own Deferred trigger above governs.
+
+      MULTI-INSTANCE: emit one finding per mismatched device with "instance" set to the device tag as
+      printed; never merge several mismatches into one row. Severity: medium for a quantity or tag mismatch,
+      high where an entire inverter, CAB or DCB has no grounding shown.'
+    absence_is: not_applicable
+    nec_ref: NEC 690.43, 250.134; firm QC checklist - DC Line Diagram grounding callouts
+    aliases:
+    - DC grounding section matches equipment configuration
+    - DC equipment grounding configuration vs SLD
+    - DC grounding section matches inverter configuration
+    - DC grounding section matches DC SLD configuration
+    - DC equipment grounding consistency with DC SLD
+    - DC grounding section matches equipment configuration on DC SLD
+    - DC equipment grounding configuration
+    - DC equipment grounding configuration consistency with SLD
+    - DC equipment grounding configuration vs single-line equipment
+  - id: egc_sizing
+    title: Equipment grounding conductor sizing (NEC 250.122)
+    instruction: 'For every circuit shown on these sheets, read the rating of the overcurrent device protecting
+      it and the EGC size and material printed for it, then look the size up in NEC Table 250.122 and
+      put the whole lookup in the evidence in the form: "OCPD = 400 A -> Table 250.122 requires 3 AWG
+      Cu or 1 AWG Al -> drawing shows 4 AWG Cu -> FAIL (undersized)".
+
+      TABLE 250.122 - OCPD rating (A): minimum copper / minimum aluminium. Sizes are AWG unless kcmil
+      is stated.
+
+      15: 14 / 12 | 20: 12 / 10 | 60: 10 / 8 | 100: 8 / 6 | 200: 6 / 4 | 300: 4 / 2 | 400: 3 / 1 | 500:
+      2 / 1/0 | 600: 1 / 2/0 | 800: 1/0 / 3/0 | 1000: 2/0 / 4/0 | 1200: 3/0 / 250 kcmil | 1600: 4/0 /
+      350 kcmil | 2000: 250 kcmil / 400 kcmil | 2500: 350 kcmil / 600 kcmil | 3000: 400 kcmil / 600 kcmil
+      | 4000: 500 kcmil / 750 kcmil | 5000: 700 kcmil / 1200 kcmil | 6000: 800 kcmil / 1200 kcmil.
+
+      Use the row for the OCPD rating; where the OCPD rating falls between rows, use the NEXT HIGHER row.
+      Grade an aluminium conductor against the aluminium column and a copper conductor against the copper
+      column - this firm''s callouts are frequently AL, and grading an aluminium conductor against the
+      copper column is the single most common way this check goes wrong (a 350 kcmil AL EGC on a 2500
+      A feeder looks compliant against the copper column and is actually undersized; 600 kcmil AL is required).
+
+      NEC 250.122(A): the EGC need not be larger than the circuit conductors.
+
+      NEC 250.122(B), 2020 wording: where the ungrounded conductors are increased in size from the minimum
+      that has sufficient ampacity for the installation FOR ANY REASON (voltage drop, future capacity,
+      standardisation, a parallel arrangement, anything), the wire-type EGC must be increased in size
+      PROPORTIONALLY to the circular-mil area of the ungrounded conductors. If the drawing shows upsized
+      phase conductors and an EGC still at the plain table size, that is a Fail; state the circular-mil
+      ratio you applied.
+
+      EXCEPTION TO 250.122(B) - NEC 690.45: for PV SOURCE and PV OUTPUT circuits (the DC side: module
+      / string to CAB, CAB to DCB, DCB to inverter), increases in EGC size to address VOLTAGE DROP are
+      NOT required. Do NOT Fail a DC circuit whose current-carrying conductors are upsized for voltage
+      drop and whose EGC is at the plain Table 250.122 size. 250.122(B) still applies in full to AC circuits
+      (inverter output, transformer secondary, service and feeder conductors), and it still applies to
+      a DC circuit upsized for a reason OTHER than voltage drop.
+
+      DETERMINISM RULE FOR 250.122(B) - do not guess at an upsize: apply 250.122(B) ONLY where these sheets
+      state, or a schedule shows, BOTH the minimum required ampacity and the larger size actually used
+      (a voltage-drop note, a future-capacity note, or an ampacity column beside a larger callout). If
+      you cannot see evidence that the ungrounded conductors were increased above the minimum, do NOT
+      infer an upsize from a large conductor on a modest OCPD - grade against the plain Table 250.122
+      row and say in the evidence that no upsize evidence was visible.
+
+      NEC 250.122(F): where the phase conductors are run in parallel in SEPARATE raceways or cables, a
+      full-size EGC sized for the circuit OCPD must be run in EACH raceway; parallel conductors in a SINGLE
+      raceway need only one EGC. Do not demand one EGC per conductor.
+
+      WHERE NO OCPD EXISTS - NEC 690.45: on a PV source or output circuit with no overcurrent device at
+      all, use an assumed overcurrent device rated per NEC 690.9(B) when applying Table 250.122, and state
+      the assumption; a PV EGC is never smaller than 14 AWG.
+
+      FAIL = a conductor smaller than the applicable column, a missing 250.122(B) proportional upsize
+      where the determinism rule above is satisfied, or a grounding conductor drawn with no size callout.
+      PASS = size read, material identified, lookup shown, size at or above the table. NEEDS REVIEW =
+      the conductor size or the OCPD rating is illegible or not stated on these sheets so the lookup cannot
+      be completed; say WHICH one is missing. DEFERRED = no EGC-carrying circuit is depicted anywhere
+      in this batch; give the one-line reason.
+
+      ABSENCE RULE (absence_is = defect): a grounding conductor drawn with no size callout IS the defect
+      this check exists to catch - Fail it, do not go quiet and do not downgrade it to Needs Review. Only
+      the complete absence of any circuit from the batch is Deferred. SCOPE OF ANY GENERIC ''If absent''
+      LINE RENDERED BELOW THIS INSTRUCTION: that line governs an item missing from a circuit or system
+      that IS depicted on these sheets (a drawn feeder with no EGC callout) - report Fail. Where the whole
+      subject class is absent from this image batch, the DEFERRED branch above governs and takes precedence
+      over the generic line.
+
+      MULTI-INSTANCE: emit ONE FINDING PER CIRCUIT that fails, with "instance" set to the circuit or equipment
+      tag as printed (for example "INV-2 AC feeder", "MV riser"). Never merge several undersized circuits
+      into one row - a field crew corrects them separately and a merged row cannot be partially cleared.
+
+      Severity: high for undersized, medium for a missing size callout, low for a notation ambiguity that
+      does not change the size.'
+    absence_is: defect
+    nec_ref: NEC Table 250.122; 250.122(A), 250.122(B), 250.122(F); 690.45 (PV EGC sizing, the assumed-OCPD
+      rule via 690.9(B), and the voltage-drop exemption on PV source and output circuits)
+    aliases:
+    - EGC validation per NEC 250.122
+    - EGC size per NEC 250.122
+    - EGC sizing per NEC 250.122
+    - EGC per NEC 250.122 for inverter feeder / equipment grounding
+    - EGC size from OCPD to inverter per NEC 250.122
+    - EGC per NEC 250.122 for inverter/rack equipment
+    - Equipment grounding conductor size validation
+    - EGC sizing per NEC 250.122 for shown medium-voltage / transformer / switchboard circuit
+    - EGC per NEC 250.122
+    - Overall grounding plan conductor sizes for inverter field
+    - egc_size_per_250_122
+    - egc_sizing_250_122
+  - id: gec_sizing
+    title: Grounding electrode conductor sizing (Table 250.66 and its limiters)
+    instruction: "For the service and for EACH separately derived system (each transformer secondary carrying\
+      \ a system bonding jumper), read the largest ungrounded supply or derived conductor, read the GEC\
+      \ size and material, and NAME WHICH ELECTRODE THE GEC RUNS TO before you size anything. The electrode\
+      \ decides whether the table applies at all.\nSTEP 1 - THE LIMITERS. Apply these FIRST; each caps\
+      \ the required size:\n  250.66(A): where the GEC, or the portion of it that is the SOLE connection\
+      \ to a made rod, pipe or plate electrode, it need not be larger than 6 AWG copper (4 AWG aluminium).\n\
+      \  250.66(B): where it is the sole connection to a concrete-encased (Ufer) electrode, it need not\
+      \ be larger than 4 AWG copper.\n  250.66(C): where it is the sole connection to a ground ring, it\
+      \ need not be larger than the ring conductor itself.\n  So a #6 Cu tap to a ground rod on a service\
+      \ with 750 kcmil supply conductors is CORRECT, not undersized. Applying the table over a limiter\
+      \ is the main way this check false-Fails a compliant design; do not do it. A limiter only ever CAPS\
+      \ the requirement - it never raises it. If you cannot tell which electrode the GEC serves, that\
+      \ is Needs Review, not Fail.\nSTEP 2 - where no limiter applies (the conductor serves the whole\
+      \ electrode system, a metal water pipe electrode, or a building steel electrode), size from TABLE\
+      \ 250.66 on the largest ungrounded conductor:\n  supply 2 AWG Cu or smaller, or 1/0 Al or smaller\
+      \ -> GEC 8 AWG Cu / 6 AWG Al\n  1 or 1/0 Cu, or 2/0 or 3/0 Al -> 6 Cu / 4 Al\n  2/0 or 3/0 Cu, or\
+      \ 4/0 or 250 kcmil Al -> 4 Cu / 2 Al\n  over 3/0 through 350 kcmil Cu, or over 250 through 500 kcmil\
+      \ Al -> 2 Cu / 1/0 Al\n  over 350 through 600 kcmil Cu, or over 500 through 900 kcmil Al -> 1/0\
+      \ Cu / 3/0 Al\n  over 600 through 1100 kcmil Cu, or over 900 through 1750 kcmil Al -> 2/0 Cu / 4/0\
+      \ Al\n  over 1100 kcmil Cu, or over 1750 kcmil Al -> 3/0 Cu / 250 kcmil Al\n  Where the supply conductors\
+      \ are PARALLELED, the equivalent size is the SUM of the cross-sectional areas of the parallel conductors\
+      \ of one phase.\n  At a separately derived system the GEC is required by NEC 250.30(A)(4) (which\
+      \ electrode it must connect to) and sized by 250.30(A)(5) from Table 250.66 on the largest ungrounded\
+      \ DERIVED conductor. Cite those at a transformer, not 250.24.\n  MULTIPLE SEPARATELY DERIVED SYSTEMS\
+      \ - NEC 250.30(A)(6): several separately derived systems are PERMITTED to share a COMMON grounding\
+      \ electrode conductor with a tap from each system to it. A transformer connected by a tap to a common\
+      \ GEC HAS a GEC - do not Fail it as missing, and do not Fail it once per transformer. Sizing: the\
+      \ common GEC shall not be smaller than 3/0 AWG copper or 250 kcmil aluminium (250.30(A)(6)(a)) -\
+      \ note this is exactly the top row of Table 250.66, so it is never smaller than what the table would\
+      \ demand for the largest derived system served; each TAP is sized from Table 250.66 on the derived\
+      \ conductors of the system it serves (250.30(A)(6)(b)). Taps must be connected to the common GEC\
+      \ without splicing it, by an irreversible means or a listed connector.\nPut the whole chain in the\
+      \ evidence. WORKED EXAMPLE where a limiter BINDS and produces the counterintuitive Pass: \"Service\
+      \ supply 2 x 750 kcmil Cu per phase -> equivalent 1500 kcmil -> Table 250.66 would give 3/0 Cu;\
+      \ but this conductor is the SOLE connection to a driven ground rod, so 250.66(A) caps the requirement\
+      \ at 6 AWG Cu -> drawing shows #6 Cu -> PASS (not undersized)\". Second example, where the cap does\
+      \ not bind: \"XFMR-1 secondary 2 x 600 kcmil Cu per phase -> equivalent 1200 kcmil -> Table 250.66\
+      \ gives 3/0 Cu; the GEC runs to the ground ring, so 250.66(C) caps it at the 4/0 ring conductor,\
+      \ a cap above the table requirement and therefore inert here -> the governing size stays 3/0 Cu\
+      \ -> drawing shows 4/0 bare Cu -> PASS\".\nFAIL = a GEC smaller than the governing requirement AFTER\
+      \ the limiters are applied, or a depicted service or separately derived system with no GEC and no\
+      \ tap to a common GEC shown at all. PASS = electrode named, lookup shown, size meets the governing\
+      \ requirement. NEEDS REVIEW = the supply/derived conductor size, or which electrode the GEC serves,\
+      \ cannot be read from these sheets. DEFERRED = no service and no separately derived system is depicted\
+      \ in this batch; give the one-line reason.\nABSENCE RULE (absence_is = defect): a GEC is required\
+      \ at every service (250.24(D)) and at every separately derived system (250.30(A)(5)), so a missing\
+      \ GEC callout on a depicted service or transformer IS the defect - Fail it, do not go quiet. SCOPE\
+      \ OF ANY GENERIC 'If absent' LINE RENDERED BELOW THIS INSTRUCTION: that line governs an item missing\
+      \ from a system that IS depicted here (a transformer on the sheet with no GEC and no common-GEC\
+      \ tap) - report Fail. Where no service and no separately derived system appears in this image batch\
+      \ at all, the DEFERRED branch above governs and takes precedence over the generic line.\nMULTI-INSTANCE:\
+      \ emit ONE FINDING PER SYSTEM, with \"instance\" set to the transformer or service tag as printed\
+      \ (\"XFMR-1\", \"XFMR-2\", \"Service 1\"). Never report two transformers in one merged row.\nSeverity:\
+      \ high if undersized or missing, medium if the electrode served is unstated."
+    absence_is: defect
+    nec_ref: NEC Table 250.66; 250.66(A), 250.66(B), 250.66(C); 250.24(D) (service); 250.30(A)(4) and
+      250.30(A)(5) (separately derived system); 250.30(A)(6) and (A)(6)(a),(b) (common GEC and taps for
+      multiple separately derived systems)
+    aliases:
+    - GEC per NEC 250.66
+    - GEC size per NEC 250.66
+    - GEC sizing per NEC 250.66
+    - Grounding electrode conductor size per NEC 250.66
+    - Grounding electrode conductor sizing
+    - Grounding electrode conductor size validation
+    - Grounding electrode conductor sizing per NEC 250.66
+    - 'Grounding electrode conductor / system bonding jumper size at transformer #1 and #2'
+    - gec_size_per_250_66
+  - id: bonding_jumper_sizing
+    title: Main and system bonding jumper sizing and single-point neutral-to-ground bond
+    instruction: "Two distinct items, both sized from Table 250.102(C)(1):\n  - the MAIN bonding jumper\
+      \ at the service, required by NEC 250.24(B) and constructed and sized per 250.28 (sizing in 250.28(D));\n\
+      \  - the SYSTEM bonding jumper at each separately derived system (each transformer secondary), required\
+      \ by NEC 250.30(A)(1).\n  250.102(C)(1) supplies only the sizing TABLE - it is not the requirement.\
+      \ Cite 250.24(B) and 250.28 at a service, and 250.30(A)(1) at a transformer.\nTABLE 250.102(C)(1)\
+      \ - largest ungrounded supply conductor, or the EQUIVALENT AREA FOR PARALLEL CONDUCTORS, -> minimum\
+      \ bonding jumper. The rows are the same as Table 250.66:\n  supply 2 AWG Cu or smaller, or 1/0 Al\
+      \ or smaller -> 8 AWG Cu / 6 AWG Al\n  1 or 1/0 Cu, or 2/0 or 3/0 Al -> 6 Cu / 4 Al\n  2/0 or 3/0\
+      \ Cu, or 4/0 or 250 kcmil Al -> 4 Cu / 2 Al\n  over 3/0 through 350 kcmil Cu, or over 250 through\
+      \ 500 kcmil Al -> 2 Cu / 1/0 Al\n  over 350 through 600 kcmil Cu, or over 500 through 900 kcmil\
+      \ Al -> 1/0 Cu / 3/0 Al\n  over 600 through 1100 kcmil Cu, or over 900 through 1750 kcmil Al ->\
+      \ 2/0 Cu / 4/0 Al\n  over 1100 kcmil Cu, or over 1750 kcmil Al -> 3/0 Cu / 250 kcmil Al, AND SEE\
+      \ NOTE 2: above these thresholds the governing size is the LARGER of this row and Note 2's 12.5\
+      \ percent figure. The table does not stop here.\n  PARALLELED SUPPLY CONDUCTORS: the table's own\
+      \ column is \"largest ungrounded supply conductor OR EQUIVALENT AREA FOR PARALLEL CONDUCTORS\",\
+      \ so parallel runs are SUMMED per phase for a single main or system bonding jumper (the parallel-conductor\
+      \ basis in Table 250.102(C)(1)'s own column heading). Where an individual jumper bonds each raceway\
+      \ or cable separately, size each one on the conductors in its own raceway (250.28(D)(3)).\nNOTE\
+      \ 1 TO TABLE 250.102(C)(1) - MIXED MATERIALS: if the ungrounded supply conductors and the bonding\
+      \ jumper are of DIFFERENT materials (the common case where a copper jumper lands on an aluminium\
+      \ bus), do NOT simply read across the row for the supply material. Size the jumper from the row\
+      \ for a supply conductor of the JUMPER's material having an ampacity equivalent to the installed\
+      \ supply conductors, then take the jumper column for that material. State in the evidence which\
+      \ material you assumed and why.\nNOTE 2 TO TABLE 250.102(C)(1) - THE 12.5 PERCENT RULE. This is\
+      \ NOTE 2, not Note 1; cite it as Note 2. It is the rule that governs utility-scale collection feeders\
+      \ and is the usual source of an under-required answer: where the ungrounded supply conductors are\
+      \ LARGER than 1100 kcmil copper or 1750 kcmil aluminium, the bonding jumper shall have an area not\
+      \ less than 12.5 percent of the area of the LARGEST ungrounded supply conductor (equivalent area\
+      \ where paralleled). Note 2 carries the identical mixed-materials proviso as Note 1 - where the\
+      \ jumper and the supply conductors differ in material, take the 12.5 percent on the assumed same-material\
+      \ supply conductor of equivalent ampacity. WORKED EXAMPLE: 3 runs of 750 kcmil Cu per phase = 2250\
+      \ kcmil equivalent, which exceeds 1100 kcmil, so 0.125 x 2250 = 281.25 kcmil and the jumper must\
+      \ be at least the next standard size, 300 kcmil Cu. The table's last row alone would give only 3/0\
+      \ Cu (167.8 kcmil), so Note 2 governs here.\nSINGLE-POINT BOND. Confirm the neutral-to-ground bond\
+      \ occurs at EXACTLY ONE point per system. A service or separately derived system with no bond shown\
+      \ at all is a Fail. EXCEPTION - the NEC 250.30(A)(1) exception permits a system bonding jumper at\
+      \ BOTH the source and the first disconnecting means where doing so does not establish a parallel\
+      \ path for the grounded conductor (the grounded conductor is then sized not smaller than the system\
+      \ bonding jumper). Where the drawing shows bonds at two points, check whether a grounded conductor\
+      \ is run between them BEFORE Failing; if it is not, or if a note states the exception is being applied,\
+      \ that is a Pass. Connection through the earth is not a parallel path.\nFAIL = a jumper below the\
+      \ governing size (the table row, or the LARGER of that row and Note 2's 12.5 percent where Note\
+      \ 2 applies), no jumper shown on a depicted service or separately derived system, or more than one\
+      \ neutral-to-ground bond in one system where the 250.30(A)(1) exception does not apply. PASS = the\
+      \ jumper exists, is sized, and the lookup checks out; show the lookup and say which rule you applied.\
+      \ NEEDS REVIEW = the supply conductor size or the jumper size cannot be read on these sheets, or\
+      \ bonds appear at two points and you cannot tell whether a grounded conductor runs between them.\
+      \ DEFERRED = no service and no separately derived system appears in this batch; give the one-line\
+      \ reason.\nABSENCE RULE (absence_is = defect): a missing main or system bonding jumper on a depicted\
+      \ service or transformer secondary IS the defect - Fail it, do not go quiet. SCOPE OF ANY GENERIC\
+      \ 'If absent' LINE RENDERED BELOW THIS INSTRUCTION: that line governs an item missing from a system\
+      \ that IS depicted here - report Fail. Where no service and no separately derived system appears\
+      \ in this image batch at all, the DEFERRED branch above governs and takes precedence over the generic\
+      \ line.\nMULTI-INSTANCE: emit ONE FINDING PER SYSTEM, with \"instance\" set to the tag as printed\
+      \ (\"XFMR-1\", \"XFMR-2\", \"Service 1\"). Never merge two transformers into one row.\nSeverity:\
+      \ high."
+    absence_is: defect
+    nec_ref: NEC 250.24(B) and 250.28, including 250.28(D) and (D)(3) (main bonding jumper at a service,
+      paralleled conductors); NEC 250.30(A)(1) and its Exception (system bonding jumper at a separately
+      derived system; jumper permitted at both source and first disconnecting means); Table 250.102(C)(1)
+      with Note 1 (mixed materials) and Note 2 (the 12.5 percent rule) - sizing only
+    aliases:
+    - Main bonding jumper per NEC 250.102(C)(1)
+    - Main bonding jumper sizing per NEC 250.102(C)(1)
+    - Main bonding jumper validation per NEC 250.102(C)(1)
+    - Main bonding jumper / system bonding jumper sizing per NEC 250.102(C)(1)
+    - Main bonding jumper size validation
+    - main_bonding_jumper_per_250_102c1
+  - id: transformer_primary_grounding
+    title: Transformer primary-side winding configuration and grounding treatment
+    instruction: 'TANK / ENCLOSURE BOND FIRST, AND UNCONDITIONALLY: the transformer TANK, frame and pad-mounted
+      enclosure must be bonded to the grounding electrode system regardless of winding configuration (NEC
+      250.4(A)(2) and, over 1000 V, 250.190). A transformer depicted on these sheets with NO tank or enclosure
+      ground shown is a FAIL. This Fail is unconditional and overrides any general absence rule appended
+      below this instruction; it is not downgraded to Needs Review.
+
+      Then read the primary winding configuration (delta or wye) and how the primary side is grounded:
+      the tank / enclosure bonding above, and, for a wye primary, whether the primary neutral is brought
+      out and grounded.
+
+      WHAT ACTUALLY GOVERNS THE NEUTRAL. Whether the medium-voltage PRIMARY NEUTRAL is grounded is set
+      by the UTILITY INTERCONNECTION REQUIREMENT and the utility''s own grounding standard, not by the
+      NEC: a four-wire multi-grounded wye distribution source normally requires the primary neutral to
+      be grounded and bonded to the tank, while a three-wire delta or ungrounded-wye source requires that
+      it not be. NEC 250.30 governs the DERIVED (secondary) side and NEC 450.5 governs grounding autotransformers,
+      so do NOT cite either as if it decided the primary; state that the basis is the interconnection
+      requirement and name the source configuration you read on these sheets. (A zig-zag or wye-delta
+      grounding autotransformer, where one is shown, is graded under check transformer_secondary_grounding,
+      which owns NEC 450.5.)
+
+      FAIL = no tank / enclosure ground shown at all, a delta primary drawn with a neutral-to-ground connection,
+      or a wye primary neutral drawn floating where these sheets or their notes state a multi-grounded-wye
+      utility source. PASS = the winding configuration is labeled, the tank is bonded, and the primary
+      neutral treatment matches the utility source stated on these sheets. NEEDS REVIEW = the tank bond
+      IS shown but the winding configuration or the utility source grounding is not stated here, so whether
+      the primary neutral must be grounded cannot be decided from the drawing; say exactly that and name
+      what is missing. DEFERRED = no transformer is depicted in this batch; give the one-line reason.
+
+      ABSENCE RULE (absence_is = unknown): if a transformer is depicted but its PRIMARY NEUTRAL treatment
+      is not indicated, answer Needs Review rather than Fail, because that requirement lives in the interconnection
+      agreement and not on the sheet. The single exception is the tank / enclosure bond, which is required
+      regardless and is a Fail when absent, as stated in the first line above. SCOPE OF ANY GENERIC ''If
+      absent'' LINE RENDERED BELOW THIS INSTRUCTION: it is a default for the neutral-treatment question
+      only; it does not reach the tank-bond Fail, and where no transformer appears in this batch at all
+      the DEFERRED branch above governs.
+
+      MULTI-INSTANCE: emit ONE FINDING PER TRANSFORMER, with "instance" set to the transformer tag as
+      printed. Never merge two transformers, and never merge the primary and secondary answers into one
+      row - the secondary is check transformer_secondary_grounding.
+
+      Severity: high for a grounded delta or an unbonded tank, medium otherwise.'
+    absence_is: unknown
+    nec_ref: Utility interconnection requirement / utility grounding standard (decides primary neutral
+      grounding); NEC 250.4(A)(2) and 250.190 (tank and MV equipment bonding). Deliberately NOT 250.30
+      (derived/secondary side) and NOT 450.5 (grounding autotransformers - owned by transformer_secondary_grounding).
+    aliases:
+    - Transformer grounding - primary side
+    - Transformer primary grounding connection
+    - Transformer primary grounding
+    - Transformer grounding primary side
+    - Transformer grounding primary/secondary
+  - id: transformer_secondary_grounding
+    title: Transformer secondary (separately derived system) grounding
+    instruction: 'Read the secondary winding configuration and its grounding. A wye secondary supplying
+      a separately derived system must have its neutral point connected, at ONE point only, through a
+      system bonding jumper (NEC 250.30(A)(1)) and through a grounding electrode conductor to the nearest
+      qualifying electrode (NEC 250.30(A)(4) and (A)(5)); the secondary enclosure and downstream equipment
+      must be bonded. Confirm the GEC and the system bonding jumper are both SHOWN and connect to the
+      right points - their sizing is graded under checks gec_sizing and bonding_jumper_sizing, so do not
+      repeat the size arithmetic here. A tap to a common GEC serving several separately derived systems
+      (NEC 250.30(A)(6)) counts as a GEC being shown.
+
+      IMPEDANCE GROUNDING. If any impedance grounding is shown - a grounding transformer (zig-zag or wye-delta),
+      a neutral grounding resistor or reactor (NGR), or a high-resistance grounding arrangement - confirm
+      its rating is SPECIFIC (ohms or let-through amperes, time rating, and kVA where applicable) rather
+      than a generic ''NGR'' bubble; a rating shown as TBD or omitted is a Fail. The governing article
+      for an impedance-grounded system OVER 1000 V is NEC 250.187; NEC 250.36 applies only to 480 V through
+      1000 V high-impedance grounded neutral systems - cite the one matching the voltage you actually
+      read. Where the device is a grounding AUTOTRANSFORMER (zig-zag) used to derive a neutral for grounding
+      a 3-phase 3-wire system, NEC 450.5 governs it: confirm its continuous neutral current rating (450.5(A)(1))
+      and its overcurrent protection (450.5(A)(4)) are called out, not just the ohms.
+
+      UNGROUNDED AND CORNER-GROUNDED SECONDARIES - make the note testable, not persuasive. For an UNGROUNDED
+      secondary, the note must BOTH state that the ungrounded configuration is intentional AND identify
+      the ground-detection / ground-fault-indication means required by NEC 250.21(B) for an ungrounded
+      system operating at 120 V to 1000 V; a configuration label alone (for example "UNGROUNDED DELTA")
+      is not sufficient. For a CORNER-GROUNDED delta - which is a GROUNDED system under NEC 250.26(4),
+      not an ungrounded one - do NOT demand ground detectors; require instead a note stating the configuration
+      is intentional and identifying WHICH phase conductor is the grounded conductor.
+
+      FAIL = a wye secondary with no neutral-to-ground connection or no GEC shown, a neutral-to-ground
+      bond at more than one point (subject to the 250.30(A)(1) exception described in check bonding_jumper_sizing),
+      an impedance-grounding device with no specified rating, a zig-zag grounding autotransformer with
+      no 450.5(A)(1) neutral current rating or no 450.5(A)(4) overcurrent protection shown, or an ungrounded
+      / corner-grounded secondary shown without the note content required above. PASS = configuration
+      labeled, bond at exactly one point (or the 250.30(A)(1) exception properly applied), GEC shown,
+      any impedance device rated. NEEDS REVIEW = the winding configuration or the grounding connection
+      is drawn but not legible. DEFERRED = no transformer is depicted in this batch; give the one-line
+      reason.
+
+      ABSENCE RULE (absence_is = defect): a depicted wye secondary with no grounding shown IS the defect
+      - Fail it, do not go quiet. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION:
+      that line governs an item missing from a transformer that IS depicted here - report Fail. Where
+      no transformer appears in this image batch at all, the DEFERRED branch above governs and takes precedence
+      over the generic line.
+
+      MULTI-INSTANCE: emit ONE FINDING PER TRANSFORMER, with "instance" set to the tag as printed. Never
+      merge two transformers into one row.
+
+      Severity: high.'
+    absence_is: defect
+    nec_ref: NEC 250.30(A)(1) and its Exception (system bonding jumper), 250.30(A)(4) and (A)(5) (electrode
+      and GEC), 250.30(A)(6) (common GEC and taps), 250.20(D), 250.21(B) (ground detection on ungrounded
+      systems), 250.26(4) (corner-grounded delta); NEC 250.36 (high-impedance grounded neutral, 480-1000
+      V) or NEC 250.187 (impedance grounded systems over 1000 V) as the voltage dictates; NEC 450.5, including
+      450.5(A)(1) and 450.5(A)(4) (grounding autotransformers / zig-zag)
+    aliases:
+    - Transformer secondary grounding connection
+    - Transformer grounding - secondary side
+  - id: inverter_equipment_bonding_continuity
+    title: Inverter, skid and row-to-row equipment bonding continuity
+    instruction: 'Confirm each inverter, inverter skid and row-to-row bonding jumper is bonded to the
+      grounding system by a means that is actually shown: a drawn conductor with a size callout, or an
+      explicitly noted equipment grounding path (a metallic raceway or cable armor of a type listed as
+      an equipment grounding conductor in NEC 250.118, or a mounting / support system listed, labeled
+      and identified for bonding under NEC 690.43(A), or a metallic support structure with identified
+      bonding jumpers or itself identified as an equipment grounding conductor under NEC 690.43(B)). Bonding
+      assumed silently through an enclosure, with neither a conductor nor a note, is not acceptable. But
+      do NOT Fail a design that states its path in a note: 250.118 permits several non-wire equipment
+      grounding conductors, and 690.43(A) and (B) permit listed mounting systems and identified metallic
+      supports, so demanding a drawn wire everywhere is a false Fail.
+
+      FAIL = an inverter, skid or row shown with no bonding conductor AND no stated grounding path, or
+      a bonding conductor drawn with no size callout. PASS = every inverter, skid and row has a stated,
+      sized or listed path; name the means and the provision it relies on. NEEDS REVIEW = a bond is drawn
+      but its size or its termination point is illegible. DEFERRED = no inverter, skid or row bonding
+      is depicted in this batch; give the one-line reason.
+
+      ABSENCE RULE (absence_is = defect): an inverter depicted on these sheets with nothing bonding it
+      is the defect - Fail it. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION:
+      that line governs an item missing from equipment that IS depicted here - report Fail. Where no inverter,
+      skid or row appears in this image batch at all, the DEFERRED branch above governs and takes precedence
+      over the generic line.
+
+      MULTI-INSTANCE: emit ONE FINDING PER INVERTER OR ROW that fails, with "instance" set to the tag
+      as printed (for example "INV-04", "Row 12-13 jumper"). Never merge several unbonded units into one
+      row.
+
+      Severity: high if unbonded, medium if bonded but unsized.'
+    absence_is: defect
+    nec_ref: NEC 250.96(A), 250.118, 250.134; NEC 690.43(A) (listed and identified module mounting / bonding
+      devices) and 690.43(B) (metallic support structures with identified bonding jumpers or identified
+      as equipment grounding conductors)
+    aliases:
+    - Inverter equipment grounding continuity
+    - Equipment grounding conductor size for inverter row-to-inverter bonding jumper
+  - id: ground_ring_size_and_continuity
+    title: Ground ring conductor size, length, burial depth and continuity
+    instruction: 'Where a ground ring is shown - typically encircling the equipment pad or MV skid - grade
+      it against the CODE MINIMUMS, which are the Fail thresholds. The ''commonly #2 through 4/0 bare
+      copper'' range is CONTEXT ONLY and must never be used as a threshold; it is a description, and two
+      runs applying it will disagree.
+
+      THRESHOLDS: NEC 250.52(A)(4) requires a ring of BARE COPPER conductor not smaller than 2 AWG and
+      at least 20 ft (6.0 m) in length, encircling the structure and in direct contact with the earth.
+      NEC 250.53(F) requires it to be buried not less than 30 in. (750 mm) below grade. Confirm in addition
+      that the ring is a CLOSED loop, that it connects to the ground rods and to the site grounding network,
+      and that its connections are exothermic welds or listed irreversible compression fittings, listed
+      for direct soil burial where buried (NEC 250.70).
+
+      THE 20 FT LENGTH IS SATISFIABLE BY INSPECTION. A ring is drawn to scale around a pad and almost
+      never annotated with a total conductor length. Where the ring is drawn as a closed loop encircling
+      equipment whose plan dimensions plainly exceed 20 ft of perimeter, treat the 20 ft minimum as satisfied,
+      say so in the evidence, and do NOT require a stated length. Require a stated length - answering
+      Needs Review without one - only where the loop is small enough that 20 ft is genuinely in doubt,
+      or the detail is explicitly not to scale.
+
+      DISJOINT STATUS BRANCHES (a ring drawn without a size callout must land on exactly one of these):
+      FAIL = the ring is drawn with no CONDUCTOR SIZE OR MATERIAL callout, or a size or material below
+      2 AWG bare copper, or a stated burial depth under 30 in., or a stated length under 20 ft, or the
+      loop is shown open or discontinuous. NEEDS REVIEW = conductor size AND material ARE called out and
+      meet the minimum, but the burial depth is not stated anywhere in these images, or the length is
+      not stated in the one case where 20 ft is genuinely in doubt; say WHICH value is missing. PASS =
+      2 AWG bare copper or larger, depth stated at or above 30 in., length stated or satisfied by inspection,
+      loop closed and connected; quote the values you read. FAIL outranks NEEDS REVIEW where both could
+      be argued.
+
+      ABSENCE RULE (absence_is = not_applicable): a ground ring is NOT required by the NEC where another
+      electrode system is provided. If no ring is shown and ground rods or a concrete-encased electrode
+      ARE, answer DEFERRED with a one-line reason naming the electrode system actually used. The ''no
+      electrode of any kind'' case belongs to check ground_rods_presence_and_spacing and must not be reported
+      twice under two keys. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION: it
+      is a default; this check''s own Deferred trigger above governs.
+
+      MULTI-INSTANCE: if more than one pad or ring is shown, emit one finding per ring with "instance"
+      set to the pad or equipment tag as printed.
+
+      Severity: high for undersized, wrong material or an open loop, medium for a missing depth or length
+      callout.'
+    absence_is: not_applicable
+    nec_ref: NEC 250.52(A)(4), 250.53(F), 250.66(C), 250.70
+    aliases:
+    - Grounding ring presence and size
+    - Grounding ring conductor size
+    - Grounding ring conductor size and connection to rods
+    - Grounding ring conductor size and continuity
+    - Ground ring size and continuity
+    - Grounding ring size and continuity
+    - Grounding ring size around equipment pad
+    - Grounding ring present and connected
+    - Grounding ring present and sized
+    - Grounding ring / equipment pad connection to site grounding network
+    - Grounding ring / ground rods
+  - id: ground_rods_presence_and_spacing
+    title: 'Grounding electrode system: rods shown, specified, supplemented and spaced'
+    instruction: 'This check owns the question ''is there a grounding electrode system at all, and are
+      the rods correctly specified and spaced''. Work the ladder IN ORDER and say which rung you landed
+      on.
+
+      (a) ELECTRODE SYSTEM PRESENT? Fail under NEC 250.50 ONLY where these images DO include a grounding
+      plan, grounding one-line or electrode detail and no grounding electrode of any type - rods, ground
+      ring, concrete-encased / Ufer, plate, or building steel - appears on it. If the batch contains only
+      notes, schedules or a detail sheet with NO electrode plan, answer NEEDS REVIEW naming the sheets
+      you searched and, where the sheets reference it, the sheet number where the electrode plan lives
+      - do not Fail and do not assume compliance. This check is handed at most three sheets and must keep
+      the same batch-scope discipline as every other check in this family.
+
+      (b) NO RODS, BUT ANOTHER ELECTRODE IS SHOWN? Answer DEFERRED with a one-line reason naming the electrode
+      type actually used. Rods are not mandatory where another qualifying electrode is present.
+
+      (c) ROD SPECIFICATION. Where rods ARE shown: NEC 250.52(A)(5) requires a rod at least 8 ft (2.44
+      m) long and, unless listed, not less than 5/8 in. in diameter (this firm''s standard callout is
+      5/8 in. x 8 ft copper-clad). NEC 250.53(G) requires at least 8 ft of it in contact with soil, installed
+      vertically where practicable, with the upper end flush with or below grade unless protected. A rod
+      shown with no specification is a FAIL.
+
+      (d) SPACING - THE THRESHOLD IS 6 FT. NEC 250.53(A)(3) requires multiple rod, pipe or plate electrodes
+      to be not less than 6 ft (1.8 m) apart, and 250.53(B) requires 6 ft between electrodes of different
+      grounding systems. FAIL ONLY spacing BELOW 6 ft. The ''twice the rod length'' figure (16 ft for
+      an 8 ft rod) is an INFORMATIONAL NOTE about paralleling efficiency, NOT a code requirement - a layout
+      at 10 ft is CODE COMPLIANT and must not be Failed. You may mention the 2x figure only as a low-severity
+      best-practice note attached to an otherwise passing finding, never as the basis of a Fail.
+
+      (e) SUPPLEMENTAL ELECTRODE - NEC 250.53(A)(2): a single rod, pipe or plate electrode must be supplemented
+      by an additional electrode, unless the drawing states that the single rod has a resistance to earth
+      of 25 ohms or less. A lone rod with no supplement and no 25-ohm note is a FAIL; this is a genuine
+      and frequently missed defect.
+
+      FAIL = rung (a) as gated above, or (c), or spacing below 6 ft in (d), or (e). PASS = rods shown,
+      specified, spaced at or above 6 ft, and supplemented or noted at 25 ohms or less; quote the spec
+      and the dimension you read. NEEDS REVIEW = the batch carries no electrode plan at all under rung
+      (a), or rods are drawn but no spacing dimension and no typical-spacing note appears anywhere in
+      these images so spacing cannot be verified; say so rather than assuming compliance. DEFERRED = rung
+      (b): another qualifying electrode is shown and no rods are used.
+
+      ABSENCE RULE (absence_is = defect): where these images DO carry electrode content, a missing grounding
+      electrode SYSTEM is itself the defect - that is rung (a), a Fail, never silence. A missing ROD where
+      another electrode is present is rung (b), Deferred. A batch with no electrode plan in it at all
+      is Needs Review, not Fail. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION:
+      that line governs an item missing from an electrode plan that IS in this batch - report Fail. The
+      rung (a) gate, the rung (b) DEFERRED branch and the Needs Review branch above take precedence over
+      the generic line.
+
+      MULTI-INSTANCE: emit one finding per electrode group or pad where the answer differs, with "instance"
+      set to the pad or area tag as printed.
+
+      Severity: high for (a) and (e), medium for a missing rod spec, medium for spacing under 6 ft, low
+      for the 2x best-practice note.'
+    absence_is: defect
+    nec_ref: NEC 250.50, 250.52(A)(5), 250.53(A)(2), 250.53(A)(3), 250.53(B), 250.53(G). The 'twice the
+      rod length' spacing figure is an Informational Note to 250.53(A)(3), not a requirement.
+    aliases:
+    - Ground rods shown and spacing
+    - Ground rods presence and spacing
+    - Ground rod presence and spacing
+    - Ground rods shown
+    - Ground rods and spacing
+    - Ground rod / ring grounding presence
+    - Ground rod spacing / ring connection detail
+  - id: equipment_pad_grounding_layout
+    title: Equipment pad grounding layout and connection details
+    instruction: 'Read the pad grounding detail and confirm it shows HOW the ring, the rods, the pad reinforcing
+      steel and each piece of pad-mounted equipment (transformer, switchgear, inverter skid, MV gear)
+      connect to the grounding system, and that the connection METHOD is called out. Buried and concrete-encased
+      connections must be made by exothermic welding or a listed irreversible compression connector, and
+      all grounding connections must use listed means; a connector used on a buried electrode must also
+      be listed for direct soil burial or concrete encasement (NEC 250.70). Grounding electrode conductor
+      connections must be accessible, except that an encased or buried connection to a concrete-encased,
+      driven or buried electrode is not required to be accessible (NEC 250.68(A) and its Exception No.
+      1). Where the pad reinforcing steel qualifies as a concrete-encased electrode (NEC 250.52(A)(3):
+      at least 20 ft of 1/2 in. or larger bare rebar, or 20 ft of 4 AWG bare copper, encased in at least
+      2 in. of concrete in direct earth contact), confirm it is connected rather than ignored; a rebar-type
+      concrete-encased electrode may be extended from within the concrete to an accessible point above
+      it under NEC 250.68(C)(3).
+
+      FAIL = a piece of pad-mounted equipment with no grounding connection drawn, a connection shown with
+      no method called out, or a rebar / Ufer electrode present in the detail but left unconnected. PASS
+      = every pad item connected and the connection methods stated; name them. NEEDS REVIEW = the detail
+      is present but too coarse to tell which items are connected. DEFERRED = no equipment pad or pad
+      grounding detail appears in this image batch; give the one-line reason.
+
+      ABSENCE RULE (absence_is = defect): a pad shown with equipment on it and no grounding connections
+      drawn is the defect - Fail it. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS INSTRUCTION:
+      that line governs an item missing from a pad that IS depicted here - report Fail. Where no pad and
+      no pad grounding detail appears in this image batch at all, the DEFERRED branch above governs and
+      takes precedence over the generic line.
+
+      MULTI-INSTANCE: emit one finding per pad, or per unconnected item where several differ, with "instance"
+      set to the equipment or pad tag as printed.
+
+      Severity: high for equipment left unconnected or an unconnected Ufer electrode, low for a missing
+      connection-method callout.'
+    absence_is: defect
+    nec_ref: NEC 250.52(A)(3), 250.68(A) and its Exception No. 1 (accessibility), 250.68(C)(3) (extending
+      the connection from a rebar-type concrete-encased electrode), 250.70 (connection means and direct-burial
+      listing), 250.190
+    aliases:
+    - Equipment pad grounding layout
+    - Equipment pad grounding ring and rod details
+  - id: fence_and_perimeter_grounding
+    title: Perimeter fence grounding, bonding or explicit isolation
+    instruction: 'Where the perimeter fence appears on these sheets, confirm EITHER (a) fence grounding
+      and bonding is shown - fence posts bonded at the stated interval, bonding jumpers across each gate
+      hinge and across the gate leaf so a swinging gate cannot become isolated, and the fence bonded to
+      the station grounding network, per NEC 250.194 - OR (b) fence ISOLATION is explicitly noted, with
+      the isolation method or clearance stated. Whichever is shown must agree with the fence-grounding
+      note carried on the site plan; silence is not an answer.
+
+      WHEN ISOLATION IS NOT AN OPTION: NEC 250.194 requires metal fences enclosing, and other metal structures
+      in or surrounding, a substation with EXPOSED electrical conductors and equipment to be grounded
+      and bonded to limit step, touch and transfer voltages. Isolation is an acceptable answer ONLY where
+      the fence does not enclose exposed energised conductors or equipment - typically a fence around
+      dead-front, pad-mounted gear. Where the fence encloses a substation or yard with EXPOSED MV conductors
+      or equipment, 250.194 REQUIRES grounding and bonding, and an isolation note is a FAIL, not an alternative.
+      State which case you read and what you read it from.
+
+      FAIL = a fence shown enclosing exposed MV conductors or equipment with an isolation note instead
+      of bonding, a fence shown enclosing MV equipment with neither bonding nor an isolation note, gates
+      with no bonding jumper where the rest of the fence is bonded, or a fence treatment that contradicts
+      the site-plan fence-grounding note. PASS = bonding is shown where 250.194 applies, or isolation
+      is explicitly stated in a case where 250.194 does not apply, and the treatment is internally consistent;
+      say which one and why it applies. NEEDS REVIEW = a fence-grounding note exists but its extent (which
+      runs, which gates), or whether the enclosed equipment is dead-front or exposed, cannot be read from
+      these images. DEFERRED = no fence and no fence-grounding note appears in these images; give the
+      one-line reason "fence not depicted on the supplied grounding sheets".
+
+      ABSENCE RULE (absence_is = not_applicable): most grounding-sheet batches do not include the fence,
+      so its absence from the batch is a scope statement rather than a defect - answer Deferred as above;
+      do not answer nothing, and do not Fail. SCOPE OF ANY GENERIC ''If absent'' LINE RENDERED BELOW THIS
+      INSTRUCTION: it is a default; this check''s own Deferred trigger above governs.
+
+      MULTI-INSTANCE: if several fence sections or gates differ, emit one finding per section or gate
+      with "instance" set as printed.
+
+      Severity: medium; high where the fence encloses exposed energised medium-voltage conductors or equipment
+      with no bonding.'
+    absence_is: not_applicable
+    nec_ref: NEC 250.194 (grounding and bonding of metal fences and structures around substations with
+      exposed conductors and equipment); firm QC checklist - Site Plan fence-grounding note
+    aliases:
+    - Fence grounding isolation panel and perimeter grounding
+  - id: nec_code_references_shown
+    title: NEC code references cited on the grounding sheets
+    instruction: 'Confirm the grounding sheets state the code basis for what they require: the NEC articles
+      relied on - 250.66 for the grounding electrode conductor, 250.122 for equipment grounding conductors,
+      250.102(C)(1) for bonding jumpers, 250.52 and 250.53 for the electrodes, 690.43 and 690.45 for the
+      PV array - cited next to the sized conductors or collected in the grounding notes, AND the NEC edition
+      or code year stated somewhere on the sheet or in the general notes.
+
+      FAIL = conductor sizes or electrode requirements given with no code basis stated anywhere on the
+      sheet; or a cited article that does not govern the item it is attached to (for example 250.66 cited
+      beside an equipment grounding conductor, or 250.30 cited beside a transformer PRIMARY grounding
+      note); or the sheet states no NEC edition or code year anywhere on it or in the general notes. PASS
+      requires BOTH: the relevant article citations, each attached to the right item, AND a stated NEC
+      edition or code year; quote two or three of the citations and the code year you found. NEEDS REVIEW
+      = notes are present but partially illegible.
+
+      ABSENCE RULE (absence_is = defect): the absence of code references IS the entire subject of this
+      check. If none are shown, answer FAIL - this check has NO Deferred branch, and the generic ''If
+      absent'' line rendered below this instruction applies to it without qualification. Never Deferred,
+      never silence.
+
+      MULTI-INSTANCE: emit one finding per wrongly-cited or uncited item where several differ, with "instance"
+      set to the note number or the item tag as printed; the missing code year is a single finding for
+      the sheet.
+
+      Severity: low where references are simply absent; low for a missing code year (it changes no conductor
+      size but leaves the sheet undatable against a code cycle); medium where a cited article is wrong
+      for the item it labels, since a wrong citation is worse than no citation and will be relied on in
+      the field.'
+    absence_is: defect
+    nec_ref: 'Firm QC checklist - Labels: NEC references; QC checklist Grounding Diagram code-reference
+      callouts; NEC edition / code year statement on the sheet'
+    aliases:
+    - Code references shown
+    - Code references shown on grounding diagram
+    - Code reference callouts shown
+    - NEC code references shown on plans
+    - Code references shown on grounding sheets
+    - NEC article references shown on plans
+    - Code references on grounding sheet
+    - Code reference completeness on grounding diagram
+    - NEC code references shown
+    - NEC code references shown on grounding diagram
+guidance:
+  grounding: 'MULTI-INSTANCE RULE (applies to EVERY check above, not only the ones that repeat it). One
+    check id may legitimately fire several times on one sheet. When a check finds several offenders -
+    three transformers, two feeders, four inverters - emit ONE FINDING PER OFFENDER and set the optional
+    "instance" field to the equipment tag exactly as printed on the drawing ("XFMR-1", "XFMR-2", "INV-04",
+    "CAB-3 -> DCB-1"). If nothing on the drawing names the offender, use a short positional descriptor
+    from the sheet ("north pad", "row 12-13 jumper"). Never merge several offenders into one row and never
+    report only the first: a field crew corrects them separately, and a merged row cannot be partially
+    cleared on the next revision.
+
+
+    ANSWER EVERY CHECK. There is no skip. If a check''s subject is genuinely out of scope for this planset
+    or this image batch, answer it with status "Deferred" and a one-line reason - a reader must always
+    be able to tell "clean" from "never checked". Each check above carries an ABSENCE RULE stating, for
+    that check specifically, whether a missing subject is a Fail (the absence is the defect), a Deferred
+    (genuinely not applicable or not in this batch), or a Needs Review (cannot be distinguished from a
+    subject drawn on a sheet outside this batch). Follow that check''s own rule; do not generalise one
+    check''s rule to another, and where a generic "If absent" line is rendered under an instruction, the
+    check''s own stated ladder governs.
+
+
+    "open_findings" IS THE COVERAGE ESCAPE HATCH AND IT IS REQUIRED, NOT OPTIONAL. Use it for a real GROUNDING
+    defect that is visible on these sheets and that none of the 15 check_ids above owns. Grounding-specific
+    classes to look for, none of which any enumerated check covers:
+
+    - GEC INSTALLATION AND ROUTING under NEC 250.64, which no id above owns: an aluminium or copper-clad-aluminium
+    GEC in contact with earth or within 18 in. of earth, or used outdoors within 18 in. of grade (250.64(A));
+    a GEC left unprotected where exposed to physical damage (250.64(B)); a GEC spliced by anything other
+    than exothermic welding or a listed irreversible compression connector, or not run in one continuous
+    length (250.64(C)); a ferrous metal raceway or enclosure around a GEC not made electrically continuous
+    and not bonded at BOTH ends to the GEC (250.64(E)); tap arrangements to a common GEC at multiple enclosures
+    (250.64(D)).
+
+    - SURGE AND LIGHTNING PROTECTION GROUNDING: surge-arrester or SPD ground leads not bonded to the same
+    grounding electrode system, air-terminal / LPS down-conductors not bonded to the electrical grounding
+    electrode system, or an SPD ground conductor routed with sharp bends or excessive length contrary
+    to the manufacturer''s listing.
+
+    - SOIL-RESISTIVITY AND GROUND-GRID STUDY CONFLICTS: a stated soil resistivity, ground-grid resistance
+    target, or step-and-touch-potential study value that contradicts the electrode arrangement actually
+    drawn (for example a 5-ohm target with two rods and no ring), or a grid design referenced by note
+    with no supporting values on the sheets.
+
+    - CONCRETE-ENCASED (UFER) ELECTRODE issues outside the equipment-pad detail - a qualifying rebar electrode
+    in a foundation, pier or pile shown on a structural or civil detail in this batch and not connected
+    to the grounding electrode system.
+
+    - DISSIMILAR-METAL AND CORROSION PROTECTION at buried connections: copper landed directly on galvanised
+    or plain steel with no bimetallic transition, no listed dissimilar-metal connector, and no corrosion-protection
+    note.
+
+    - MEDIUM-VOLTAGE CABLE SHIELD AND NEUTRAL GROUNDING: MV cable shields or concentric neutrals shown
+    terminated at only one end with no note stating the grounding scheme, or shield grounding omitted
+    entirely at a termination.
+
+    - DC-SIDE ARRAY GROUNDING CONFIGURATION not covered above: a functionally grounded or ungrounded PV
+    array whose ground-fault detection / interruption arrangement (NEC 690.41(B)) is drawn or noted inconsistently
+    with the inverter listing.
+
+    - INTERNAL CONTRADICTION AND DOCUMENT CONTROL: a grounding note that contradicts another note or a
+    detail on a different sheet in this batch, a detail callout that points to a detail not present, or
+    a stale revision block or superseded revision cloud on the grounding detail.
+
+    Give each entry a short descriptive name in the "check" field (a "title" field is also accepted by
+    the parser) - never leave it unnamed and never let it be numbered positionally. Quote the sheet and
+    the text or dimension you read, exactly as for an enumerated check.
+
+
+    DO NOT DUPLICATE AN ENUMERATED CHECK HERE. If the defect you are about to write is already owned by
+    one of the 15 ids above - an undersized EGC (egc_sizing), a GEC sized against the table over a 250.66
+    limiter (gec_sizing), a bonding jumper below Note 2''s 12.5 percent (bonding_jumper_sizing), rod spacing
+    or a missing supplemental electrode (ground_rods_presence_and_spacing), ring size, depth or continuity
+    (ground_ring_size_and_continuity), a missing tank bond (transformer_primary_grounding), a missing
+    or wrong code citation (nec_code_references_shown) - report it UNDER THAT CHECK ID, not here, even
+    if you would phrase it differently. Restating an enumerated finding in open_findings is counted as
+    a duplicate and defeats the purpose of the fixed ids. Open findings are for subjects the 15 ids cannot
+    reach. If nothing qualifies, return "open_findings": [].'

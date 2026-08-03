@@ -95,7 +95,10 @@ _ABSENCE_RULE = {
                "not Deferred. Where the parent equipment is not depicted at "
                "all, follow the status ladder in the Verify text above."),
     "not_applicable": ("If this design genuinely has no such equipment, report "
-                       "Deferred and say which equipment is absent."),
+                       "Deferred and say which equipment is absent. Where the "
+                       "check's own Verify text states a different Deferred "
+                       "trigger (for example that the supplied sheets carry no "
+                       "content of this kind at all), that text governs."),
     "unknown": ("If you cannot tell whether the item is missing or merely not "
                 "shown on these sheets, report Needs Review and name the "
                 "sheets you searched."),
