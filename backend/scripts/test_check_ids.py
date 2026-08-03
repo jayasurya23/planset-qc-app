@@ -61,8 +61,7 @@ def load_fixture(text: str) -> None:
     tmp = Path(tempfile.mkdtemp()) / "check_ids.yaml"
     tmp.write_text(text, encoding="utf-8")
     ci._REGISTRY_PATH = tmp
-    ci._load.cache_clear()
-    ci._lookup.cache_clear()
+    ci._clear_caches()
 
 
 load_fixture(FIXTURE)
@@ -163,6 +162,16 @@ check("the escape hatch is advertised", "open_findings" in block)
 check("escape hatch is framed as required, not optional",
       "required, not optional" in block.lower())
 check("unregistered family yields no block", ci.checklist_block("sld") == "")
+
+# The family's own escape-hatch wording names the defect classes the enumerated
+# list cannot anticipate. Compiling it away would leave only the generic
+# sentence and quietly weaken the release gate.
+load_fixture(FIXTURE + '\nguidance:\n  grounding: "Report a missing fence bond here."\n')
+check("per-family open_findings guidance reaches the prompt",
+      "Report a missing fence bond here." in ci.checklist_block("grounding"))
+load_fixture(FIXTURE)
+check("no guidance block is harmless",
+      "Report a missing fence bond" not in ci.checklist_block("grounding"))
 
 print("Registry fingerprint is stamped for run comparison:")
 fp = ci.registry_fingerprint()

@@ -82,13 +82,23 @@ def _slug(value: object, limit: int = 24) -> str:
 # circular instruction: "answer Deferred when the subject is not present" is
 # exactly wrong for a check whose entire purpose is to notice that something is
 # not present (no ground rods drawn, no GEC callout).
+#
+# The wording is SCOPED on purpose. An unscoped "absence is the defect" would
+# override the careful status ladder each instruction already states — a check
+# whose parent equipment is simply not on the supplied sheets would be Failed
+# for the drawings not containing something they never claimed to show. The
+# rendered line therefore defers to the Verify text whenever the parent subject
+# is absent, and only bites when the parent IS depicted.
 _ABSENCE_RULE = {
-    "defect": ("If this item is absent from the drawings, THAT IS THE DEFECT — "
-               "report Fail, do not report Deferred."),
+    "defect": ("Where the parent equipment or circuit IS depicted on these "
+               "sheets, the absence of this item is the defect — report Fail, "
+               "not Deferred. Where the parent equipment is not depicted at "
+               "all, follow the status ladder in the Verify text above."),
     "not_applicable": ("If this design genuinely has no such equipment, report "
                        "Deferred and say which equipment is absent."),
     "unknown": ("If you cannot tell whether the item is missing or merely not "
-                "shown on these sheets, report Needs Review."),
+                "shown on these sheets, report Needs Review and name the "
+                "sheets you searched."),
 }
 
 
@@ -112,6 +122,25 @@ def _normalize(name: str) -> str:
     text = re.sub(r"^\s*\d+[\.\)]\s*", "", text)
     text = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
     return text
+
+
+@functools.lru_cache(maxsize=1)
+def _load_guidance() -> dict[str, str]:
+    """Per-family open_findings guidance from the YAML `guidance:` block.
+
+    Without this the family's own escape-hatch wording — which names the kinds
+    of defect the enumerated list cannot anticipate — is compiled away and the
+    model only ever sees the generic sentence. The exploratory rate is the
+    release gate for enumeration, so weakening its instructions quietly
+    weakens the one protection against silent narrowing.
+    """
+    if not _REGISTRY_PATH.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(_REGISTRY_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    return {k: str(v).strip() for k, v in (raw.get("guidance") or {}).items() if v}
 
 
 @functools.lru_cache(maxsize=1)
@@ -154,6 +183,13 @@ def _lookup(family: str) -> dict[str, str]:
         table[_normalize(c.id)] = c.id
         table.setdefault(_normalize(c.title), c.id)
     return table
+
+
+def _clear_caches() -> None:
+    """Drop every memoized view of the registry (tests swap the file)."""
+    _load.cache_clear()
+    _lookup.cache_clear()
+    _load_guidance.cache_clear()
 
 
 def family_for_prefix(prefix: str) -> str | None:
@@ -209,6 +245,13 @@ def checklist_block(family: str) -> str:
         "Do not force such a defect into an unrelated check_id, and do not",
         "leave it out. Reporting it is required, not optional.",
     ]
+    # The family's own escape-hatch wording names the defect classes its
+    # enumerated list cannot anticipate. Dropping it would leave only the
+    # generic sentence above and weaken the exploratory rate, which is the
+    # release gate against enumeration silently narrowing coverage.
+    guidance = _load_guidance().get(family)
+    if guidance:
+        lines += ["", guidance]
     return "\n".join(lines)
 
 

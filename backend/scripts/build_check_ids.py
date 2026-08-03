@@ -143,9 +143,17 @@ def main() -> int:
         current = yaml.safe_load(TARGET.read_text(encoding="utf-8")) or {}
     families = current.get("families") or {}
     families[args.family] = entries
+    # The family's own escape-hatch wording must ship too: compiling it away
+    # leaves only the generic sentence, weakening the exploratory rate that is
+    # the release gate against enumeration silently narrowing coverage.
+    guidance = current.get("guidance") or {}
+    if isinstance(data, dict) and data.get("open_findings_guidance"):
+        guidance[args.family] = str(data["open_findings_guidance"]).strip()
+    doc = {"families": families}
+    if guidance:
+        doc["guidance"] = guidance
     TARGET.write_text(
-        yaml.safe_dump({"families": families}, sort_keys=False,
-                       allow_unicode=True, width=100),
+        yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=100),
         encoding="utf-8")
     print(f"\nwrote {TARGET} ({len(entries)} checks for {args.family})")
     return 0
