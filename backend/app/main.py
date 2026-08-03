@@ -561,7 +561,14 @@ async def api_analyze(
         if auto_pd:
             merged = dict(auto_pd)
             if pd:
-                merged.update(pd)  # user's own values override the auto-extract
+                # user's own values override the auto-extract — but a blank box
+                # is not a value. The form posts every field it renders, so
+                # letting "" through would erase a datasheet-extracted spec and
+                # silently defer the calc that needed it.
+                merged.update({
+                    k: v for k, v in pd.items()
+                    if v is not None and str(v).strip() != ""
+                })
             pd = merged
             logging.getLogger(__name__).info(
                 "Auto-merged %d project_details fields from datasheet uploads "

@@ -180,6 +180,30 @@ def _pick_page_for_finding(finding: dict, page_numbers: list[int]) -> int | None
     return None
 
 
+def _cross_page_check_names(
+    findings: list[dict], page_numbers: list[int]
+) -> set[str]:
+    """Check names the model attributed to more than one page in one call.
+
+    A check name legitimately recurs across sheets in a multi-page call — an
+    EGC violation on SLD sheets 6 AND 7 is two defects, not one. Dedup used to
+    key on the name alone and to fire BEFORE page attribution, so every
+    instance after the first was discarded with no log line, and the survivor
+    was not even guaranteed to be the one whose page got recorded.
+
+    The names returned here get a page suffix on ALL of their instances.
+    Suffixing only the later ones would make the bare key depend on response
+    ordering, trading a silent data loss for fresh run-to-run key churn.
+    """
+    pages_per_check: dict[str, set[int]] = {}
+    for idx, item in enumerate(findings):
+        name = item.get("check") or item.get("field") or f"item_{idx}"
+        claimed = _pick_page_for_finding(item, page_numbers)
+        if claimed is not None:
+            pages_per_check.setdefault(name, set()).add(claimed)
+    return {n for n, pages in pages_per_check.items() if len(pages) > 1}
+
+
 def _extract_location_hints(finding: dict) -> list[str]:
     """Pull searchable literal text excerpts out of a vision finding.
 
@@ -228,38 +252,242 @@ def _extract_location_hints(finding: dict) -> list[str]:
     return hints
 
 
+_CLOSERS = {"[": "]", "{": "}"}
+
+# Envelope keys a model may wrap its findings in. The first match wins.
+_FINDING_KEYS = ("findings", "issues", "checks", "results")
+# Parallel arrays carrying defects that no enumerated check id covers. These
+# MUST survive parsing — they are the coverage escape hatch for any prompt that
+# constrains the model to a fixed check list, and silently dropping them would
+# turn "we stopped looking" into a report that merely looks cleaner.
+_EXPLORATORY_KEYS = ("open_findings", "exploratory_findings", "other_findings")
+
+
+def _balanced_end(text: str, start: int) -> int | None:
+    """Index just past the balanced JSON value beginning at *start*.
+
+    String-aware, so brackets inside string literals do not move the depth
+    counter. Returns None when the value never closes — i.e. the response was
+    truncated mid-array, which is exactly when the caller wants to salvage.
+    """
+    if text[start] not in _CLOSERS:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return None
+
+
+def _salvage_objects(text: str, array_start: int) -> list[dict]:
+    """Complete objects from a truncated JSON array.
+
+    A response cut off by a token ceiling used to yield [] — the whole check
+    family vanished from the report with only a log line. Keeping the objects
+    that did close is strictly better than losing all of them.
+    """
+    out: list[dict] = []
+    i = array_start + 1
+    while i < len(text):
+        if text[i] != "{":
+            i += 1
+            continue
+        end = _balanced_end(text, i)
+        if end is None:
+            break
+        try:
+            obj = json.loads(text[i:end])
+        except json.JSONDecodeError:
+            break
+        if isinstance(obj, dict):
+            out.append(obj)
+        i = end
+    return out
+
+
+def _findings_from_obj(obj: dict) -> list[dict] | None:
+    """Pull findings out of an envelope object, keeping exploratory siblings.
+
+    Returns None when the object is not an envelope at all (no recognised
+    findings array), so the caller can treat it as a single finding.
+    """
+    findings: list[dict] | None = None
+    for key in _FINDING_KEYS:
+        value = obj.get(key)
+        if isinstance(value, list):
+            findings = [x for x in value if isinstance(x, dict)]
+            break
+    if findings is None:
+        return None
+
+    for key in _EXPLORATORY_KEYS:
+        value = obj.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if isinstance(item, dict):
+                # Marked so the key-minting path can give it a content-derived
+                # id and so the exploratory rate stays measurable — an
+                # enumeration that quietly stops finding anything new is a
+                # regression, not a stability win.
+                item.setdefault("_exploratory", True)
+                findings.append(item)
+
+    dropped = [
+        k for k, v in obj.items()
+        if isinstance(v, list)
+        and k not in _FINDING_KEYS
+        and k not in _EXPLORATORY_KEYS
+    ]
+    if dropped:
+        logger.warning(
+            "Model response carried unrecognised array key(s) %s — not "
+            "imported. Add them to _EXPLORATORY_KEYS if they carry findings.",
+            dropped,
+        )
+    return findings
+
+
+def _salvage_truncated(text: str, start: int) -> list[dict]:
+    """Findings recoverable from a response cut off mid-structure.
+
+    Handles both a truncated bare array and a truncated envelope object — for
+    the latter the findings array is somewhere inside, so scan forward to it.
+    """
+    if text[start] == "[":
+        return _salvage_objects(text, start)
+    bracket = text.find("[", start)
+    return _salvage_objects(text, bracket) if bracket != -1 else []
+
+
+def _as_findings(parsed: Any) -> list[dict] | None:
+    """Interpret a parsed JSON value as a findings list, or None if it isn't one."""
+    if isinstance(parsed, list):
+        return [x for x in parsed if isinstance(x, dict)]
+    if isinstance(parsed, dict):
+        found = _findings_from_obj(parsed)
+        if found is not None:
+            return found
+        # A lone object that looks like a finding is one finding. Requiring a
+        # finding-shaped key stops a decoy object (an echoed config blob, say)
+        # from becoming a junk row with a positional item_key.
+        if any(k in parsed for k in ("check", "field", "status", "found")):
+            return [parsed]
+    return None
+
+
+# Bound on the brute-force scan below, which is quadratic against text full of
+# unbalanced brackets. Exceeding it is logged, never silent.
+_MAX_SCAN_ATTEMPTS = 64
+
+
 def _extract_json(text: str) -> list[dict]:
-    """Best-effort extraction of a JSON array from Gemini's response."""
-    # Try to find ```json ... ``` block first
-    m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
-    if m:
+    """Best-effort extraction of findings from a model response.
+
+    Accepts a bare array, a fenced block, or an envelope object, and preserves
+    any exploratory sibling array alongside the primary findings.
+
+    Gathers every readable candidate and returns the LAST non-empty one rather
+    than the first that parses. Around twenty vision prompts embed their own
+    fenced ```json example, so a model that restates the schema (or opens with
+    an empty `{"findings": []}`) before giving its real answer would otherwise
+    have the decoy returned and the actual findings discarded.
+    """
+    candidates: list[list[dict]] = []
+
+    def offer(raw: str) -> bool:
         try:
-            return json.loads(m.group(1))
-        except json.JSONDecodeError:
-            pass
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        got = _as_findings(parsed)
+        if got is None:
+            return False
+        candidates.append(got)
+        return True
 
-    # Try the whole response
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return parsed
-        if isinstance(parsed, dict) and "findings" in parsed:
-            return parsed["findings"]
-        return [parsed]
-    except json.JSONDecodeError:
-        pass
+    # 1. Fenced ```json ... ``` blocks — array or object.
+    for match in re.finditer(r"```(?:json)?\s*([\[{])", text):
+        start = match.start(1)
+        end = _balanced_end(text, start)
+        if end is None:
+            salvaged = _salvage_truncated(text, start)
+            if salvaged:
+                logger.warning(
+                    "Fenced response truncated — salvaged %d complete "
+                    "finding(s); the rest of this check family was lost.",
+                    len(salvaged),
+                )
+                candidates.append(salvaged)
+            continue
+        offer(text[start:end])
 
-    # Last resort – find outermost [ ... ]
-    start = text.find("[")
-    end = text.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        try:
-            return json.loads(text[start: end + 1])
-        except json.JSONDecodeError:
-            pass
+    # 2. The whole response.
+    offer(text)
 
-    logger.warning(
-        "Could not parse JSON from Gemini response:\n%s", text[:500])
+    # 3. Last resort — walk the text for any balanced array or envelope.
+    # Deliberately NOT find("[") + rfind("]"): with a sibling array present
+    # that span reads `[...], "open_findings": [...]` and fails to parse,
+    # losing the entire family. Equally deliberately this does not stop at the
+    # first unbalanced bracket — a stray "{" in prose ("per note {see E-101")
+    # ahead of the real payload must not abort the search.
+    i = attempts = 0
+    while i < len(text):
+        if text[i] not in _CLOSERS:
+            i += 1
+            continue
+        if attempts >= _MAX_SCAN_ATTEMPTS:
+            logger.warning(
+                "Gave up scanning for JSON after %d bracket candidates; "
+                "response may contain findings that were not imported.",
+                attempts,
+            )
+            break
+        attempts += 1
+        end = _balanced_end(text, i)
+        if end is None:
+            salvaged = _salvage_truncated(text, i)
+            if salvaged:
+                logger.warning(
+                    "Response truncated — salvaged %d complete finding(s); "
+                    "the rest of this check family was lost.", len(salvaged),
+                )
+                candidates.append(salvaged)
+                # A successful salvage means this was the real payload and the
+                # response ends here. Scanning on would re-parse the array's
+                # own objects as one-item candidates and, since the last
+                # non-empty wins, hand back a single finding instead of all
+                # the salvaged ones.
+                break
+            # Nothing recoverable: a stray bracket in prose ("per note {see
+            # E-101"). Keep looking — the real payload may follow.
+            i += 1
+            continue
+        i = end if offer(text[i:end]) else i + 1
+
+    for got in reversed(candidates):
+        if got:
+            return got
+    if not candidates:
+        logger.warning(
+            "Could not parse JSON from Gemini response:\n%s", text[:500])
     return []
 
 
@@ -1665,7 +1893,16 @@ def _gemini_page_check(
 
         # Per-call dedup: Gemini sometimes emits the same finding multiple
         # times in a single response (e.g. 3x "gen_placeholders" on one page).
+        # Only one page is in play here, so collapsing by name is right — but
+        # log it, because on a dense grounding or SLD sheet the repeats can be
+        # genuinely distinct violations sharing a name, and losing those
+        # without a trace is how a real defect leaves the report unnoticed.
         if item_key in seen_keys:
+            logger.info(
+                "Duplicate finding %s in one %s call — dropped (evidence: %.80s)",
+                item_key, item_key_prefix,
+                str(finding.get("evidence") or finding.get("value") or ""),
+            )
             continue
         seen_keys.add(item_key)
 
@@ -1805,6 +2042,8 @@ def _gemini_multi_page_check(
     raw = analyze_multiple_images(images, prompt + multi_page_suffix, deep=deep)
     findings = _extract_json(raw)
 
+    cross_page_checks = _cross_page_check_names(findings, page_numbers)
+
     issues: list[dict] = []
     seen_keys: set[str] = set()
     # Multi-page rescue is bucketed by page number — one Gemini call per page
@@ -1859,15 +2098,24 @@ def _gemini_multi_page_check(
         else:
             item_key = f"{item_key_prefix}_{check_name}"
 
-        # Per-call dedup.
+        # Per-call dedup, page-aware — see cross_page_checks above.
+        claimed_page = _pick_page_for_finding(finding, page_numbers)
+        if check_name in cross_page_checks and claimed_page is not None:
+            item_key = f"{item_key}__p{claimed_page}"
         if item_key in seen_keys:
+            logger.info(
+                "Duplicate finding %s (page %s) in one %s call — dropped.",
+                item_key, claimed_page, item_key_prefix,
+            )
             continue
         seen_keys.add(item_key)
 
         title = _pretty_title_for(check_name)
         issue_id = str(uuid.uuid4())
 
-        ref_page = page_numbers[0]
+        # Attribute to the sheet the model named, so Pass rows point at the
+        # page they were actually judged on rather than always at the first.
+        ref_page = claimed_page or page_numbers[0]
         snippet_path, preview_path, bbox_dict = None, None, None
         if status in ("Fail", "Needs Review"):
             hints = _extract_location_hints(finding)
@@ -2066,6 +2314,7 @@ def run_gemini_checks(
     design_stage: str | None = None,
     progress_cb: Any = None,
     out_timings: list[dict] | None = None,
+    out_dispatch: list[dict] | None = None,
 ) -> list[dict]:
     """Run all Gemini-powered deep checks.  Returns a list of issue dicts.
 
@@ -2096,6 +2345,13 @@ def run_gemini_checks(
     _max_workers = int(_os.getenv("AI_PARALLELISM", "6"))
     _pool = _cf.ThreadPoolExecutor(max_workers=_max_workers, thread_name_prefix="qc-vision")
     _futures: list[tuple[Any, str]] = []
+    # One record per dispatched vision call. A family that returns nothing used
+    # to leave no trace in the report at all — the reader could not tell "this
+    # sheet is clean" from "this check never ran". Bagby's finding count swung
+    # 266 -> 225 between two runs of the same PDF, which is about one whole
+    # ai_sld dispatch, and nothing in the output said so.
+    _dispatch: list[dict] = []
+    _record_for_future: dict[Any, dict] = {}
 
     import time as _time
 
@@ -2114,23 +2370,140 @@ def run_gemini_checks(
         label = kwargs.pop("_label", default_label)
         deep_flag = bool(kwargs.get("deep", False))
 
+        # Positional contract shared by _gemini_page_check and
+        # _gemini_multi_page_check: (doc, page(s), prompt, run_id, run_dir,
+        # category, item_key_prefix, default_title, ...).
+        _pages_arg = args[1] if len(args) > 1 else None
+        record = {
+            "label": label,
+            "category": args[5] if len(args) > 5 and isinstance(args[5], str) else None,
+            "prefix": args[6] if len(args) > 6 and isinstance(args[6], str) else None,
+            "pages": (
+                list(_pages_arg) if isinstance(_pages_arg, list)
+                else [_pages_arg] if isinstance(_pages_arg, int) else []
+            ),
+            "deep": deep_flag,
+            "findings_returned": None,
+            "ok": None,
+        }
+        _dispatch.append(record)
+
+        # Catch here rather than relying on _safe_gemini_call: that helper
+        # swallows the exception and returns [], which would make a crashed
+        # provider call indistinguishable from a sheet the model found nothing
+        # on. The reader needs to know which one happened — one is worth a
+        # re-run, the other is a real (if empty) review.
+        def _guarded(*a, **kw):
+            try:
+                return func(*a, **kw)
+            except Exception:
+                logger.exception("Vision check '%s' failed", label)
+                record["ok"] = False
+                return []
+
         if out_timings is None:
-            fut = _pool.submit(_safe_gemini_call, func, *args, **kwargs)
+            fut = _pool.submit(_guarded, *args, **kwargs)
         else:
             def _timed(*a, **kw):
                 t0 = _time.monotonic()
                 try:
-                    return _safe_gemini_call(*a, **kw)
+                    return _guarded(*a, **kw)
                 finally:
                     out_timings.append({
                         "label": label,
                         "duration_s": round(_time.monotonic() - t0, 2),
                         "deep": deep_flag,
                     })
-            fut = _pool.submit(_timed, func, *args, **kwargs)
+            fut = _pool.submit(_timed, *args, **kwargs)
 
         _futures.append((fut, label))
+        _record_for_future[fut] = record
         return []
+
+    def _drain_futures(all_issues: list[dict], tag: str) -> list[dict]:
+        """Collect every dispatched vision check, then account for the silent ones.
+
+        Used by both the v4-engine path and the legacy path, so neither can
+        drop a check family without leaving a row in the report.
+        """
+        fmap = {fut: label for fut, label in _futures}
+        total = len(fmap)
+        done = 0
+        try:
+            for fut in _cf.as_completed(fmap):
+                done += 1
+                label = fmap[fut]
+                if progress_cb is not None:
+                    pct = int(40 + (48 * min(done, total) / max(1, total)))
+                    try:
+                        progress_cb(f"AI vision: {label} ({done}/{total})", pct)
+                    except Exception:
+                        pass
+                record = _record_for_future.get(fut)
+                try:
+                    got = fut.result()
+                    all_issues.extend(got)
+                    if record is not None:
+                        record["findings_returned"] = len(got)
+                        # _guarded may already have marked this False.
+                        if record["ok"] is None:
+                            record["ok"] = True
+                except Exception:
+                    logger.exception("%s '%s' failed", tag, label)
+                    if record is not None:
+                        record["findings_returned"] = 0
+                        record["ok"] = False
+        finally:
+            _pool.shutdown(wait=True)
+
+        # A dispatched check that produced nothing must say so. Silence here is
+        # indistinguishable from "the sheet is clean", and a reviewer signing a
+        # planset deserves to know which reviews actually happened.
+        for record in _dispatch:
+            if record["findings_returned"]:
+                continue
+            prefix = record["prefix"]
+            if not prefix:
+                continue
+            reason = (
+                "the AI review raised an error"
+                if record["ok"] is False
+                else "the AI review returned no findings at all"
+            )
+            pages = record["pages"]
+            where = (
+                f" (page{'s' if len(pages) > 1 else ''} "
+                f"{', '.join(str(p) for p in pages)})" if pages else ""
+            )
+            all_issues.append(make_issue(
+                run_id=run_id,
+                # Minted in code, never by the model, so it is directly
+                # comparable between runs.
+                item_key=f"{prefix}_review_incomplete",
+                category=record["category"] or "AI Review",
+                title=f"{record['label']} review did not complete",
+                description=(
+                    f"[AI] {record['label']}: no results were recorded for "
+                    "this check family."
+                ),
+                status="Deferred",
+                severity="medium",
+                page_number=pages[0] if pages else None,
+                evidence=(
+                    f"Deferred: {reason}{where}. Nothing on this sheet was "
+                    "assessed by this check — treat it as unreviewed, not as "
+                    "passing, and re-run to retry."
+                ),
+                confidence=1.0,
+            ))
+            logger.warning(
+                "Vision family '%s' (%s) returned no findings — emitted "
+                "%s_review_incomplete", record["label"], prefix, prefix,
+            )
+
+        if out_dispatch is not None:
+            out_dispatch.extend(_dispatch)
+        return all_issues
 
     all_issues: list[dict] = []
 
@@ -2370,26 +2743,7 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
 
         # Drain the futures submitted by the engine and supplement —
         # skip the legacy hard-coded dispatches below.
-        fmap = {fut: label for fut, label in _futures}
-        total = len(fmap)
-        done = 0
-        try:
-            for fut in _cf.as_completed(fmap):
-                done += 1
-                label = fmap[fut]
-                if progress_cb is not None:
-                    pct = int(40 + (48 * min(done, total) / max(1, total)))
-                    try:
-                        progress_cb(f"AI vision: {label} ({done}/{total})", pct)
-                    except Exception:
-                        pass
-                try:
-                    all_issues.extend(fut.result())
-                except Exception:
-                    logger.exception("V4 vision check '%s' failed", label)
-        finally:
-            _pool.shutdown(wait=True)
-        return all_issues
+        return _drain_futures(all_issues, "V4 vision check")
 
     # ── Find pages by TITLE keywords (not E-number prefixes) ──
     def find_pages(*keywords: str, exclude: tuple[str, ...] = ()) -> list[int]:
@@ -2789,24 +3143,4 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
     # ── Drain all submitted vision checks ──
     # Until this point every _safe_call(...) just queued the work and returned
     # an empty list. Now wait for results and stream progress as they finish.
-    fmap = {fut: label for fut, label in _futures}
-    total = len(fmap)
-    done = 0
-    try:
-        for fut in _cf.as_completed(fmap):
-            done += 1
-            label = fmap[fut]
-            if progress_cb is not None:
-                pct = int(40 + (48 * min(done, total) / max(1, total)))
-                try:
-                    progress_cb(f"AI vision: {label} ({done}/{total})", pct)
-                except Exception:
-                    pass
-            try:
-                all_issues.extend(fut.result())
-            except Exception:
-                logger.exception("Parallel vision check '%s' failed", label)
-    finally:
-        _pool.shutdown(wait=True)
-
-    return all_issues
+    return _drain_futures(all_issues, "Parallel vision check")

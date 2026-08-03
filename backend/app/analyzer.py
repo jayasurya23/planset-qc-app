@@ -1091,19 +1091,30 @@ Return ONLY a JSON object. Always include "equipment_type" and a one-sentence
 
 
 def _parse_extract_json(raw: str) -> dict:
-    """Pull the JSON object out of a (possibly fenced) AI response."""
-    try:
-        import re as _re
-        m = _re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, _re.DOTALL)
-        text = m.group(1) if m else raw
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end <= start:
-            return {}
-        parsed = json.loads(text[start:end + 1])
-        return parsed if isinstance(parsed, dict) else {}
-    except (json.JSONDecodeError, Exception):
-        return {}
+    """Pull the JSON object out of a (possibly fenced) AI response.
+
+    Prefers the LAST fenced block. The extraction prompt embeds its own
+    ```json schema example, so a model that restates the schema before
+    answering used to have the *schema* parsed as its answer — every field
+    would come back holding its own description text.
+    """
+    import re as _re
+    candidates = [
+        m.group(1)
+        for m in _re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", raw, _re.DOTALL)
+    ]
+    if not candidates:
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end > start:
+            candidates.append(raw[start:end + 1])
+    for text in reversed(candidates):
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
 
 
 # Datasheet-page detection: a page that looks like a vendor cut-sheet
@@ -1269,11 +1280,44 @@ Return ONLY the JSON object, no other text.
 """
 
 
+# Fields whose absence silently turns a deterministic engineering check into
+# "Deferred: calc inputs not yet extracted". Measured on prod run 0909b346:
+# poi_voltage was extracted on one run of Bagby.pdf and missed on the next,
+# which flipped four NEC calcs to Deferred with nothing in the report saying
+# why. These get a second look on the electrical sheets before we give up.
+def _is_blank_spec(value: object) -> bool:
+    """True when an extracted spec carries no usable value.
+
+    The model answers "N/A" / "TBD" / "not shown" rather than omitting a field
+    it cannot read. Those are absences, not values: treating them as present
+    lets a calc defer for missing input while the completeness check reports
+    everything found.
+    """
+    if value is None:
+        return True
+    text = str(value).strip()
+    return not text or text.lower() in (
+        "not shown", "n/a", "na", "tbd", "null", "none", "-", "--", "?",
+    )
+
+
+HIGH_VALUE_FIELDS = (
+    "poi_voltage",
+    "transformer_primary_voltage",
+    "transformer_secondary_voltage",
+    "transformer_kva",
+    "transformer_impedance",
+    "inverter_kva",
+    "total_ac_kva",
+)
+
+
 def extract_specs_from_pages(
     doc: fitz.Document,
     pages: list[PageInfo],
     design_stage: str | None = None,
     project_name: str | None = None,
+    out_report: dict | None = None,
 ) -> tuple[dict, dict]:
     """Auto-extract electrical specs from the planset itself.
 
@@ -1358,7 +1402,12 @@ def extract_specs_from_pages(
             cover_prompt = _EXTRACT_SPECS_PROMPT_TEMPLATE.replace(
                 "{stage_clause}", stage_clause,
             )
-            raw = analyze_multiple_images(cover_images, cover_prompt)
+            # deep=True: this is ONE call per run, not per page, so the cost
+            # delta is negligible — and every deterministic calc downstream
+            # depends on what it reads. Running the whole spec table through
+            # the cheap model to save one call's worth of tokens is how
+            # poi_voltage went missing between two runs of the same planset.
+            raw = analyze_multiple_images(cover_images, cover_prompt, deep=True)
             sysinfo = _parse_extract_json(raw)
             cover_sheet = pages[0].sheet_number if pages else None
             cover_label = (
@@ -1501,8 +1550,83 @@ def extract_specs_from_pages(
             log.info("Inferred %s=%d from %d %s datasheet pages "
                      "(was %r)", key, n, n, equip, existing)
 
+    # ── Pass 4: second chance for the fields that gate the NEC calcs ─────
+    # The extraction prompt tells the model to omit anything it is not sure
+    # of, so field presence is a per-call confidence sample rather than a
+    # fact about the document. For most fields that is fine. For the handful
+    # that decide whether a safety calculation runs at all, one look at page
+    # 1 is not enough — POI voltage in particular is usually called out on
+    # the single-line, not the cover.
+    missing_hv = [f for f in HIGH_VALUE_FIELDS if _is_blank_spec(merged.get(f))]
+    retry_pages: list[int] = []
+    if missing_hv:
+        for p in pages:
+            title = (p.sheet_title or "").upper()
+            number = (p.sheet_number or "").upper()
+            if ("SINGLE LINE" in title or "ONE LINE" in title
+                    or "SLD" in title or number.startswith("E-1")):
+                retry_pages.append(p.number)
+        retry_pages = retry_pages[:2]
+    if missing_hv and retry_pages:
+        try:
+            imgs = [
+                doc[pn - 1].get_pixmap(
+                    matrix=fitz.Matrix(2.0, 2.0), alpha=False
+                ).tobytes("png")
+                for pn in retry_pages
+            ]
+            retry_prompt = (
+                _EXTRACT_SPECS_PROMPT_TEMPLATE.replace("{stage_clause}", "")
+                + "\n\n=== FOCUS ===\n"
+                "These are electrical single-line sheets, not the cover. Read "
+                "the one-line diagram, its equipment schedules, and its notes, "
+                "and report ONLY these fields: "
+                + ", ".join(missing_hv)
+                + ". Voltages must be in VOLTS (a drawing reading '34.5 kV' is "
+                "34500). Omit any field this sheet genuinely does not show."
+            )
+            raw = analyze_multiple_images(imgs, retry_prompt, deep=True)
+            found = _parse_extract_json(raw)
+            recovered = []
+            for k in missing_hv:
+                if _is_blank_spec(found.get(k)):
+                    continue
+                sv = str(found[k]).strip()
+                if sv:
+                    merged[k] = sv
+                    # One call covers both sheets, so we cannot say which one
+                    # the value came from. Claiming the first would put a
+                    # wrong page number on the provenance trail the
+                    # cross-sheet checker reads, so leave it unattributed.
+                    single = retry_pages[0] if len(retry_pages) == 1 else None
+                    _record(
+                        k, sv,
+                        "single-line retry (p"
+                        + ", p".join(str(p) for p in retry_pages) + ")",
+                        single,
+                    )
+                    recovered.append(k)
+            if recovered:
+                log.info("high-value retry recovered %d field(s) from pages %s: %s",
+                         len(recovered), retry_pages, recovered)
+        except Exception:
+            log.exception("high-value field retry failed")
+
+    still_missing = [f for f in HIGH_VALUE_FIELDS if _is_blank_spec(merged.get(f))]
+    if out_report is not None:
+        out_report.update({
+            "field_count": len(merged),
+            "fields_found": sorted(merged.keys()),
+            "high_value_missing": still_missing,
+            "high_value_retried": bool(missing_hv and retry_pages),
+            "retry_pages": retry_pages,
+        })
+
     log.info("extract_specs_from_pages: %d total fields → %s",
              len(merged), sorted(merged.keys()))
+    if still_missing:
+        log.warning("extraction incomplete — high-value fields still missing: %s",
+                    still_missing)
     return merged, provenance
 
 
@@ -2090,10 +2214,12 @@ def analyze_pdf(
 
     # --- Auto-extract specs from planset pages for electrical calcs ---
     _progress("calcs", "Extracting specs from planset...", 33)
+    extraction_report: dict = {}
     auto_specs, provenance = extract_specs_from_pages(
         doc, pages,
         design_stage=design_stage,
         project_name=project_name,
+        out_report=extraction_report,
     )
 
     # Augment provenance with NON-planset sightings: user-entered
@@ -2334,8 +2460,54 @@ def analyze_pdf(
             "cross-sheet consistency check failed — continuing"
         )
 
-    # Merge: user-provided project_details override auto-extracted values
-    pd = {**auto_specs, **(project_details or {})}
+    # Merge: user-provided project_details override auto-extracted values —
+    # but only where the user actually entered something. The form posts every
+    # field it renders, so an untouched box arrives as "" and used to erase a
+    # perfectly good extracted value, silently deferring the calcs that needed
+    # it. Blanking a field is therefore not a way to force a deferral; that
+    # would need an explicit sentinel, not an empty string.
+    _user_pd = {
+        k: v for k, v in (project_details or {}).items()
+        if not _is_blank_spec(v)
+    }
+    _blanked = sorted(
+        k for k in (project_details or {})
+        if k not in _user_pd and k in auto_specs
+    )
+    if _blanked:
+        import logging
+        logging.getLogger(__name__).info(
+            "Ignoring %d blank project_details field(s) that would have "
+            "overwritten extracted values: %s", len(_blanked), _blanked,
+        )
+    pd = {**auto_specs, **_user_pd}
+
+    # If a field that gates an NEC calc could not be read from the planset and
+    # the reviewer did not supply it either, say so on the report. Otherwise
+    # the only trace is a set of calcs quietly reading "Deferred", which looks
+    # like the tool chose not to check rather than could not.
+    _hv_missing = [f for f in HIGH_VALUE_FIELDS if _is_blank_spec(pd.get(f))]
+    if _hv_missing:
+        issues.append(make_issue(
+            run_id=run_id,
+            item_key="extraction_incomplete",
+            category="Electrical Sheet",
+            title="Some design inputs could not be read from the planset",
+            description=(
+                "The automatic spec extraction did not find every value the "
+                "NEC calculations need, so some checks were deferred rather "
+                "than computed."
+            ),
+            status="Needs Review",
+            severity="medium",
+            evidence=(
+                "Missing: " + ", ".join(_hv_missing) + ". "
+                "Enter these in Project Details and re-run to compute the "
+                "checks that depend on them. A deferred check is NOT a pass — "
+                "nothing was verified."
+            ),
+            confidence=1.0,
+        ))
 
     # --- electrical_calc rules ---
     _progress("calcs", "Running electrical calculations...", 35)
@@ -2423,6 +2595,11 @@ def analyze_pdf(
     _progress("gemini", "Running AI vision checks (Gemini Flash)...", 40)
     gemini_usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "api_calls": 0}
     call_timings: list[dict] = []
+    # What each vision check family was actually handed, and what it returned.
+    # Without this, "no findings" and "never ran" look identical in the report,
+    # and a swing in total finding count between two runs of the same document
+    # cannot be traced to the family that caused it.
+    vision_dispatch: list[dict] = []
     try:
         from .gemini_client import reset_usage, get_usage
         from .gemini_analyzer import run_gemini_checks
@@ -2447,6 +2624,7 @@ def analyze_pdf(
             design_stage=design_stage,
             progress_cb=_gem_progress,
             out_timings=call_timings,
+            out_dispatch=vision_dispatch,
         )
         issues.extend(gemini_issues)
         gemini_usage = get_usage()
@@ -2524,11 +2702,19 @@ def analyze_pdf(
         "design_stage": design_stage,
         "supporting_docs": supporting_docs or [],
         "call_timings": call_timings_sorted,
+        # Per-family dispatch record: pages sent, deep flag, findings returned,
+        # and whether the call succeeded. Makes a vanished check family visible
+        # in a run diff instead of showing up only as a lower total.
+        "vision_dispatch": vision_dispatch,
         # The merged calc-input snapshot (auto-extracted specs overlaid with
         # user-entered project details) — exactly what run_calc() saw. Persisted
         # so a chat-time recompute can reproduce the run's verdicts instead of
         # re-deriving inputs that may have changed.
         "calc_inputs": pd,
+        # How complete that snapshot is, and whether the high-value retry
+        # fired. Two runs of one document captured 29 and 27 fields with no
+        # way to tell from the report which was the thin one.
+        "extraction_report": extraction_report,
         # Ruleset fingerprint: detect at chat time that the rules file changed
         # since this run was graded (mutable, unversioned registry).
         "rules_file": rules_fingerprint()["file"],

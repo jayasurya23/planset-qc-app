@@ -26,6 +26,18 @@ DB_PATH = DATA_DIR / "planset_qc.sqlite3"
 _DB_LOCK = threading.RLock()
 _CONN_URI = f"file:{DB_PATH}?nolock=1"
 
+# Version of the item_key minting convention. Runs are compared to each other
+# by item_key, so a change to how keys are built makes every finding in an
+# older run look new. Bump this whenever key format changes; the compare view
+# then declines to diff across the boundary instead of reporting hundreds of
+# phantom "new"/"removed" rows that no reviewer can act on.
+#
+#   1  original — free-form model check name appended to a family prefix.
+#      Runs written before this column existed report NULL and are treated as 1.
+#   2  multi-page findings that a model attributed to more than one sheet keep
+#      one row per sheet, suffixed "__p<page>", instead of collapsing to one.
+KEY_SCHEMA_VERSION = 2
+
 
 # Stage ordering for sorting stage submissions within a project. Mirrors
 # rule_registry.STAGE_ORDER; kept local to avoid importing the rule engine here.
@@ -107,6 +119,14 @@ def init_db() -> None:
             # Optional human-friendly label for a run (falls back to the PDF
             # filename in the UI when unset).
             ("run_name",      "ALTER TABLE runs ADD COLUMN run_name TEXT"),
+            # Which item_key convention this run was written under. Findings
+            # are matched between runs by item_key, so any change to how keys
+            # are minted makes an older run look like it churned 100% of its
+            # findings. The compare refuses to diff across a boundary rather
+            # than reporting phantom "new" and "removed" rows. NULL = pre-stamp
+            # (schema 1). See KEY_SCHEMA_VERSION.
+            ("key_schema_version",
+             "ALTER TABLE runs ADD COLUMN key_schema_version INTEGER"),
         ]:
             try:
                 cur.execute(f"SELECT {col} FROM runs LIMIT 1")
@@ -416,8 +436,9 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 status_counts_json, categories_json,
                 project_details_json, engineer_name,
                 project_id, design_stage, created_by, created_by_id,
-                parent_run_id, root_run_id, version, is_latest, run_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                parent_run_id, root_run_id, version, is_latest, run_name,
+                key_schema_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run["id"],
@@ -442,6 +463,7 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 run.get("version") or 1,
                 1 if run.get("is_latest", 1) else 0,
                 (run.get("run_name") or "").strip() or None,
+                run.get("key_schema_version") or KEY_SCHEMA_VERSION,
             ),
         )
         cur.executemany(
