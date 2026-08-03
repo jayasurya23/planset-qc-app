@@ -1710,14 +1710,41 @@ export default function App() {
   };
   const isProblemStatus = (s: Status | string | undefined) =>
     s === "Fail" || s === "Needs Review";
+  // A problem → Pass transition only means "fixed" if the later run
+  // affirmatively re-examined the item. A Pass carrying no evidence and no
+  // located instance is indistinguishable from "the check quietly stopped
+  // detecting it", and filing that under Fixed tells the reviewer a comment
+  // was addressed when the defect may still be on the sheet. That is the one
+  // failure mode this tool exists to prevent, so those go to their own bucket.
+  const hasAffirmativeEvidence = (i: Issue | null) =>
+    !!i &&
+    ((i.evidence ?? "").trim().length > 0 || (i.locations?.length ?? 0) > 0);
+  // "Deferred" means the check could not run — the opposite of resolved. It
+  // is not a problem status, so a Fail → Deferred transition used to land in
+  // Fixed, reading as "the designer addressed this" when the truth is "we can
+  // no longer tell". Deferred rows also carry explanatory evidence text, so
+  // the evidence gate above does not catch them on its own.
+  const OVERRIDDEN = "Overridden / Accepted by QC Engineer";
+  const isResolvedStatus = (s: Status | string | undefined) =>
+    s === "Pass" || s === OVERRIDDEN;
+  // Runs are matched finding-by-finding on item_key. If the two runs were
+  // written under different key conventions, every finding in the older one
+  // looks removed and every finding in the newer one looks new — hundreds of
+  // phantom rows that read as a catastrophic regression. Refuse the diff and
+  // say why, rather than showing a confidently wrong one.
+  const keySchemaOf = (r: RunData | null) => r?.key_schema_version ?? 1;
+  const schemaMismatch =
+    !!run && !!compareRun && keySchemaOf(run) !== keySchemaOf(compareRun);
   const diff = useMemo<{
     fixed: DiffEntry[];
+    unconfirmed: DiffEntry[];
     newly: DiffEntry[];
     drift: DiffEntry[];
     same: DiffEntry[];
     removed: DiffEntry[];
   } | null>(() => {
     if (!run || !compareRun) return null;
+    if (keySchemaOf(run) !== keySchemaOf(compareRun)) return null;
     const beforeMap = new Map<string, Issue>();
     for (const i of compareRun.issues ?? []) {
       // Strip stage_deferred / xref_deferred prefixes so the same rule
@@ -1729,6 +1756,7 @@ export default function App() {
     }
     const afterKeys = new Set<string>();
     const fixed: DiffEntry[] = [];
+    const unconfirmed: DiffEntry[] = [];
     const newly: DiffEntry[] = [];
     const drift: DiffEntry[] = [];
     const same: DiffEntry[] = [];
@@ -1752,8 +1780,13 @@ export default function App() {
       } else {
         const wasProblem = isProblemStatus(before.status);
         const isProblem = isProblemStatus(after.status);
-        if (wasProblem && !isProblem) fixed.push(entry);
-        else if (!wasProblem && isProblem) newly.push(entry);
+        if (wasProblem && !isProblem) {
+          // An explicit human acceptance is resolved by definition.
+          if (after.status === OVERRIDDEN) fixed.push(entry);
+          else if (isResolvedStatus(after.status) && hasAffirmativeEvidence(after))
+            fixed.push(entry);
+          else unconfirmed.push(entry);
+        } else if (!wasProblem && isProblem) newly.push(entry);
         else if (before.status !== after.status) drift.push(entry);
         else same.push(entry);
       }
@@ -1772,7 +1805,7 @@ export default function App() {
         });
       }
     }
-    return { fixed, newly, drift, same, removed };
+    return { fixed, unconfirmed, newly, drift, same, removed };
   }, [run, compareRun]);
 
   // Group findings by rule for the issue list. Same rule firing on
@@ -4138,8 +4171,11 @@ export default function App() {
               {/* ── Issue list ── */}
               <section className="issue-panel">
                 {/* Compare-mode banner. Visible whenever ``compareRun`` is
-                    loaded — replaces the regular list with a diff view. */}
-                {compareRun && diff && (
+                    loaded — replaces the regular list with a diff view. Must
+                    NOT be gated on ``diff`` alone: it carries the only exit
+                    and swap controls, so refusing an incomparable diff would
+                    otherwise strand the user in compare mode. */}
+                {compareRun && (diff || schemaMismatch) && (
                   <div className="compare-banner">
                     <div className="compare-banner-text">
                       <strong>Diff mode</strong> · comparing{" "}
@@ -4341,6 +4377,23 @@ export default function App() {
                       cards. Each entry shows before-status → after-status
                       with the rule title, category, page, and a click-
                       through to open the full finding modal. */}
+                  {compareRun && schemaMismatch && (
+                    <div className="diff-section diff-section-removed">
+                      <div className="diff-section-head">
+                        <span className="diff-section-title">
+                          Can't compare these two runs
+                        </span>
+                      </div>
+                      <div className="dim" style={{ padding: "1.25rem" }}>
+                        These runs were analysed under different finding-ID
+                        conventions (v{keySchemaOf(compareRun)} vs v
+                        {keySchemaOf(run)}), so findings can't be matched
+                        between them — a diff here would show every finding as
+                        both removed and new. Re-run the earlier version to
+                        compare them directly.
+                      </div>
+                    </div>
+                  )}
                   {compareRun && diff && (() => {
                     const renderDiffSection = (
                       title: string,
@@ -4429,10 +4482,16 @@ export default function App() {
                     return (
                       <>
                         {renderDiffSection("Fixed (problem → resolved)", "fixed", diff.fixed)}
+                        {renderDiffSection(
+                          "Unconfirmed (no longer flagged, but not verified — check manually)",
+                          "unconfirmed",
+                          diff.unconfirmed,
+                        )}
                         {renderDiffSection("New problems", "newly", diff.newly)}
                         {renderDiffSection("Drift (status changed)", "drift", diff.drift)}
                         {renderDiffSection("Removed (no longer fired)", "removed", diff.removed)}
-                        {diff.fixed.length === 0 &&
+                        {diff.unconfirmed.length === 0 &&
+                          diff.fixed.length === 0 &&
                           diff.newly.length === 0 &&
                           diff.drift.length === 0 &&
                           diff.removed.length === 0 && (

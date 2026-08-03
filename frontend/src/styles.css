@@ -531,6 +531,8 @@ select.si option, select.si optgroup { background: var(--dark2); color: #fff; }
 .diff-section-fixed .diff-section-head { background: var(--green-bg); color: var(--green-fg); }
 .diff-section-newly .diff-section-head { background: var(--red-bg); color: var(--red-fg); }
 .diff-section-drift .diff-section-head { background: var(--amber-bg); color: var(--amber-fg); }
+/* Amber, not green — these are NOT confirmed fixes, and must not read like one. */
+.diff-section-unconfirmed .diff-section-head { background: var(--amber-bg); color: var(--amber-fg); }
 .diff-section-removed .diff-section-head { background: var(--bg); color: var(--text3); }
 .diff-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--bg); cursor: pointer; transition: background .12s; }
 .diff-row:last-child { border-bottom: 0; }

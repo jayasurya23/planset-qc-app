@@ -216,6 +216,13 @@ export interface RunData {
   root_run_id?: string | null
   version?: number | null
   is_latest?: number | boolean | null
+  /**
+   * Which item_key convention this run was written under. Findings are matched
+   * between runs by item_key, so diffing across a change in that convention
+   * reports phantom "new"/"removed" rows. Null on runs written before the
+   * column existed — treated as 1.
+   */
+  key_schema_version?: number | null
 }
 
 /** Signed-in engineer, from GET /api/me (EasyAuth identity). */
