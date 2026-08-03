@@ -36,7 +36,11 @@ _CONN_URI = f"file:{DB_PATH}?nolock=1"
 #      Runs written before this column existed report NULL and are treated as 1.
 #   2  multi-page findings that a model attributed to more than one sheet keep
 #      one row per sheet, suffixed "__p<page>", instead of collapsing to one.
-KEY_SCHEMA_VERSION = 2
+#   3  enumerated families (check_ids.yaml) key off the registry id rather than
+#      the model's wording, and un-enumerated families fold case/punctuation —
+#      the model was emitting "date"/"Date" and "sov"/"SOV" for one check on
+#      one sheet, which halved that family's stability by capitalisation alone.
+KEY_SCHEMA_VERSION = 3
 
 
 # Stage ordering for sorting stage submissions within a project. Mirrors
