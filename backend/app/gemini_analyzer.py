@@ -21,6 +21,7 @@ from typing import Any
 
 import fitz
 
+from . import check_ids
 from .analyzer import (
     PageInfo,
     default_footer_bbox,
@@ -1879,8 +1880,13 @@ def _gemini_page_check(
     # re-render its issue once the rescue pass returns a location.
     rescue_pending: list[dict] = []
     for i, finding in enumerate(findings):
-        check_name = finding.get("check") or finding.get(
-            "field") or f"item_{i}"
+        # "title" is in the chain because the open_findings escape hatch in
+        # several prompts emits a title rather than a check name; without it
+        # those findings fell to the POSITIONAL f"item_{i}" fallback, which
+        # renames itself whenever the model reorders its response — the exact
+        # churn this work removes, on the findings we can least afford to lose.
+        check_name = (finding.get("check") or finding.get("field")
+                      or finding.get("title") or f"item_{i}")
         status_raw = finding.get("status", "")
         found = finding.get("found")
 
@@ -1919,10 +1925,11 @@ def _gemini_page_check(
         # Avoid the double-prefix rule_key bug: if the model already emitted a
         # fully-qualified check name (e.g. "gen_placeholders") that starts with
         # the category prefix, use it as-is.
-        if check_name.startswith(item_key_prefix):
-            item_key = check_name
-        else:
-            item_key = f"{item_key_prefix}_{check_name}"
+        # The registry, not the model, decides the key for enumerated families.
+        # Families without a registry keep the previous free-form behaviour so
+        # enumeration can roll out one family at a time.
+        item_key, is_open = check_ids.canonical_key(
+            item_key_prefix, check_name, finding)
 
         # Per-call dedup: Gemini sometimes emits the same finding multiple
         # times in a single response (e.g. 3x "gen_placeholders" on one page).
@@ -1939,7 +1946,8 @@ def _gemini_page_check(
             continue
         seen_keys.add(item_key)
 
-        title = _pretty_title_for(check_name)
+        title = (check_ids.title_for(item_key_prefix, check_name)
+                 or _pretty_title_for(check_name))
         issue_id = str(uuid.uuid4())
 
         # Generate page preview for Fail / Needs Review items. Highlight every
@@ -2083,8 +2091,13 @@ def _gemini_multi_page_check(
     # that has any rescue candidates, batching all findings for that page.
     rescue_by_page: dict[int, list[dict]] = {}
     for i, finding in enumerate(findings):
-        check_name = finding.get("check") or finding.get(
-            "field") or f"item_{i}"
+        # "title" is in the chain because the open_findings escape hatch in
+        # several prompts emits a title rather than a check name; without it
+        # those findings fell to the POSITIONAL f"item_{i}" fallback, which
+        # renames itself whenever the model reorders its response — the exact
+        # churn this work removes, on the findings we can least afford to lose.
+        check_name = (finding.get("check") or finding.get("field")
+                      or finding.get("title") or f"item_{i}")
         status_raw = finding.get("status", "")
         found = finding.get("found")
 
@@ -2119,10 +2132,11 @@ def _gemini_multi_page_check(
             )
 
         # Avoid the double-prefix rule_key bug.
-        if check_name.startswith(item_key_prefix):
-            item_key = check_name
-        else:
-            item_key = f"{item_key_prefix}_{check_name}"
+        # The registry, not the model, decides the key for enumerated families.
+        # Families without a registry keep the previous free-form behaviour so
+        # enumeration can roll out one family at a time.
+        item_key, is_open = check_ids.canonical_key(
+            item_key_prefix, check_name, finding)
 
         # Per-call dedup, page-aware — see cross_page_checks above.
         claimed_page = _pick_page_for_finding(finding, page_numbers)
@@ -2136,7 +2150,8 @@ def _gemini_multi_page_check(
             continue
         seen_keys.add(item_key)
 
-        title = _pretty_title_for(check_name)
+        title = (check_ids.title_for(item_key_prefix, check_name)
+                 or _pretty_title_for(check_name))
         issue_id = str(uuid.uuid4())
 
         # Attribute to the sheet the model named, so Pass rows point at the
