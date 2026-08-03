@@ -303,8 +303,40 @@ def compose_prompt(family: str, header: str) -> str | None:
     return f"{header.strip()}\n\n{block}\n{_RESPONSE_BLOCK}"
 
 
+def canonical_id(prefix: str, check_name: str) -> str | None:
+    """Registry id a model-returned check name resolves to, ignoring instances."""
+    family = family_for_prefix(prefix)
+    if family is None:
+        return None
+    return _lookup(family).get(_normalize(check_name))
+
+
+def fanout_ids(prefix: str, findings: list[dict]) -> set[str]:
+    """Canonical ids the model reported MORE THAN ONCE in one response.
+
+    Only these get an instance suffix. Measured on the grounding pilot: the
+    model labels the same subject differently between runs — "XFMR-1" one run,
+    "TRANSFORMER_1" the next, "MV_TRANSFORMER" the run after — so suffixing
+    unconditionally reintroduced exactly the churn enumeration removes, just
+    moved from the check name into the instance label. Suffixing only genuine
+    fan-out keeps two co-occurring defects distinct (the reason the
+    discriminator exists) while leaving the common single-instance case with a
+    bare, reproducible key.
+    """
+    counts: dict[str, int] = {}
+    for idx, f in enumerate(findings):
+        if f.get("_exploratory"):
+            continue
+        name = (f.get("check") or f.get("field") or f.get("title")
+                or f"item_{idx}")
+        cid = canonical_id(prefix, name)
+        if cid:
+            counts[cid] = counts.get(cid, 0) + 1
+    return {cid for cid, n in counts.items() if n > 1}
+
+
 def canonical_key(prefix: str, check_name: str, finding: dict[str, Any] | None = None,
-                  ) -> tuple[str, bool]:
+                  fanout: set[str] | None = None) -> tuple[str, bool]:
     """Map a model-returned check name onto a stable item_key.
 
     Returns ``(item_key, is_open)``. ``is_open`` marks a finding that no
@@ -329,8 +361,18 @@ def canonical_key(prefix: str, check_name: str, finding: dict[str, Any] | None =
             # different feeders can both be undersized. Without a discriminator
             # the per-call dedup would keep the first and silently discard the
             # rest, turning an enumeration into a finding-loss mechanism.
+            #
+            # But ONLY for genuine fan-out. The model's instance labels are not
+            # stable between runs ("XFMR-1" / "TRANSFORMER_1" / "MV_TRANSFORMER"
+            # for one subject), so suffixing a single-instance finding just
+            # relocates the churn from the check name into the label. When
+            # `fanout` is not supplied we cannot tell, so we stay conservative
+            # and suffix — a duplicate key would silently drop a finding, which
+            # is the worse failure.
             instance = _slug((finding or {}).get("instance"))
-            suffix = f"__{instance}" if instance else ""
+            suffix = ""
+            if instance and (fanout is None or canonical in fanout):
+                suffix = f"__{instance}"
             return f"{key_prefix}_{canonical}{suffix}", False
 
     # Unrecognised id, or an explicit open_findings entry. Key off the content

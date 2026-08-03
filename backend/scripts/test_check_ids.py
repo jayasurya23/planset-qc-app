@@ -135,6 +135,42 @@ check("no instance -> bare canonical key",
       ci.canonical_key("ai_gnd_deep", "egc_size_250_122", {"evidence": "a"})[0]
       == "ai_gnd_egc_size_250_122")
 
+print("Instance suffix ONLY on genuine fan-out (the pilot's churn source):")
+# Measured on the grounding pilot: the model labelled one subject "XFMR-1" in
+# one run and "TRANSFORMER_1" in the next, so suffixing every finding moved the
+# churn out of the check name and into the instance label. 14 of 16 keys were
+# correctly enumerated yet only 6 matched between runs.
+single = [{"check": "egc_size_250_122", "instance": "XFMR-1", "evidence": "a"}]
+fan = ci.fanout_ids("ai_gnd_deep", single)
+check("one occurrence is not fan-out", fan == set())
+k, _ = ci.canonical_key("ai_gnd_deep", "egc_size_250_122", single[0], fan)
+check("single instance gets a bare, reproducible key",
+      k == "ai_gnd_egc_size_250_122")
+# the same check under a DIFFERENT label next run must land on the same key
+k_next, _ = ci.canonical_key(
+    "ai_gnd_deep", "egc_size_250_122",
+    {"instance": "TRANSFORMER_1", "evidence": "a"}, ci.fanout_ids("ai_gnd_deep", [
+        {"check": "egc_size_250_122", "instance": "TRANSFORMER_1"}]))
+check("relabelled instance still yields the SAME key", k == k_next)
+
+both = [{"check": "egc_size_250_122", "instance": "XFMR-1", "evidence": "a"},
+        {"check": "egc_size_250_122", "instance": "XFMR-2", "evidence": "b"}]
+fan2 = ci.fanout_ids("ai_gnd_deep", both)
+check("two occurrences are fan-out", fan2 == {"egc_size_250_122"})
+ka, _ = ci.canonical_key("ai_gnd_deep", "egc_size_250_122", both[0], fan2)
+kb, _ = ci.canonical_key("ai_gnd_deep", "egc_size_250_122", both[1], fan2)
+check("genuine fan-out keeps both instances distinct", ka != kb)
+check("neither collides with the bare key",
+      ka != "ai_gnd_egc_size_250_122" and kb != "ai_gnd_egc_size_250_122")
+check("exploratory findings never count toward fan-out",
+      ci.fanout_ids("ai_gnd_deep", [
+          {"check": "egc_size_250_122", "_exploratory": True},
+          {"check": "egc_size_250_122", "instance": "X"}]) == set())
+check("no fanout arg -> conservative suffix (never drop a finding)",
+      ci.canonical_key("ai_gnd_deep", "egc_size_250_122",
+                       {"instance": "XFMR-1", "evidence": "a"})[0]
+      == "ai_gnd_egc_size_250_122__xfmr_1")
+
 print("Families without a registry are untouched:")
 k5, o5 = ci.canonical_key("ai_sld", "free_form_name_the_model_chose", {"evidence": "x"})
 check("free-form key preserved", k5 == "ai_sld_free_form_name_the_model_chose" and not o5)
