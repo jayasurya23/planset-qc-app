@@ -1021,12 +1021,12 @@ cannot find with high confidence. Use EXACTLY these field names:
   "transformer_kva": "transformer kVA per unit (one transformer's nameplate)",
   "transformer_quantity": "number of step-up transformers in this project (e.g. '(2) 2500 kVA' → 2). Defaults to 1 if not stated.",
   "transformer_total_kva": "total transformer capacity if stated explicitly (e.g. 'Total: 5000 kVA'). Otherwise omit and the calc will multiply per-unit × count.",
-  "transformer_primary_voltage": "primary voltage in V",
-  "transformer_secondary_voltage": "secondary voltage in V",
+  "transformer_primary_voltage": "primary voltage in VOLTS — convert kV to V (drawing '34.5 kV' -> 34500, '12.47 kV' -> 12470). Never return the bare kV number.",
+  "transformer_secondary_voltage": "secondary voltage in VOLTS — convert kV to V (e.g. '0.8 kV' -> 800). Never return the bare kV number.",
   "transformer_impedance": "Z percent (typical 5.5-5.75 for 750-2500 kVA)",
   "transformer_xr_ratio": "X/R ratio (typical 4-10 for distribution class)",
   "transformer_bil": "BIL in kV (15 kV class: 95 or 110; 25 kV: 125 or 150; 35 kV: 150 or 200)",
-  "poi_voltage": "POI voltage in V",
+  "poi_voltage": "POI / interconnection voltage in VOLTS — convert kV to V (drawing '34.5 kV' -> 34500, '12.47 kV' -> 12470, '69 kV' -> 69000). Never return the bare kV number.",
   "design_temp_low_c": "lowest design temp in C",
   "design_temp_high_c": "highest design temp in C"
 }

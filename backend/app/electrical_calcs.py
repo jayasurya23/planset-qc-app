@@ -11,6 +11,7 @@ values, and evidence text suitable for issue creation.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -162,6 +163,44 @@ def _parse_wire_size(raw: str) -> str | None:
     """Normalize a wire size string like '#10', '10 AWG', '4/0', '500 kcmil'."""
     s = raw.strip().upper().replace("AWG", "").replace("KCMIL", "").replace("#", "").strip()
     return s if s in _WIRE_INDEX else None
+
+
+# Below this, a "voltage" is a kV figure written without its unit.
+# Real AC system voltages in a PV planset are either LV (>=120 V: 208, 240,
+# 277, 480, 600, 690, 800) or MV/HV named in kV (4.16, 12.47, 13.2, 13.8,
+# 24.9, 34.5, 46, 69). Nothing legitimate sits between, so <100 means kV.
+# NOTE: transmission-level POIs written bare (115/138/230 kV) fall outside
+# this rule — those rely on the extractor returning volts (see the
+# poi_voltage schema note in analyzer.py, which now demands kV->V).
+_BARE_KV_MAX = 100.0
+
+
+def _volts(pd: dict, *keys: str) -> float | None:
+    """First present voltage among *keys*, normalized to VOLTS.
+
+    Extraction sometimes returns "34.5" for a drawing that reads "34.5 kV",
+    dropping the unit. Feeding that to the calcs is not a cosmetic problem:
+    it under-states NEC 110.26 working clearances (3 ft instead of 5/6/9 ft
+    at 34.5 kV), picks the wrong transformer BIL class, and inflates MV FLA
+    by 1000x. Normalize defensively at the point of use so historical runs
+    and any future extraction slip can't produce wrong engineering numbers.
+    """
+    for key in keys:
+        raw = pd.get(key)
+        if raw in (None, ""):
+            continue
+        text = str(raw).strip().lower().replace(",", "")
+        match = re.search(r"[-+]?\d*\.?\d+", text)
+        if not match:
+            continue
+        value = float(match.group())
+        if value <= 0:
+            continue
+        # "34.5 kV" (explicit) or a bare 34.5 both mean 34 500 V.
+        if "kv" in text or value < _BARE_KV_MAX:
+            value *= 1000.0
+        return value
+    return None
 
 
 def _safe_float(val: Any) -> float | None:
@@ -567,7 +606,7 @@ def validate_transformer(pd: dict) -> CalcResult:
     xfmr_total = _safe_float(pd.get("transformer_total_kva"))
     inv_kva = _safe_float(pd.get("inverter_kva"))
     inv_qty = _safe_float(pd.get("inverter_quantity")) or 1
-    poi_v = _safe_float(pd.get("poi_voltage"))
+    poi_v = _volts(pd, "poi_voltage")
     xfmr_z = _safe_float(pd.get("transformer_impedance"))
     xfmr_bil = _safe_float(pd.get("transformer_bil"))
 
@@ -724,7 +763,7 @@ def validate_ac_ampacity(pd: dict) -> CalcResult:
     inv_kva = _safe_float(pd.get("inverter_kva"))
     inv_kw = _safe_float(pd.get("inverter_kw"))
     inv_qty = _safe_float(pd.get("inverter_quantity")) or 1
-    voltage = _safe_float(pd.get("transformer_secondary_voltage")) or _safe_float(pd.get("poi_voltage"))
+    voltage = _volts(pd, "transformer_secondary_voltage", "poi_voltage")
 
     if inv_kva is None and inv_kw is None:
         return CalcResult("Needs Review", "Missing inverter_kva/kw", confidence=0.40)
@@ -792,7 +831,7 @@ def validate_mv_ampacity(pd: dict) -> CalcResult:
     Uses: transformer_kva, transformer_primary_voltage or poi_voltage
     """
     xfmr_kva = _safe_float(pd.get("transformer_kva")) or _safe_float(pd.get("total_ac_kva"))
-    voltage = _safe_float(pd.get("transformer_primary_voltage")) or _safe_float(pd.get("poi_voltage"))
+    voltage = _volts(pd, "transformer_primary_voltage", "poi_voltage")
 
     if xfmr_kva is None:
         return CalcResult("Needs Review", "Missing transformer_kva", confidence=0.40)
@@ -839,7 +878,7 @@ def validate_egc_sizing(pd: dict) -> CalcResult:
     """
     inv_kva = _safe_float(pd.get("inverter_kva"))
     inv_kw = _safe_float(pd.get("inverter_kw"))
-    voltage = _safe_float(pd.get("transformer_secondary_voltage")) or _safe_float(pd.get("poi_voltage"))
+    voltage = _volts(pd, "transformer_secondary_voltage", "poi_voltage")
 
     if (inv_kva is None and inv_kw is None) or voltage is None:
         return CalcResult("Needs Review", "Missing inverter kVA/kW or voltage for EGC calc", confidence=0.40)
@@ -883,7 +922,7 @@ def validate_gec_sizing(pd: dict) -> CalcResult:
     Uses: transformer_kva, transformer_secondary_voltage or poi_voltage
     """
     xfmr_kva = _safe_float(pd.get("transformer_kva"))
-    voltage = _safe_float(pd.get("transformer_secondary_voltage")) or _safe_float(pd.get("poi_voltage"))
+    voltage = _volts(pd, "transformer_secondary_voltage", "poi_voltage")
 
     if xfmr_kva is None or voltage is None:
         return CalcResult("Needs Review", "Missing transformer_kva or voltage for GEC calc", confidence=0.40)
@@ -940,7 +979,7 @@ def validate_voltage_drop(pd: dict) -> CalcResult:
     """
     dc_kw = _safe_float(pd.get("total_dc_kw"))
     ac_kva = _safe_float(pd.get("total_ac_kva"))
-    poi_v = _safe_float(pd.get("poi_voltage"))
+    poi_v = _volts(pd, "poi_voltage")
 
     if dc_kw is None and ac_kva is None:
         return CalcResult("Needs Review", "Missing system size for voltage drop estimation", confidence=0.40)
@@ -1194,8 +1233,8 @@ def validate_dc_ac_ratio(pd: dict) -> CalcResult:
 
 def validate_nec_clearances(pd: dict) -> CalcResult:
     """Provide NEC 110.26 clearance requirements based on system voltage."""
-    poi_v = _safe_float(pd.get("poi_voltage"))
-    secondary_v = _safe_float(pd.get("transformer_secondary_voltage"))
+    poi_v = _volts(pd, "poi_voltage")
+    secondary_v = _volts(pd, "transformer_secondary_voltage")
 
     voltage = poi_v or secondary_v
     if voltage is None:
