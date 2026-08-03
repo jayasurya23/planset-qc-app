@@ -12,7 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import inspect  # noqa: E402
 import yaml  # noqa: E402
+from app import gemini_analyzer  # noqa: E402
 from app.gemini_analyzer import _SLD_PROMPT  # noqa: E402
 
 _FAILS: list[str] = []
@@ -44,6 +46,22 @@ check("recognizes KNAF", "KNAF" in _SLD_PROMPT)
 check("explicitly do NOT flag KNAN/KNAF", "Do NOT flag KNAN or KNAF" in _SLD_PROMPT)
 check("guardrail: still flags genuine fluid/class mismatch",
       "mineral-oil unit carrying a K-class" in _SLD_PROMPT)
+
+print("Decimal-separator guardrail (Bagby 4,779.000 kW false positive):")
+# _GLOBAL_INSTRUCTIONS is a local inside run_gemini_checks and is appended to
+# EVERY vision prompt — assert against the function source so the guardrail
+# can't be dropped without failing here.
+_src = inspect.getsource(gemini_analyzer.run_gemini_checks)
+check("global instructions carry the number-reading rule (9b)",
+      "READING NUMBERS OFF DRAWINGS" in _src)
+check("uses the real failing value as the worked example",
+      '"4,779.000 kW" is 4779 kW' in _src and '"4,779,000 kW"' in _src)
+check("guardrail: comma = thousands, period = decimal point",
+      "A comma is a THOUSANDS" in _src and "a period is a DECIMAL" in _src)
+check("guardrail: 10^n discrepancy must be re-read + cross-checked first",
+      "power of ten" in _src and "cross-check" in _src.lower())
+check("guardrail: degrade to Needs Review, never Fail, on residual doubt",
+      '"Needs Review" (not\n   "Fail")' in _src or 'as "Needs Review" (not' in _src)
 
 print("Item 4 — 3LD keyword rule no longer claims 'no cable sizes':")
 rules = yaml.safe_load(

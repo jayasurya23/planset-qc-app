@@ -2188,6 +2188,32 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
    All-caps project/owner names (e.g. "WELLINGTON SOLAR") are valid
    values, not placeholders.
 
+9b. **READING NUMBERS OFF DRAWINGS — decimal points, separators, magnitude.**
+   Engineering tables routinely print values that use BOTH separators, e.g.
+   "4,779.000 kW", "2,500.00 kVA", "1.470", "0.950". A comma is a THOUSANDS
+   separator; a period is a DECIMAL POINT. NEVER re-read a decimal point as
+   a comma: "4,779.000 kW" is 4779 kW — it is NOT "4,779,000 kW". Making
+   that substitution inflates the value 1000x and reports a false defect on
+   a perfectly correct drawing. Transcribe the value with its separators
+   exactly as printed.
+   BEFORE reporting that a printed value is wrong by a factor of 1000 (or
+   any power of ten), STOP. An apparent 10^n discrepancy is far more often
+   YOUR misreading — a decimal point taken as a comma, a dropped/added
+   trailing zero, or a kW/W/MW unit mix-up — than a real design error.
+   Do two things first:
+     (a) Re-read the printed characters exactly, including the position of
+         every '.' and ',' and the printed unit.
+     (b) Cross-check against related rows in the SAME table: a DC/AC ratio,
+         a per-unit rating, a module count x wattage, a stated total. If
+         ANY related row is consistent with the smaller/other reading, then
+         you misread the value — do NOT raise a finding, and use the
+         consistent reading everywhere in your response.
+   Only if the value is still inconsistent after (a) and (b) may you report
+   it, and then as "Needs Review" (not "Fail"), stating plainly what you
+   read and what you expected. Your readings must be self-consistent: never
+   use one magnitude for a value in one finding and a different magnitude
+   for the same value in another.
+
 10b. **SUPPORTING-DOC CITATION — required when the finding's evidence
     came from a supporting document.** When you validate a value against
     something in the AVAILABLE EVIDENCE block (CESIR, BOD / tech spec,
