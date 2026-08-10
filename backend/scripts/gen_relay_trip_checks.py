@@ -46,8 +46,22 @@ TRIP_FUNCTIONS = [
 DEVICES = [("relay", "recloser"), ("inverter", "inverter")]
 
 
-# Phrases that turn the shared procedure from "about THIS check" into "about
-# whichever check cites it", so it can be stated once for the whole family.
+# Turning the shared procedure from "about THIS check" into "about whichever
+# check cites it" is not a plain token swap: the template uses {DEVICE} as a
+# noun modifier ("{DEVICE} settings table"), and substituting a noun PHRASE
+# there yields "no the device named in the check settings table at all". The
+# model has to read this, so fix the common collocations first, then the bare
+# tokens. Order matters — longest phrases first.
+_GENERIC_PHRASES = [
+    ("no {DEVICE} is shown", "that device is not shown"),
+    ("{DEVICE} settings table", "settings table for the device named in the check"),
+    ("{DEVICE} settings tables", "settings tables for the device named in the check"),
+    ("on the {DEVICE}", "on that device"),
+    ("the {DEVICE}", "that device"),
+    ("a {DEVICE}", "that device"),
+    ("{DEVICE} R-1", "recloser R-1"),
+    ("{DEVICE} SMA SC 4600 UP", "inverter SMA SC 4600 UP"),
+]
 _GENERIC = {
     "{DEVICE}": "the device named in the check",
     "{ELEMENT}": "the element named in the check",
@@ -67,6 +81,8 @@ def build_preamble(template: dict) -> str:
     setpoint differ, and those stay in the per-check line.
     """
     body = template["instruction_template"]
+    for phrase, generic in _GENERIC_PHRASES:
+        body = body.replace(phrase, generic)
     for ph, generic in _GENERIC.items():
         body = body.replace(ph, generic)
     both_tables = "\n\n".join(
