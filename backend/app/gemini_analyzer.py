@@ -1304,6 +1304,25 @@ You are a senior protection engineer reviewing the RELAY AND INVERTER SETTINGS s
 5. Read FLA shown. CALCULATE: FLA = MVA × 1000 / (√3 × kV_L-L). Compare to shown value.
 6. Read Operating Power Factor (should be 1.0 absorbing/consuming for most solar).
 
+**HOW TO MATCH FREQUENCY AND VOLTAGE TRIP FUNCTIONS — READ THIS BEFORE STEP 2:**
+Match on the SETPOINT VALUES, not on the element label. IEEE 1547 fixes the
+required trip points; it does NOT fix which element number a designer assigns
+to them, and relay platforms (SEL 81U1/81U2, Tavrida, SMA) are numbered by the
+engineer. A drawing that labels 58.5 Hz / 300 s as "UF2" and 56.5 Hz / 0.16 s
+as "UF1" has the RIGHT protection with the labels in the opposite order from
+the table above.
+
+So: confirm the required SET of trip points is present with the correct
+magnitude AND clearing time —
+  underfrequency: one at 58.5 Hz / 300 s and one at 56.5 Hz / 0.16 s
+  overfrequency:  one at 61.2 Hz / 300 s and one at 62.0 Hz / 0.16 s
+Report Fail only when a required trip point is MISSING, or its magnitude or
+clearing time DEVIATES from the value above. If every required point is
+present and correct but the element numbering is transposed relative to this
+table, that is Needs Review at LOW severity ("labelling differs from IEEE
+1547 numbering; protection is correct"), never a Fail. Say in the evidence
+which values you found and which required point each one satisfies.
+
 **STEP 2 — Recloser Settings — Read and Validate against IEEE 1547:**
 
 Read each trip function and compare to IEEE 1547 Category I defaults:
@@ -1316,8 +1335,8 @@ Read each trip function and compare to IEEE 1547 Category I defaults:
 | UV2 | 27-2 | 0.45 p.u. | 0.16s |
 | OF2 | 81O-2 | 62.0 Hz | 0.16s |
 | OF1 | 81O-1 | 61.2 Hz | 300.0s |
-| UF2 | 81U-2 | 58.5 Hz | 300.0s |
-| UF1 | 81U-1 | 56.5 Hz | 0.16s |
+| UF1 | 81U-1 | 58.5 Hz | 300.0s |
+| UF2 | 81U-2 | 56.5 Hz | 0.16s |
 
 For each setting:
 - Read the p.u. voltage or Hz shown.
@@ -1338,8 +1357,8 @@ Read each inverter trip setting and validate against IEEE 1547 Category I:
 | UV2 | 27-2 | 0.45 | = 0.45 × V_L-N | 0.16s |
 | OF2 | 81O-2 | 62.0 Hz | — | 0.16s |
 | OF1 | 81O-1 | 61.2 Hz | — | 300.0s |
-| UF2 | 81U-2 | 58.5 Hz | — | 300.0s |
-| UF1 | 81U-1 | 56.5 Hz | — | 0.16s |
+| UF1 | 81U-1 | 58.5 Hz | — | 300.0s |
+| UF2 | 81U-2 | 56.5 Hz | — | 0.16s |
 
 CALCULATE each voltage value and compare to what's shown. For example, if inverter L-N = 277V, then OV2 voltage = 1.20 × 277 = 332.4V.
 
