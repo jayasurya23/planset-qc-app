@@ -17,8 +17,10 @@ Two separate defects, found together while preparing to enumerate ai_relay.
    58.5 Hz / 300 s as "UF2" (Raven, ai_relay_recloser_uf2_setting, Pass). That
    planset has correct protection with the labels transposed. Simply swapping
    the table would have turned 28 passing findings into false Fails, so the
-   prompt now matches on the setpoint SET and demotes a pure labelling
-   difference to low-severity Needs Review.
+   prompt now matches on the setpoint SET. A pure labelling difference is
+   PASS with the difference noted in evidence — not Needs Review, because a
+   check that fires on every planset using a vendor's own element numbering
+   is the miscalibration the 2026-08-03 audit condemned.
 
 Run: PYTHONPATH=backend python backend/scripts/test_relay_setpoints.py
 """
@@ -28,7 +30,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.gemini_analyzer import _RELAY_SETTINGS_PROMPT as P  # noqa: E402
+from app.gemini_analyzer import _RELAY_SETTINGS_PROMPT as _RAW  # noqa: E402
+
+P = _RAW
+# Assertions on prompt wording must survive line wrapping.
+FLAT = re.sub(r"\s+", " ", _RAW)
 
 _FAILS: list[str] = []
 
@@ -90,19 +96,23 @@ check("UF2 appears in 2 tables", len(R.get("UF2", [])) == 2)
 
 print("Matching is by VALUE, not by element label:")
 check("prompt tells the model to match on setpoint values",
-      "SETPOINT VALUES, not on the element label" in P)
+      "SETPOINT VALUES, not on the element label" in FLAT)
 check("prompt states IEEE does not fix element numbering",
-      "does NOT fix which element number" in P)
+      "does NOT fix which element number" in FLAT)
 check("required underfrequency set is stated explicitly",
       "58.5 Hz / 300 s" in P and "56.5 Hz / 0.16 s" in P)
 check("required overfrequency set is stated explicitly",
       "61.2 Hz / 300 s" in P and "62.0 Hz / 0.16 s" in P)
-check("a transposed label is Needs Review, never a Fail",
-      "never a Fail" in P and "Needs Review at LOW severity" in P)
+check("a transposed label alone is never Fail or Needs Review",
+      "Never report a labelling difference alone as a Fail or a Needs Review" in FLAT)
+check("element numbering is explicitly irrelevant to the verdict",
+      "Element numbering is IRRELEVANT to this verdict" in FLAT)
+check("the three status branches are declared non-overlapping",
+      "these branches do not overlap" in FLAT)
 check("Fail is reserved for a missing or deviating trip point",
       "MISSING" in P and "DEVIATES" in P)
 check("evidence must name which required point each value satisfies",
-      "which required point each one satisfies" in P)
+      "which required point each one satisfies" in FLAT)
 
 print("Enumerated registry (when relay is enumerated) must agree with the standard:")
 # The draft registry carried the SAME inverted UF pairing as the prompt, in 4

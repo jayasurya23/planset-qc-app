@@ -1316,12 +1316,20 @@ So: confirm the required SET of trip points is present with the correct
 magnitude AND clearing time —
   underfrequency: one at 58.5 Hz / 300 s and one at 56.5 Hz / 0.16 s
   overfrequency:  one at 61.2 Hz / 300 s and one at 62.0 Hz / 0.16 s
-Report Fail only when a required trip point is MISSING, or its magnitude or
-clearing time DEVIATES from the value above. If every required point is
-present and correct but the element numbering is transposed relative to this
-table, that is Needs Review at LOW severity ("labelling differs from IEEE
-1547 numbering; protection is correct"), never a Fail. Say in the evidence
-which values you found and which required point each one satisfies.
+STATUS, and these branches do not overlap:
+  PASS  = every required trip point is present with the correct magnitude AND
+          clearing time. Element numbering is IRRELEVANT to this verdict. If
+          the numbering differs from the table above, still PASS and say so in
+          the evidence ("58.5 Hz / 300 s is labelled UF2 on this sheet;
+          protection is correct, numbering differs from IEEE 1547").
+  FAIL  = a required trip point is MISSING, or its magnitude or clearing time
+          DEVIATES from the value above.
+  NEEDS REVIEW = a value is present but you cannot read it, so you cannot tell
+          whether it deviates. Name the value you could not read.
+Never report a labelling difference alone as a Fail or a Needs Review — a
+correctly protected planset must not be flagged for using its vendor's element
+numbering. Say in the evidence which values you found and which required point
+each one satisfies.
 
 **STEP 2 — Recloser Settings — Read and Validate against IEEE 1547:**
 
