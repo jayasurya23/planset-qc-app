@@ -201,6 +201,38 @@ check("unknown check has no registry title",
 check("unregistered family has no registry title",
       ci.title_for("ai_sld", "anything") is None)
 
+print("A check that states its own status ladder governs itself:")
+# Three separate reviews caught the framework's generic absence line being
+# appended AFTER a check's own ladder, giving the model two instructions that
+# can disagree — and the generic one wins by coming last. 8 live grounding
+# checks and 16 proposed relay checks were affected.
+LADDERED = """
+families:
+  grounding:
+    - id: with_ladder
+      title: Has its own ladder
+      absence_is: defect
+      instruction: |
+        Read the thing.
+        PASS = it is right. FAIL = it is wrong.
+        NEEDS REVIEW = cannot tell. DEFERRED = no such sheet here.
+    - id: without_ladder
+      title: States no ladder
+      absence_is: defect
+      instruction: Read the thing and compare it to the table.
+"""
+load_fixture(LADDERED)
+blk = ci.checklist_block("grounding")
+after_own = blk.split("[check_id: with_ladder]")[1].split("[check_id:")[0]
+after_bare = blk.split("[check_id: without_ladder]")[1]
+check("a check with its own ladder gets NO generic absence line",
+      "If absent:" not in after_own)
+check("a check without one still gets the default",
+      "If absent:" in after_bare)
+check("the check's own ladder still reaches the model",
+      "DEFERRED = no such sheet here" in after_own)
+load_fixture(FIXTURE)
+
 print("The prompt block is the v4-style contract:")
 block = ci.checklist_block("grounding")
 check("ids appear verbatim for the model to echo",
