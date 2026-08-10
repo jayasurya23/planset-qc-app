@@ -104,6 +104,44 @@ check("Fail is reserved for a missing or deviating trip point",
 check("evidence must name which required point each value satisfies",
       "which required point each one satisfies" in P)
 
+print("Enumerated registry (when relay is enumerated) must agree with the standard:")
+# The draft registry carried the SAME inverted UF pairing as the prompt, in 4
+# of its 37 checks. Enumeration replaces the hand-written prompt entirely, so a
+# registry that reverts the values would silently undo the fix above. This guard
+# is mechanical on purpose — it should not depend on a reviewer noticing.
+from app import check_ids as ci  # noqa: E402
+
+# (element, required magnitude, required clearing time)
+IEEE_1547_CAT_I = (
+    ("UF1", "58.5", "300"), ("UF2", "56.5", "0.16"),
+    ("OF1", "61.2", "300"), ("OF2", "62.0", "0.16"),
+    ("OV1", "1.10", "2.0"), ("OV2", "1.20", "0.16"),
+    ("UV1", "0.70", "2.0"), ("UV2", "0.45", "0.16"),
+)
+# Pairings that are WRONG — the inversion this file exists to prevent.
+FORBIDDEN = (("UF1", "56.5"), ("UF2", "58.5"),
+             ("OF1", "62.0"), ("OF2", "61.2"))
+
+relay_checks = ci.checks_for("relay")
+if not relay_checks:
+    print("  SKIP  relay not enumerated yet — guard is armed for when it is")
+else:
+    joined = " ".join((c.instruction or "") + " " + (c.title or "")
+                      for c in relay_checks)
+    for elem, wrong in FORBIDDEN:
+        near = re.search(
+            rf"{elem}[^.\n]{{0,90}}{re.escape(wrong)}|{re.escape(wrong)}[^.\n]{{0,90}}{elem}",
+            joined)
+        check(f"registry never pairs {elem} with {wrong}", near is None)
+    for elem, mag, _t in IEEE_1547_CAT_I:
+        mentions = [c for c in relay_checks
+                    if elem in ((c.instruction or "") + (c.title or ""))]
+        if mentions:
+            ok = any(mag in (c.instruction or "") for c in mentions)
+            check(f"registry states {elem} = {mag}", ok)
+    check("registry keeps value-based matching, not label-based",
+          "element number" in joined.lower() or "setpoint value" in joined.lower())
+
 print()
 if _FAILS:
     print(f"FAILED ({len(_FAILS)}): {_FAILS}")
