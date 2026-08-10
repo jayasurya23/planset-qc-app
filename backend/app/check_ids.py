@@ -105,6 +105,13 @@ _ABSENCE_RULE = {
 }
 
 
+# A check that spells out what PASS / FAIL / NEEDS REVIEW / DEFERRED mean for
+# its own subject governs itself; the family-wide absence default is only for
+# checks that say nothing.
+_STATES_OWN_LADDER = re.compile(
+    r"(?mi)(STATUS LADDER|^\s*[-*]?\s*(PASS|FAIL|NEEDS\s+REVIEW|DEFERRED)\s*[:=])")
+
+
 @dataclass(frozen=True)
 class CheckId:
     id: str
@@ -233,8 +240,15 @@ def checklist_block(family: str) -> str:
             lines.append(f"   Verify: {c.instruction}")
         if c.nec_ref:
             lines.append(f"   Reference: {c.nec_ref}")
+        # Only supply the generic absence rule to checks that do NOT state
+        # their own. A check carrying an explicit ladder has already decided
+        # what each status means for its own subject, in far more detail than
+        # a family-wide default can — appending the default after it gives the
+        # model two instructions that can disagree, and the generic one is the
+        # louder because it comes last. Two independent reviews caught this
+        # exact conflict on 16 relay checks and 8 live grounding checks.
         rule = _ABSENCE_RULE.get(c.absence_is)
-        if rule:
+        if rule and not _STATES_OWN_LADDER.search(c.instruction):
             lines.append(f"   If absent: {rule}")
     lines += [
         "",
