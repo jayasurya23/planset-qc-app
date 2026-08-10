@@ -519,6 +519,21 @@ def _search_page_multi(page: fitz.Page, needles: list[str]) -> list[fitz.Rect]:
     rects: list[fitz.Rect] = []
     seen: set[tuple[float, float, float, float]] = set()
 
+    # ── Coordinate space ────────────────────────────────────────────────
+    # search_for() returns rectangles in the page's UNROTATED (MediaBox)
+    # space, but everything downstream — get_pixmap, page.rect clamping, the
+    # x2 scale onto the rendered image, and parse_ai_bbox — works in DISPLAY
+    # space. On a rotated page those are transposed, so the rects landed
+    # outside the image and the highlight/snippet pointed at nothing.
+    #
+    # This is not an edge case for this corpus: 1,257 of 1,267 production
+    # pages (99%) carry /Rotate 270, and 39% of text matches on a sampled
+    # sheet resolved off-canvas (e.g. 'E-101' at y=2410 scaled to y=4820 on a
+    # 3456px-tall image). Applying the page's own rotation matrix here — at
+    # the single point where these rects are produced — takes that to 0%.
+    # It is an identity transform on unrotated pages.
+    rotation = page.rotation_matrix
+
     def _add_matches(term: str) -> bool:
         """Append all matches for ``term`` (deduped). Return True if any added."""
         try:
@@ -527,6 +542,8 @@ def _search_page_multi(page: fitz.Page, needles: list[str]) -> list[fitz.Rect]:
             matches = []
         added = False
         for r in matches:
+            r = fitz.Rect(r) * rotation
+            r.normalize()  # a 90/270 transform can invert x0/x1 or y0/y1
             key = (round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1))
             if key in seen:
                 continue
