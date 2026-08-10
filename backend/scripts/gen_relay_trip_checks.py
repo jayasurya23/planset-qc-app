@@ -43,7 +43,17 @@ TRIP_FUNCTIONS = [
     ("UF2", "81U-2", "frequency", "56.5 Hz",  "0.16 s"),
 ]
 
-DEVICES = [("relay", "recloser"), ("inverter", "inverter")]
+# The grid-side device is NOT always a recloser. Production emits both
+# "Recloser OV2 IEEE 1547 Cat I" and "Relay OV2 setting vs IEEE 1547-2018
+# Category I", and on an interconnection using a switchgear relay (SEL-351/751)
+# the ladder's branch 1 would find no "recloser" table and silently Defer all
+# eight grid-side checks — a finding that never appears, which is the failure
+# mode that reaches a construction site. The rest of the registry already says
+# "grid-side protective device (recloser or switchgear relay)".
+DEVICES = [
+    ("relay", "grid-side protective device (recloser or switchgear relay)"),
+    ("inverter", "inverter"),
+]
 
 
 # Turning the shared procedure from "about THIS check" into "about whichever
@@ -54,22 +64,39 @@ DEVICES = [("relay", "recloser"), ("inverter", "inverter")]
 # tokens. Order matters — longest phrases first.
 _GENERIC_PHRASES = [
     ("no {DEVICE} is shown", "that device is not shown"),
-    ("{DEVICE} settings table", "settings table for the device named in the check"),
-    ("{DEVICE} settings tables", "settings tables for the device named in the check"),
-    ("on the {DEVICE}", "on that device"),
-    ("the {DEVICE}", "that device"),
-    ("a {DEVICE}", "that device"),
+    ("{DEVICE} settings tables", "settings tables for this check's device"),
+    ("{DEVICE} settings table", "settings table for this check's device"),
+    ("on the {DEVICE}", "on this check's device"),
+    ("the {DEVICE}", "this check's device"),
+    ("a {DEVICE}", "this check's device"),
     ("{DEVICE} R-1", "recloser R-1"),
     ("{DEVICE} SMA SC 4600 UP", "inverter SMA SC 4600 UP"),
 ]
 _GENERIC = {
-    "{DEVICE}": "the device named in the check",
-    "{ELEMENT}": "the element named in the check",
-    "{ANSI}": "that element's ANSI number",
-    "{QUANTITY}": "the quantity named in the check",
+    "{DEVICE}": "this check's device",
+    "{ELEMENT}": "this check's element",
+    "{ANSI}": "this check's ANSI number",
+    "{QUANTITY}": "this check's quantity",
     "{MAGNITUDE}": "the magnitude stated in the check",
     "{TIME}": "the maximum clearing time stated in the check",
 }
+
+# STEP 2's label fallback let two checks grade the SAME row. On a table with
+# 58.5 Hz / 300 s labelled "UF2" and a genuinely wrong 57.0 Hz / 0.16 s labelled
+# "UF1", relay_uf1 matched 58.5 by value and PASSED it, while relay_uf2 found no
+# 56.5 row, fell back to the row LABELLED "UF2" — the same row — and FAILED it.
+# One row Passed and Failed at once, and the actually defective row graded by
+# nobody: a reproducible false Fail AND a missed protection defect on one
+# drawing, on exactly the vendor-numbered tables this redesign exists to handle.
+_FALLBACK_OLD = ("Only if no row carries that magnitude, fall back to the row "
+                 "LABELLED {ELEMENT}.")
+_FALLBACK_NEW = (
+    "Only if no row carries that magnitude, fall back to the row LABELLED "
+    "{ELEMENT} — and ONLY IF that row was not already matched by value to a "
+    "different required trip point in the same table. A row that satisfies "
+    "another required point is claimed by that point and is NOT a candidate "
+    "here; treat it as though it were absent. If no unclaimed row remains, "
+    "there is no candidate row.")
 
 
 def build_preamble(template: dict) -> str:
@@ -81,6 +108,27 @@ def build_preamble(template: dict) -> str:
     setpoint differ, and those stay in the per-check line.
     """
     body = template["instruction_template"]
+
+    # Close the double-grading hole BEFORE generalizing, while {ELEMENT} is
+    # still a placeholder.
+    if _FALLBACK_OLD in body:
+        body = body.replace(_FALLBACK_OLD, _FALLBACK_NEW, 1)
+    else:
+        print("WARNING: STEP 2 fallback wording not found — the double-grading "
+              "hole may be unpatched. Check the template.")
+
+    # Drop the template's opening "Grade the {DEVICE} ..." sentence. It names
+    # what to grade, which is per-check content that each check's own line
+    # already carries; generalizing it produced unreadable text ("Grade that
+    # device the quantity named in the check trip point the element ...").
+    # The shared procedure should start at STEP 1.
+    step1 = body.find("STEP 1")
+    if step1 > 0:
+        body = body[step1:]
+    else:
+        print("WARNING: could not find STEP 1 — preamble may still carry a "
+              "per-check opening sentence.")
+
     for phrase, generic in _GENERIC_PHRASES:
         body = body.replace(phrase, generic)
     for ph, generic in _GENERIC.items():

@@ -151,7 +151,15 @@ def main() -> int:
     if isinstance(data, dict) and data.get("open_findings_guidance"):
         guidance[args.family] = str(data["open_findings_guidance"]).strip()
     preambles = current.get("preamble") or {}
-    if args.preamble:
+    # Prefer the preamble carried INSIDE the authored artefact. Taking it only
+    # from a separate --preamble file let the reviewed bundle and the compiled
+    # registry diverge silently — the shared procedure grades all 16 trip
+    # checks, so a stale copy there is not a cosmetic difference.
+    if isinstance(data, dict) and data.get("preamble"):
+        preambles[args.family] = str(data["preamble"]).strip()
+        if args.preamble:
+            print("NOTE: artefact carries its own preamble; --preamble ignored.")
+    elif args.preamble:
         preambles[args.family] = Path(args.preamble).read_text(encoding="utf-8").strip()
     doc = {"families": families}
     if preambles:
