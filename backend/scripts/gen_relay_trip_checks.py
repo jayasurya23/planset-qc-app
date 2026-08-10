@@ -46,6 +46,42 @@ TRIP_FUNCTIONS = [
 DEVICES = [("relay", "recloser"), ("inverter", "inverter")]
 
 
+# Phrases that turn the shared procedure from "about THIS check" into "about
+# whichever check cites it", so it can be stated once for the whole family.
+_GENERIC = {
+    "{DEVICE}": "the device named in the check",
+    "{ELEMENT}": "the element named in the check",
+    "{ANSI}": "that element's ANSI number",
+    "{QUANTITY}": "the quantity named in the check",
+    "{MAGNITUDE}": "the magnitude stated in the check",
+    "{TIME}": "the maximum clearing time stated in the check",
+}
+
+
+def build_preamble(template: dict) -> str:
+    """The grading procedure, stated ONCE for the family.
+
+    Substituting each check's specifics into its own copy produced 16 blocks of
+    ~9,200 characters — 143,000 for one call, three times the pre-enumeration
+    size. The procedure is identical across all 16; only the element, device and
+    setpoint differ, and those stay in the per-check line.
+    """
+    body = template["instruction_template"]
+    for ph, generic in _GENERIC.items():
+        body = body.replace(ph, generic)
+    both_tables = "\n\n".join(
+        t for t in (template.get("category_table_voltage", ""),
+                    template.get("category_table_frequency", "")) if t)
+    body = body.replace("{CATEGORY_TABLE}", both_tables)
+    header = (
+        "=== SHARED TRIP-POINT PROCEDURE ===\n"
+        "Every trip-point check below is graded by this one procedure. Read it "
+        "once and apply it to each check using that check's own device, "
+        "element and setpoint.\n\n"
+    )
+    return header + body
+
+
 def build(template: dict, round1: dict) -> list[dict]:
     """Render 16 checks, carrying each id's aliases forward from round 1."""
     prior = {c["id"]: c for c in round1.get("checks", [])}
@@ -74,10 +110,20 @@ def build(template: dict, round1: dict) -> list[dict]:
                 "{TIME}": time,
                 "{CATEGORY_TABLE}": tables[quantity],
             }
-            instruction = tmpl
+            # Only the distinguishing facts; the procedure lives in the
+            # family preamble rendered once above the checklist.
+            instruction = (
+                f"Grade the {device_word} {quantity} trip point {elem} ({ansi}). "
+                f"Its IEEE 1547-2018 Category I default is {magnitude} with a "
+                f"maximum clearing time of {time}. Apply the SHARED TRIP-POINT "
+                f"PROCEDURE stated above in full — establish the applicable "
+                f"abnormal operating performance category first, match the "
+                f"candidate row by SETPOINT VALUE rather than element label, "
+                f"treat the clearing time as a maximum, and use the ordered "
+                f"status ladder. Grade only this one point and only on the "
+                f"{device_word}.")
             title = title_tmpl
             for k, v in subs.items():
-                instruction = instruction.replace(k, v)
                 title = title.replace(k, v)
             if "{" in instruction:
                 missing.append(f"{cid}: unsubstituted placeholder")
@@ -105,6 +151,7 @@ def main() -> int:
     ap.add_argument("--template", required=True)
     ap.add_argument("--round1", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--preamble-out", required=True)
     a = ap.parse_args()
 
     template = json.loads(Path(a.template).read_text(encoding="utf-8"))
@@ -127,8 +174,14 @@ def main() -> int:
     if any(not c["aliases"] for c in checks):
         print("\nNOTE: some checks carry no aliases — their production names "
               "would stop resolving. Verify against the round-1 registry.")
+    pre = build_preamble(template)
+    Path(a.preamble_out).write_text(pre, encoding="utf-8")
     Path(a.out).write_text(json.dumps({"checks": checks}, indent=1), encoding="utf-8")
-    print(f"\nwrote {a.out}")
+    print(f"\nshared preamble : {len(pre):>7,} chars (rendered ONCE per family)")
+    print(f"16 check lines  : {total:>7,} chars")
+    print(f"combined        : {len(pre) + total:>7,} chars — against "
+          f"{len(pre) * 16:,} if the procedure were repeated per check")
+    print(f"wrote {a.out} and {a.preamble_out}")
     return 0
 
 
