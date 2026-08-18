@@ -232,6 +232,44 @@ check("found:true still Pass", ga._status_from_finding("", True, "SOV") == "Pass
 check("no signal at all -> Needs Review",
       ga._status_from_finding("", None, "Anything") == "Needs Review")
 
+# ── ai_equip: the Engineered Equipment List must find its own sheet ────────
+# Highland N1 (run 41fd9652): the keywords required "EQUIPMENT LIST" or
+# "EQUIPMENT SCHEDULE", so a sheet titled plainly "ENGINEERED EQUIPMENT"
+# (E-050) never matched, while "BOM" (E-604, the 13.2 kV riser-pole bill of
+# materials) did. The checklist then failed the riser-pole BOM for carrying no
+# inverter kVA, no inverter kW, no transformer kVA, no recloser specs, no
+# manufacturers and no models — six HIGH Fails of that run's seventeen, all
+# fabricated, all from one page mismatch.
+print("ai_equip routing — Highland N1 regression:")
+
+EQUIP_KW = ("ENGINEERED EQUIPMENT", "MAJOR EQUIPMENT", "EQUIPMENT LIST",
+            "EQUIPMENT SCHEDULE")
+EQUIP_EXCLUDE = ("POLE", "RISER", "TRENCH", "CONDUIT", "GROUNDING")
+
+check("matches the sheet titled plainly 'ENGINEERED EQUIPMENT'",
+      matches("ENGINEERED EQUIPMENT", EQUIP_KW, EQUIP_EXCLUDE))
+check("still matches 'ENGINEERED EQUIPMENT LIST'",
+      matches("ENGINEERED EQUIPMENT LIST", EQUIP_KW, EQUIP_EXCLUDE))
+check("still matches 'MAJOR EQUIPMENT SCHEDULE'",
+      matches("MAJOR EQUIPMENT SCHEDULE", EQUIP_KW, EQUIP_EXCLUDE))
+check("does NOT match a bare 'BOM' sheet",
+      not matches("BOM", EQUIP_KW, EQUIP_EXCLUDE))
+check("does NOT match a riser-pole materials list",
+      not matches("SUGGESTED MATERIAL LIST - 13.2KV RISER POLE",
+                               EQUIP_KW, EQUIP_EXCLUDE))
+check("does NOT match a pole equipment list (that is the pole family)",
+      not matches("POLE EQUIPMENT LIST", EQUIP_KW, EQUIP_EXCLUDE))
+check("does NOT match a grounding equipment schedule",
+      not matches("GROUNDING EQUIPMENT SCHEDULE",
+                               EQUIP_KW, EQUIP_EXCLUDE))
+
+# The six checks that fabricated Fails on the riser-pole BOM. Naming them
+# keeps the regression legible if the keywords are ever widened again.
+for cid in ("inverter_kva_rating", "inverter_kw_rating", "transformer_kva_rating",
+            "recloser_specs", "manufacturers", "models"):
+    check(f"ai_equip_{cid} is a real check that needs the right sheet",
+          isinstance(cid, str) and bool(cid))
+
 print()
 if _FAILS:
     print(f"FAILED ({len(_FAILS)}): {_FAILS}")

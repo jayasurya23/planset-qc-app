@@ -134,9 +134,9 @@ def _normalize(name: str) -> str:
     return text
 
 
-@functools.lru_cache(maxsize=1)
-def _load_guidance() -> dict[str, str]:
-    """Per-family open_findings guidance from the YAML `guidance:` block.
+@functools.lru_cache(maxsize=8)
+def _load_section(key: str) -> dict[str, str]:
+    """Per-family free text from a top-level YAML block (`guidance`, `preamble`).
 
     Without this the family's own escape-hatch wording — which names the kinds
     of defect the enumerated list cannot anticipate — is compiled away and the
@@ -150,7 +150,7 @@ def _load_guidance() -> dict[str, str]:
         raw = yaml.safe_load(_REGISTRY_PATH.read_text(encoding="utf-8")) or {}
     except Exception:  # noqa: BLE001
         return {}
-    return {k: str(v).strip() for k, v in (raw.get("guidance") or {}).items() if v}
+    return {k: str(v).strip() for k, v in (raw.get(key) or {}).items() if v}
 
 
 @functools.lru_cache(maxsize=1)
@@ -199,7 +199,7 @@ def _clear_caches() -> None:
     """Drop every memoized view of the registry (tests swap the file)."""
     _load.cache_clear()
     _lookup.cache_clear()
-    _load_guidance.cache_clear()
+    _load_section.cache_clear()
 
 
 def family_for_prefix(prefix: str) -> str | None:
@@ -221,7 +221,18 @@ def checklist_block(family: str) -> str:
     checks = checks_for(family)
     if not checks:
         return ""
-    lines = [
+    lines: list[str] = []
+    # A procedure shared by many checks belongs here ONCE. Relay's 16 trip
+    # checks differ only in device, element and setpoint, but each carried the
+    # full 7,700-character grading procedure plus a reference table: 143,000
+    # characters (~36k tokens) for one call, against 47,000 before enumeration.
+    # Stating the shared part once and leaving each check its distinguishing
+    # facts cuts that by an order of magnitude and stops sixteen near-identical
+    # blocks competing for the model's attention.
+    preamble = _load_section("preamble").get(family)
+    if preamble:
+        lines += [preamble, ""]
+    lines += [
         "=== CHECKS ===",
         "Answer EVERY check below, exactly once, using its check_id verbatim in",
         'the "check" field. Do NOT invent, rename, re-case, pluralise or',
@@ -266,7 +277,7 @@ def checklist_block(family: str) -> str:
     # enumerated list cannot anticipate. Dropping it would leave only the
     # generic sentence above and weaken the exploratory rate, which is the
     # release gate against enumeration silently narrowing coverage.
-    guidance = _load_guidance().get(family)
+    guidance = _load_section("guidance").get(family)
     if guidance:
         lines += ["", guidance]
     return "\n".join(lines)

@@ -1316,12 +1316,20 @@ So: confirm the required SET of trip points is present with the correct
 magnitude AND clearing time —
   underfrequency: one at 58.5 Hz / 300 s and one at 56.5 Hz / 0.16 s
   overfrequency:  one at 61.2 Hz / 300 s and one at 62.0 Hz / 0.16 s
-Report Fail only when a required trip point is MISSING, or its magnitude or
-clearing time DEVIATES from the value above. If every required point is
-present and correct but the element numbering is transposed relative to this
-table, that is Needs Review at LOW severity ("labelling differs from IEEE
-1547 numbering; protection is correct"), never a Fail. Say in the evidence
-which values you found and which required point each one satisfies.
+STATUS, and these branches do not overlap:
+  PASS  = every required trip point is present with the correct magnitude AND
+          clearing time. Element numbering is IRRELEVANT to this verdict. If
+          the numbering differs from the table above, still PASS and say so in
+          the evidence ("58.5 Hz / 300 s is labelled UF2 on this sheet;
+          protection is correct, numbering differs from IEEE 1547").
+  FAIL  = a required trip point is MISSING, or its magnitude or clearing time
+          DEVIATES from the value above.
+  NEEDS REVIEW = a value is present but you cannot read it, so you cannot tell
+          whether it deviates. Name the value you could not read.
+Never report a labelling difference alone as a Fail or a Needs Review — a
+correctly protected planset must not be flagged for using its vendor's element
+numbering. Say in the evidence which values you found and which required point
+each one satisfies.
 
 **STEP 2 — Recloser Settings — Read and Validate against IEEE 1547:**
 
@@ -2963,12 +2971,26 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         )
 
     # 6 ── Equipment List ────────────────────────────────────────────────
-    eq = find_pages("EQUIPMENT LIST", "EQUIPMENT SCHEDULE",
-                    "BOM", "BILL OF MATERIAL")
-    if eq:
+    # This checklist asks for inverter kVA/kW, transformer kVA, recloser make
+    # and interrupting rating, manufacturers and model numbers — the contents
+    # of an ENGINEERED EQUIPMENT list. On Highland N1 the keywords missed the
+    # sheet actually titled "ENGINEERED EQUIPMENT" (E-050, no "LIST" or
+    # "SCHEDULE" in the title) and matched a sheet titled "BOM" (E-604, the
+    # 13.2 kV riser-pole bill of materials) instead, then failed it for
+    # carrying no inverter, no transformer and no recloser. Six HIGH Fails out
+    # of that run's seventeen came from that one mismatch.
+    #
+    # A pole BOM is a materials take-off, not an equipment schedule, so the
+    # generic bill-of-materials keywords are excluded rather than widened.
+    eq = find_pages("ENGINEERED EQUIPMENT", "MAJOR EQUIPMENT", "EQUIPMENT LIST",
+                    "EQUIPMENT SCHEDULE",
+                    exclude=("POLE", "RISER", "TRENCH", "CONDUIT", "GROUNDING"))
+    eq_page = claim_page(eq, "ai_equip", "Engineered Equipment List",
+                         "Equipment List Review")
+    if eq_page:
         all_issues.extend(
             _safe_call(
-                _gemini_page_check, doc, eq[0], _prompt(_EQUIPMENT_LIST_PROMPT),
+                _gemini_page_check, doc, eq_page, _prompt(_EQUIPMENT_LIST_PROMPT),
                 run_id, run_dir, "Engineered Equipment List", "ai_equip", "Equipment List Review",
             )
         )
