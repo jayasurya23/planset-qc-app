@@ -2971,12 +2971,26 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         )
 
     # 6 ── Equipment List ────────────────────────────────────────────────
-    eq = find_pages("EQUIPMENT LIST", "EQUIPMENT SCHEDULE",
-                    "BOM", "BILL OF MATERIAL")
-    if eq:
+    # This checklist asks for inverter kVA/kW, transformer kVA, recloser make
+    # and interrupting rating, manufacturers and model numbers — the contents
+    # of an ENGINEERED EQUIPMENT list. On Highland N1 the keywords missed the
+    # sheet actually titled "ENGINEERED EQUIPMENT" (E-050, no "LIST" or
+    # "SCHEDULE" in the title) and matched a sheet titled "BOM" (E-604, the
+    # 13.2 kV riser-pole bill of materials) instead, then failed it for
+    # carrying no inverter, no transformer and no recloser. Six HIGH Fails out
+    # of that run's seventeen came from that one mismatch.
+    #
+    # A pole BOM is a materials take-off, not an equipment schedule, so the
+    # generic bill-of-materials keywords are excluded rather than widened.
+    eq = find_pages("ENGINEERED EQUIPMENT", "MAJOR EQUIPMENT", "EQUIPMENT LIST",
+                    "EQUIPMENT SCHEDULE",
+                    exclude=("POLE", "RISER", "TRENCH", "CONDUIT", "GROUNDING"))
+    eq_page = claim_page(eq, "ai_equip", "Engineered Equipment List",
+                         "Equipment List Review")
+    if eq_page:
         all_issues.extend(
             _safe_call(
-                _gemini_page_check, doc, eq[0], _prompt(_EQUIPMENT_LIST_PROMPT),
+                _gemini_page_check, doc, eq_page, _prompt(_EQUIPMENT_LIST_PROMPT),
                 run_id, run_dir, "Engineered Equipment List", "ai_equip", "Equipment List Review",
             )
         )
