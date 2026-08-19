@@ -230,11 +230,19 @@ def guess_sheet_title(page: fitz.Page, text: str, sheet_number: str | None) -> s
     # Last resort: the strict assembly above found nothing usable, so fall back
     # to the old lenient single-line pick. A weak title still gives the router
     # something to match; None gives it nothing and the sheet goes unreviewed.
-    for idx, line in enumerate(lines):
-        if line == sheet_number:
+    #
+    # BOTH lists, footer and whole page. Searching only the footer regressed
+    # Highland N1 E-050, whose sheet number does not appear in the footer at
+    # all: the strict pass returned None, the footer-only fallback could not
+    # see the number, and the equipment checklist lost the sheet it had just
+    # been fixed to find.
+    for source in (lines, all_lines):
+        for idx, line in enumerate(source):
+            if normalize_spaces(line) != sheet_number:
+                continue
             for nb in (idx + 1, idx - 1):
-                if 0 <= nb < len(lines):
-                    cand = normalize_spaces(lines[nb])
+                if 0 <= nb < len(source):
+                    cand = normalize_spaces(source[nb])
                     if cand and cand.upper() not in _TITLE_SKIP                             and not _SHEET_TOKEN_RE.fullmatch(cand):
                         return cand[:90]
     return None

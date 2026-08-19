@@ -2882,11 +2882,27 @@ CRITICAL FORMATTING RULES FOR ALL RESPONSES:
         the Grounding check), which would emit false "pad dimensions missing"
         fails on a sheet that legitimately shows none.
         """
-        return [
-            p.number
-            for p in pages
-            if _sheet_title_matches(p.sheet_title or "", keywords, exclude)
-        ]
+        # Best match first, NOT page order. Highland N1 carries both
+        # "FENCE EQUIPMENT PAD AREA" (p14) and "EQUIPMENT AREA LAYOUT" (p15);
+        # taking the first page gave the equipment-area checklist the FENCE
+        # plan and produced eight Fails for missing working clearances, pile
+        # details and an AUX rack on a fence drawing, while the real equipment
+        # area layout went unreviewed. Page order carries no information about
+        # which sheet a checklist is for.
+        scored = []
+        for p in pages:
+            title = p.sheet_title or ""
+            if not _sheet_title_matches(title, keywords, exclude):
+                continue
+            up = title.upper()
+            # Earlier keywords are the more specific ones by convention, and a
+            # keyword covering more of the title means the sheet is ABOUT that
+            # subject rather than mentioning it in passing.
+            hit = next((k for k in keywords if k.upper() in up), "")
+            priority = len(keywords) - list(keywords).index(hit) if hit else 0
+            coverage = len(hit) / max(len(up), 1)
+            scored.append((-(priority + coverage), p.number))
+        return [n for _score, n in sorted(scored)]
 
     # ── Page routing ────────────────────────────────────────────────────
     # A sheet belongs to at most ONE review family. Two families each taking

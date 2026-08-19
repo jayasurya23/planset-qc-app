@@ -116,6 +116,22 @@ check("returns None without a sheet number",
       guess_sheet_title(page, page.get_text("text"), None) is None)
 doc.close()
 
+
+print("A sheet number absent from the footer still yields a title:")
+# Highland N1 E-050 carries its number outside the footer box entirely, so the
+# footer strategies find nothing. The strict assembly then returned None and
+# the equipment checklist lost the sheet it had just been fixed to find. The
+# last-resort fallback must search the whole page, not only the footer.
+doc = fitz.open()
+page = doc.new_page(width=1728, height=1120)
+page.insert_text((200, 200), "E-050", fontsize=11)
+page.insert_text((200, 224), "ENGINEERED EQUIPMENT", fontsize=11)
+page.insert_text((1400, 1000), "RATING", fontsize=11)
+got = guess_sheet_title(page, page.get_text("text"), "E-050")
+check("title found from page body when the footer lacks the number",
+      got is not None and "ENGINEERED EQUIPMENT" in got.upper())
+doc.close()
+
 print()
 if _FAILS:
     print(f"FAILED ({len(_FAILS)}): {_FAILS}")
