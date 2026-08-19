@@ -270,6 +270,46 @@ for cid in ("inverter_kva_rating", "inverter_kw_rating", "transformer_kva_rating
     check(f"ai_equip_{cid} is a real check that needs the right sheet",
           isinstance(cid, str) and bool(cid))
 
+
+# ── Best match wins, not page order (Highland N1 v3 regression) ───────────
+# Fuller sheet titles made first-match-wins untenable: Highland carries both
+# "FENCE EQUIPMENT PAD AREA" (p14) and "EQUIPMENT AREA LAYOUT" (p15). Taking
+# the first page handed the equipment-area checklist a FENCE drawing, which
+# then failed for missing working clearances, pile details and an AUX rack —
+# eight Fails — while the real equipment area layout went unreviewed.
+print("find_pages ranks by specificity, not page number:")
+
+
+def rank(keywords, titles_by_page):
+    scored = []
+    for n, t in titles_by_page.items():
+        up = (t or "").upper()
+        if not matches(t or "", keywords):
+            continue
+        hit = next((k for k in keywords if k.upper() in up), "")
+        priority = len(keywords) - list(keywords).index(hit) if hit else 0
+        scored.append((-(priority + len(hit) / max(len(up), 1)), n))
+    return [n for _s, n in sorted(scored)]
+
+
+EAF = ("EQUIPMENT AREA", "EQUIPMENT PAD", "PAD FEEDER", "EQUIPMENT FEEDER")
+order = rank(EAF, {14: "FENCE EQUIPMENT PAD AREA", 15: "EQUIPMENT AREA LAYOUT"})
+check("the equipment area layout outranks the fence plan", order[0] == 15)
+check("the fence plan is still available, just not first", 14 in order)
+
+# a title that is ABOUT the subject beats one that mentions it in passing
+order = rank(("GROUNDING",), {1: "GROUNDING DIAGRAM",
+                              2: "MODULE BONDING AND GROUNDING DETAILS TYPICAL"})
+check("the grounding diagram outranks a passing mention", order[0] == 1)
+
+# an earlier keyword is the more specific one by convention
+order = rank(("PAD DETAIL", "EQUIPMENT PAD"),
+             {5: "EQUIPMENT PAD AREA", 6: "PAD DETAIL"})
+check("an earlier keyword outranks a later one", order[0] == 6)
+check("ranking is deterministic across calls",
+      rank(EAF, {14: "FENCE EQUIPMENT PAD AREA", 15: "EQUIPMENT AREA LAYOUT"})
+      == rank(EAF, {15: "EQUIPMENT AREA LAYOUT", 14: "FENCE EQUIPMENT PAD AREA"}))
+
 print()
 if _FAILS:
     print(f"FAILED ({len(_FAILS)}): {_FAILS}")
