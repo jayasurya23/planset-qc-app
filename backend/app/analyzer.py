@@ -1772,6 +1772,41 @@ def _check_ids_fingerprint() -> dict:
         return {"families": {}, "sha256": None}
 
 
+# Every planset in the corpus is a direct CAD export: AutoCAD via the pdfplot
+# driver. That matters because sheet numbers, sheet titles and every
+# text-anchored evidence highlight are read out of the text layer AutoCAD
+# writes. A file that has been re-saved or flattened by another application
+# (Bluebeam, Acrobat, an optimiser) may carry a rewritten text layer, and a
+# FLATTENED file additionally bakes reviewer markup INTO the page content,
+# where the title extractor and the highlight search can pick it up as if it
+# were part of the drawing.
+#
+# Un-flattened annotations are harmless: PyMuPDF reads the page content
+# stream, and annotation appearance streams are not part of it. Verified on a
+# 205-markup review copy — no markup text reached the extracted text.
+_CAD_PRODUCERS = ("PDFPLOT", "AUTOCAD", "AUTODESK", "DWG")
+
+
+def pdf_provenance(doc: fitz.Document) -> dict:
+    """What wrote this PDF, and does it look like a direct CAD export."""
+    meta = doc.metadata or {}
+    producer = (meta.get("producer") or "").strip()
+    creator = (meta.get("creator") or "").strip()
+    blob = (producer + " " + creator).upper()
+    annots = 0
+    for i in range(doc.page_count):
+        try:
+            annots += sum(1 for _ in (doc[i].annots() or []))
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "producer": producer or None,
+        "creator": creator or None,
+        "is_cad_export": any(m in blob for m in _CAD_PRODUCERS),
+        "annotation_count": annots,
+    }
+
+
 def analyze_pdf(
     pdf_path: Path,
     project_name: str | None,
@@ -1790,6 +1825,34 @@ def analyze_pdf(
     run_id = str(uuid.uuid4())
     run_dir = pdf_path.parent
     doc = fitz.open(pdf_path)
+
+    provenance = pdf_provenance(doc)
+    if not provenance["is_cad_export"]:
+        issues.append(make_issue(
+            run_id=run_id,
+            item_key="pdf_not_direct_cad_export",
+            category="Drawing Index",
+            title="This PDF was not exported directly from CAD",
+            description=(
+                "[QC] The uploaded file appears to have been re-saved by "
+                "another application rather than exported straight from CAD."
+            ),
+            status="Needs Review",
+            severity="low",
+            evidence=(
+                "Producer: " + str(provenance["producer"] or "not stated")
+                + " | Creator: " + str(provenance["creator"] or "not stated")
+                + ". Every planset reviewed to date was a direct AutoCAD "
+                "export, and sheet numbers, sheet titles and evidence "
+                "highlights are all read from the text layer CAD writes. A "
+                "re-saved or FLATTENED copy can carry a rewritten text layer, "
+                "and flattening additionally merges reviewer markup into the "
+                "page itself, where it can be mistaken for drawing content. "
+                "Prefer uploading the original CAD export. This is a note "
+                "about the file, not a defect in the design."
+            ),
+            confidence=1.0,
+        ))
 
     _progress("parse", "Extracting pages and text...", 15)
     pages = extract_pages(doc)
@@ -2842,6 +2905,9 @@ def analyze_pdf(
         "duration_seconds": duration_seconds,
         "deep_mode": bool(use_deep),
         "design_stage": design_stage,
+        # What wrote the PDF. Makes "the tool got worse on this project"
+        # answerable when a team changes its export or markup workflow.
+        "pdf_provenance": provenance,
         "supporting_docs": supporting_docs or [],
         "call_timings": call_timings_sorted,
         # Per-family dispatch record: pages sent, deep flag, findings returned,
