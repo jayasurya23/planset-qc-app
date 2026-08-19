@@ -113,6 +113,76 @@ _TITLE_SKIP = {
 }
 
 
+# Metadata that sits beside a sheet name in a CAD title block but is not part
+# of it. Matched as a PREFIX so "SCALE: 1\" = 70'" and "DATE: 03/13/26" are
+# both rejected, not just the bare word.
+_TITLE_STOP_PREFIX = (
+    "SCALE", "DATE", "DRAWN", "CHECKED", "APPROVED", "REV", "REVISION",
+    "PROJECT", "CLIENT", "OWNER", "SHEET", "JOB", "DWG", "FILE", "PLOT",
+    "DESIGNED", "ENGINEER", "CONTRACTOR", "NO.", "OF ",
+    # A sheet name never continues into these — they begin a different block
+    # in the title area, and running on into them produced titles like
+    # "MAJOR ENGINEERED EQUIPMENT NOTE: CONTRACTOR TO INFORM...".
+    "NOTE", "NOTES", "LEGEND", "KEYNOTE", "GENERAL NOTE",
+)
+
+
+def _title_line_ok(line: str, first: bool = False) -> bool:
+    """Is this line part of a sheet NAME, rather than title-block metadata?
+
+    CAD title blocks wrap a sheet name over two or three lines, so the name is
+    assembled from consecutive lines that all pass this test.
+    """
+    t = (line or "").strip()
+    if not (2 < len(t) <= 60):
+        return False
+    up = t.upper()
+    if up in _TITLE_SKIP:
+        return False
+    stops = _TITLE_STOP_PREFIX
+    if first:
+        # "GENERAL NOTES" and "LEGEND" are real sheet names. They only signal
+        # the end of a title when they CONTINUE one — "AUXILLARY POWER DIAGRAM
+        # NOTE:" is a title plus the start of a note block.
+        stops = tuple(w for w in stops
+                      if w not in ("NOTE", "NOTES", "LEGEND", "KEYNOTE",
+                                   "GENERAL NOTE"))
+    if any(up.startswith(w) for w in stops):
+        return False
+    letters = sum(c.isalpha() for c in t)
+    # A real sheet name is mostly letters: rejects "1", "03/13/26", "4488",
+    # '1" = 70'' and similar title-block fields that used to become titles.
+    if letters < 3 or letters < len(t) * 0.5:
+        return False
+    if _SHEET_TOKEN_RE.fullmatch(t):
+        return False
+    return True
+
+
+def _gather_title(lines: list[str], idx: int, step: int) -> str | None:
+    """Join up to three consecutive title-like lines starting at *idx*.
+
+    Taking a single adjacent line truncated every wrapped sheet name in the
+    corpus: E-050 read as "MAJOR ENGINEERED" instead of "MAJOR ENGINEERED
+    EQUIPMENT LIST", which is why the equipment checklist could not find its
+    own sheet and graded a riser-pole BOM instead.
+    """
+    parts: list[str] = []
+    i = idx
+    while 0 <= i < len(lines) and len(parts) < 3:
+        line = normalize_spaces(lines[i])
+        if not _title_line_ok(line, first=not parts):
+            break
+        parts.append(line)
+        i += step
+    if not parts:
+        return None
+    if step < 0:
+        parts.reverse()
+    joined = normalize_spaces(" ".join(parts))
+    return joined[:90] or None
+
+
 def guess_sheet_title(page: fitz.Page, text: str, sheet_number: str | None) -> str | None:
     if not sheet_number:
         return None
@@ -123,29 +193,29 @@ def guess_sheet_title(page: fitz.Page, text: str, sheet_number: str | None) -> s
 
     # Strategy 1: look for the sheet number on its own line, title is adjacent
     for idx, line in enumerate(lines):
-        if line == sheet_number and idx > 0:
-            prev_line = normalize_spaces(lines[idx - 1])
-            if prev_line and prev_line.upper() not in _TITLE_SKIP:
-                return prev_line
         if line == sheet_number and idx + 1 < len(lines):
-            nxt = normalize_spaces(lines[idx + 1])
-            if nxt and nxt.upper() not in _TITLE_SKIP:
-                return nxt
+            got = _gather_title(lines, idx + 1, 1)
+            if got:
+                return got
+        if line == sheet_number and idx > 0:
+            got = _gather_title(lines, idx - 1, -1)
+            if got:
+                return got
 
     # Strategy 2: sheet number is embedded in a longer line (e.g. "E-001 SITE PLAN")
     for line in lines:
         if sheet_number in line and line != sheet_number:
             remainder = line.replace(sheet_number, "").strip(" -–—:")
-            if remainder and remainder.upper() not in _TITLE_SKIP:
-                return remainder
+            if remainder and _title_line_ok(remainder):
+                return normalize_spaces(remainder)[:90]
 
     # Strategy 3: search full page text (not just footer)
     all_lines = [line.strip() for line in text.splitlines() if line.strip()]
     for idx, line in enumerate(all_lines):
         if line == sheet_number and idx + 1 < len(all_lines):
-            nxt = normalize_spaces(all_lines[idx + 1])
-            if nxt and nxt.upper() not in _TITLE_SKIP:
-                return nxt
+            got = _gather_title(all_lines, idx + 1, 1)
+            if got:
+                return got
 
     # Strategy 4: look for common sheet title keywords near the footer
     # (the title block often has a dedicated SHEET NAME field)
@@ -153,9 +223,20 @@ def guess_sheet_title(page: fitz.Page, text: str, sheet_number: str | None) -> s
         upper = line.upper()
         if upper in {"SHEET NAME", "SHEET NAME:"}:
             if idx + 1 < len(lines):
-                nxt = normalize_spaces(lines[idx + 1])
-                if nxt and nxt.upper() not in _TITLE_SKIP and not _SHEET_TOKEN_RE.fullmatch(nxt):
-                    return nxt
+                got = _gather_title(lines, idx + 1, 1)
+                if got:
+                    return got
+
+    # Last resort: the strict assembly above found nothing usable, so fall back
+    # to the old lenient single-line pick. A weak title still gives the router
+    # something to match; None gives it nothing and the sheet goes unreviewed.
+    for idx, line in enumerate(lines):
+        if line == sheet_number:
+            for nb in (idx + 1, idx - 1):
+                if 0 <= nb < len(lines):
+                    cand = normalize_spaces(lines[nb])
+                    if cand and cand.upper() not in _TITLE_SKIP                             and not _SHEET_TOKEN_RE.fullmatch(cand):
+                        return cand[:90]
     return None
 
 
