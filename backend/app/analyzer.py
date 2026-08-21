@@ -707,11 +707,28 @@ def _cached_table_cells(page: fitz.Page) -> list[fitz.Rect]:
 
 
 def _cached_text_lines(page: fitz.Page) -> list[fitz.Rect]:
-    """All line-level bounding rects on the page (cached)."""
+    """All line-level bounding rects on the page, in DISPLAY space (cached).
+
+    get_text("dict") reports line bboxes in the page's UNROTATED space, the
+    same space search_for() uses. Its only caller, _line_for_rect, compares
+    them against display-space rects, so on a rotated page the two never
+    line up and the line fallback in _expand_hit silently never fires.
+
+    That is the same coordinate-space defect _search_page_multi carried, and
+    it hides in a fallback rather than in the output: findings inside a
+    detected table still expanded correctly (find_tables returns display
+    space), so only free text — plan notes, dimension callouts, general
+    notes — was affected, and it degraded to a cramped word-level box
+    instead of failing outright. Measured on a rotated sheet: 0 of 6
+    free-text hits expanded before, 6 of 6 after, and the enclosing line for
+    "WORKING CLEARANCE 3'-6\" MIN, NEC 110.26(A)(1)" went from a 76pt
+    fragment to the full 163pt line.
+    """
     cached = getattr(page, "_qc_line_cache", None)
     if cached is not None:
         return cached
     lines: list[fitz.Rect] = []
+    rotation = page.rotation_matrix  # identity on unrotated pages
     try:
         td = page.get_text("dict")
         for block in td.get("blocks", []):
@@ -720,9 +737,11 @@ def _cached_text_lines(page: fitz.Page) -> list[fitz.Rect]:
                 if not bbox:
                     continue
                 try:
-                    lines.append(fitz.Rect(bbox))
+                    rect = fitz.Rect(bbox) * rotation
                 except Exception:
                     continue
+                rect.normalize()  # a 90/270 transform can invert x0/x1 or y0/y1
+                lines.append(rect)
     except Exception:
         pass
     try:
