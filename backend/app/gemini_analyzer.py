@@ -22,7 +22,7 @@ from typing import Any
 
 import fitz
 
-from . import check_ids
+from . import check_ids, confidence
 from .analyzer import (
     PageInfo,
     default_footer_bbox,
@@ -728,16 +728,9 @@ return a placeholder).
 # finding anyway. 96 findings in the production corpus carry one of these
 # phrases; 91 sit at Needs Review, which is honest but unreviewable -- the
 # check did not fail, it never ran.
-_ILLEGIBILITY_RE = re.compile(
-    r"(?i)\b(?:"
-    r"not\s+legible|illegible|not\s+readable|unreadable|"
-    r"cannot\s+be\s+read|can'?t\s+be\s+read|could\s+not\s+be\s+read|"
-    r"too\s+small\s+to\s+read|too\s+small\s+to\s+resolve|"
-    r"unable\s+to\s+read|unable\s+to\s+resolve|"
-    r"resolution\s+(?:is\s+)?too\s+low|not\s+clearly\s+legible"
-    r")\b"
-)
-
+# Detecting the admission and penalising it must never drift apart, so both
+# come from the same place.
+_ILLEGIBILITY_RE = confidence.ILLEGIBILITY_RE
 # One extra vision call per re-read, so cap it. In production this trigger
 # fires about 2.5 times per run, but a pathological sheet must not be able to
 # turn one page into thirty calls.
@@ -2270,8 +2263,22 @@ def _gemini_page_check(
         # exact callouts that triggered the finding.
         snippet_path, preview_path, bbox_dict = None, None, None
         needs_rescue = False
+        text_anchored = False
+        ai_bbox = None
         if status in ("Fail", "Needs Review"):
             hints = _extract_location_hints(finding)
+            # Did the model quote something that is genuinely in the text
+            # layer? On vector PDFs that is the strongest corroboration
+            # available without a human, and it is what separates a finding
+            # that read the drawing from one that reconstructed a plausible
+            # callout. It decides the confidence below.
+            if hints:
+                try:
+                    from .analyzer import _search_page_multi
+                    text_anchored = bool(
+                        _search_page_multi(doc[page_number - 1], hints))
+                except Exception:
+                    text_anchored = False
             # AI-supplied normalized bbox — used as ``fallback_bbox`` so the
             # renderer prefers literal-text matches but always has a focused
             # region to draw when text search fails (paraphrased excerpts,
@@ -2316,7 +2323,12 @@ def _gemini_page_check(
             severity=severity,
             page_number=page_number,
             evidence=full_evidence,
-            confidence=0.72,
+            confidence=confidence.score_ai_finding(
+                evidence=full_evidence,
+                text_anchored=text_anchored,
+                model_bbox=ai_bbox is not None or bbox_dict is not None,
+                cites_supporting_doc=isinstance(src_filename, str) and bool(src_filename),
+            ),
             snippet_path=snippet_path,
             page_preview_path=preview_path,
             bbox=bbox_dict,
@@ -2399,6 +2411,14 @@ def _gemini_page_check(
         before = issue["status"]
         issue["status"] = verdict["status"]
         issue["auto_status"] = verdict["status"]
+        # A magnified look that could actually read the region is real
+        # corroboration, and the illegibility penalty no longer applies.
+        issue["confidence"] = confidence.score_ai_finding(
+            evidence=verdict["evidence"],
+            text_anchored=bool(verdict.get("value")),
+            model_bbox=True,
+            reread_resolved=True,
+        )
         issue["evidence"] = f"{issue.get('evidence') or ''} | {detail}".strip(" |")
         # Re-anchor the artifacts on the region we actually read.
         try:
@@ -2532,8 +2552,18 @@ def _gemini_multi_page_check(
         # page they were actually judged on rather than always at the first.
         ref_page = claimed_page or page_numbers[0]
         snippet_path, preview_path, bbox_dict = None, None, None
+        text_anchored = False
         if status in ("Fail", "Needs Review"):
             hints = _extract_location_hints(finding)
+            # As in the single-page path: a text-layer hit is what separates a
+            # finding that read the drawing from one that invented a callout.
+            if hints:
+                try:
+                    from .analyzer import _search_page_multi
+                    text_anchored = any(
+                        _search_page_multi(doc[pn - 1], hints) for pn in page_numbers)
+                except Exception:
+                    text_anchored = False
             # The model sometimes reports which page it saw the issue on (e.g.
             # "Page 2" or "page_index": 1). Try to pick the right page out of
             # the set before falling back to a hint-based search.
@@ -2599,7 +2629,12 @@ def _gemini_multi_page_check(
             severity=severity,
             page_number=ref_page,
             evidence=full_evidence,
-            confidence=0.72,
+            confidence=confidence.score_ai_finding(
+                evidence=full_evidence,
+                text_anchored=text_anchored,
+                model_bbox=bbox_dict is not None,
+                cites_supporting_doc=isinstance(src_filename, str) and bool(src_filename),
+            ),
             snippet_path=snippet_path,
             page_preview_path=preview_path,
             bbox=bbox_dict,
