@@ -91,17 +91,43 @@ def normalize_spaces(value: str) -> str:
 
 
 def first_sheet_number(page: fitz.Page, text: str) -> str | None:
+    """The sheet number, taken from the title block rather than the drawing.
+
+    get_text("words") reports word rects in the page's AUTHORED space, but the
+    band test and the ordering below are statements about where a token sits on
+    the sheet as DISPLAYED. On a /Rotate 270 page authored y IS display x, so
+    the untransformed version filtered on the wrong axis: "the bottom 35% of
+    the sheet" actually selected "the right 57%", and "bottom-most" meant
+    "right-most". A key-plan cross-reference in the top-right corner therefore
+    outscored the real sheet number, while a token in the genuine bottom-left
+    footer was excluded outright.
+
+    Rotating the rects alone is not enough, and gets it wrong in a new way: the
+    old sort takes the bottom-most token, so a general note low on the left of
+    the drawing then beats the title block. Sheet numbers live in the bottom
+    RIGHT corner on both common title-block layouts -- a right-edge vertical
+    strip and a bottom horizontal band -- so rank by proximity to that corner.
+    """
     words = page.get_text("words")
+    rotation = page.rotation_matrix  # identity on unrotated pages
     candidates = []
     for x0, y0, x1, y1, word, *_ in words:
         token = str(word).strip()
-        if _is_valid_sheet_number(token):
-            candidates.append((x0, y0, x1, y1, token))
+        if not _is_valid_sheet_number(token):
+            continue
+        rect = fitz.Rect(x0, y0, x1, y1) * rotation
+        rect.normalize()  # a 90/270 transform can invert x0/x1 or y0/y1
+        candidates.append((rect, token))
+
     if candidates:
-        footer_candidates = [c for c in candidates if c[1] >= page.rect.height * 0.65]
+        page_rect = page.rect
+        footer_candidates = [c for c in candidates
+                             if c[0].y0 >= page_rect.height * 0.65]
         target = footer_candidates or candidates
-        target.sort(key=lambda c: (c[1], c[0]))
-        return target[-1][4]
+        # Manhattan distance from the token's own bottom-right corner to the
+        # page's. Smallest wins.
+        target.sort(key=lambda c: (page_rect.x1 - c[0].x1) + (page_rect.y1 - c[0].y1))
+        return target[0][1]
 
     matches = [m for m in SHEET_RE.findall(text) if _is_valid_sheet_number(m)]
     return matches[-1] if matches else None
@@ -187,7 +213,20 @@ def guess_sheet_title(page: fitz.Page, text: str, sheet_number: str | None) -> s
     if not sheet_number:
         return None
 
-    footer = default_footer_bbox(page)
+    # default_footer_bbox describes where the title block sits on the page as
+    # DISPLAYED, but get_textbox() clips in the page's AUTHORED space. On the
+    # 99.4% of pages carrying /Rotate 270 the display rect lands off the
+    # authored page entirely, so get_textbox returned "" and the `or text`
+    # fallback silently widened every footer-scoped strategy below into a
+    # whole-page scan. Measured on a production-geometry sheet: 0 characters
+    # before, 63 after -- and the 63 are exactly the title block.
+    #
+    # That is not cosmetic. With the scope dead, a detail callout in the
+    # drawing body that repeats the sheet number wins strategy 1 on content
+    # order alone: a sheet whose real name is MAJOR ENGINEERED EQUIPMENT LIST
+    # read as "SEE DETAIL 3 THIS SHEET", which routes its checklist nowhere.
+    footer = default_footer_bbox(page) * page.derotation_matrix
+    footer.normalize()  # a 90/270 transform can invert x0/x1 or y0/y1
     footer_text = page.get_textbox(footer) or text
     lines = [normalize_spaces(line) for line in footer_text.splitlines() if normalize_spaces(line)]
 
