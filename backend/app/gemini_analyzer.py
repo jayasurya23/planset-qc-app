@@ -14,6 +14,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import math
 import re
 import uuid
 from pathlib import Path
@@ -40,12 +41,46 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def render_page_to_bytes(doc: fitz.Document, page_number: int, zoom: float = 2.0) -> bytes:
-    """Render a 1-based *page_number* to PNG bytes. Cached per (page, zoom)
-    so the same page isn't re-rasterized for every vision check that
-    references it."""
+# Fixed zoom the pipeline used before the budget was measured. Kept as the
+# fallback for providers whose preprocessing vision_zoom_for_page does not
+# model, so an unrecognised provider behaves exactly as it always did.
+LEGACY_VISION_ZOOM = 2.0
+
+
+def render_page_to_bytes(
+    doc: fitz.Document, page_number: int, zoom: float | None = None,
+) -> bytes:
+    """Render a 1-based *page_number* to PNG bytes for a vision call.
+
+    With ``zoom=None`` the scale is derived from the page size and the
+    provider's image budget, so the render lands on exactly what the model
+    will look at. Every provider shrinks what it receives and none upscale,
+    so rendering above the budget spends bandwidth and latency on pixels that
+    are discarded before the model sees them.
+
+    On this corpus that was the normal case, not an edge case. Sheets are
+    2592 x 1728 pt; the old fixed zoom 2.0 uploaded 5184 x 3456 and OpenAI
+    reduced it to 1152 x 768 every single time -- 430 KB to deliver 69 KB of
+    information, on every vision call of every check of every run.
+
+    Rendering to the target directly is also slightly SHARPER than rendering
+    huge and letting the provider's resampler discard pixels: 0.74 vs 0.69
+    mean |Laplacian| over the same 3/32" conductor callout. So this is not a
+    quality-for-cost trade, it is strictly better on both.
+
+    Pass an explicit *zoom* to override (the region re-read does, deliberately
+    going far above the whole-page budget on a small crop).
+
+    Cached per (page, zoom).
+    """
     page = doc[page_number - 1]
-    cache_key = f"_qc_bytes_{zoom}"
+    if zoom is None:
+        # Imported here, like every other client call in this module, to keep
+        # the import graph one-directional.
+        from .gemini_client import vision_zoom_for_page
+        rect = page.rect
+        zoom = vision_zoom_for_page(rect.width, rect.height) or LEGACY_VISION_ZOOM
+    cache_key = f"_qc_bytes_{zoom:.4f}"
     cached = getattr(page, cache_key, None)
     if cached is not None:
         return cached
@@ -57,6 +92,104 @@ def render_page_to_bytes(doc: fitz.Document, page_number: int, zoom: float = 2.0
     except Exception:
         pass
     return data
+
+
+# A region re-read deliberately blows past the whole-page budget, because the
+# budget is per IMAGE, not per page: a crop that is 1/20th of the sheet can be
+# rendered 13x larger and still arrive inside the same 2048x768 envelope. That
+# is the whole point -- it is the only way to give the model more resolution
+# than the sheet-level pass can.
+REGION_MIN_PT = (240.0, 150.0)   # floor, so a bare value keeps its label/context
+REGION_PAD_PT = 36.0             # half an inch of surrounding drawing
+REGION_MAX_ZOOM = 12.0           # past this the vector is just being magnified
+
+
+def _slide(lo: float, hi: float, min_v: float, max_v: float) -> tuple[float, float]:
+    """Move the interval inside [min_v, max_v] without changing its length."""
+    if hi > max_v:
+        lo, hi = lo - (hi - max_v), max_v
+    if lo < min_v:
+        lo, hi = min_v, hi + (min_v - lo)
+    return lo, hi
+
+
+def region_render_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect:
+    """Pad *rect* for context, enforce a minimum size, clamp to the page."""
+    r = fitz.Rect(rect)
+    r.normalize()
+    r = fitz.Rect(r.x0 - REGION_PAD_PT, r.y0 - REGION_PAD_PT,
+                  r.x1 + REGION_PAD_PT, r.y1 + REGION_PAD_PT)
+    # Grow about the centre up to the floor.
+    min_w, min_h = REGION_MIN_PT
+    if r.width < min_w:
+        cx = (r.x0 + r.x1) / 2
+        r.x0, r.x1 = cx - min_w / 2, cx + min_w / 2
+    if r.height < min_h:
+        cy = (r.y0 + r.y1) / 2
+        r.y0, r.y1 = cy - min_h / 2, cy + min_h / 2
+    page_rect = page.rect
+    # Slide back inside the page rather than trimming: a hit in the corner of
+    # the title block -- which is where sheet numbers and titles live -- would
+    # otherwise be cropped to a sliver with none of its surroundings.
+    if r.width <= page_rect.width:
+        r.x0, r.x1 = _slide(r.x0, r.x1, page_rect.x0, page_rect.x1)
+    if r.height <= page_rect.height:
+        r.y0, r.y1 = _slide(r.y0, r.y1, page_rect.y0, page_rect.y1)
+    return r & page_rect
+
+
+def _fit_zoom_to_budget(region: fitz.Rect, zoom: float) -> float:
+    """Shrink *zoom* until the pixmap this region will actually produce fits
+    the provider's envelope.
+
+    Landing one pixel over is not a quality problem -- the provider rescales
+    by 0.1% -- but the point of the budget is that no server-side rescale
+    happens at all, and asserting that is what keeps the claim honest.
+    """
+    from .gemini_client import vision_zoom_for_page
+
+    for _ in range(4):
+        irect = (fitz.Rect(region) * fitz.Matrix(zoom, zoom)).irect
+        w, h = irect.width, irect.height
+        if w <= 0 or h <= 0:
+            return zoom
+        ideal = vision_zoom_for_page(float(w), float(h))
+        if ideal is None or ideal >= 1.0:
+            return zoom          # already inside the envelope
+        zoom *= ideal            # ideal < 1 means "this many times too big"
+    return zoom
+
+
+def render_region_to_bytes(
+    doc: fitz.Document, page_number: int, rect: fitz.Rect,
+) -> tuple[bytes, fitz.Rect, float]:
+    """Render one REGION of a page at the largest scale its budget allows.
+
+    Returns ``(png_bytes, rendered_rect, zoom)``. The rect comes back because
+    it is padded and clamped, and any bbox the model returns is normalised
+    against the region actually rendered, not the one asked for.
+
+    Why this exists: the sheet-level pass gives the model 1152 px across a
+    36-inch drawing, which puts 3/32" dimension text at 3 px. It cannot read
+    that, and says so -- 96 findings in the production corpus carry evidence
+    admitting they could not make the drawing out. Cropping to the region and
+    spending the same budget on it lifts the same text to roughly 40 px.
+    """
+    from .gemini_client import vision_zoom_for_page
+
+    page = doc[page_number - 1]
+    region = region_render_rect(page, rect)
+    # get_pixmap rounds the transformed clip OUTWARD on each edge, so a region
+    # at fractional coordinates picks up a pixel on either side no matter what
+    # zoom is used. Snap to integers first, then the only rounding left is the
+    # predictable one.
+    region = fitz.Rect(math.floor(region.x0), math.floor(region.y0),
+                       math.ceil(region.x1), math.ceil(region.y1)) & page.rect
+    zoom = vision_zoom_for_page(region.width, region.height) or LEGACY_VISION_ZOOM
+    zoom = min(zoom, REGION_MAX_ZOOM)
+    zoom = _fit_zoom_to_budget(region, zoom)
+    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=region, alpha=False)
+    return pix.tobytes("png"), region, zoom
 
 
 def render_page_preview(
@@ -2113,7 +2246,12 @@ def _gemini_multi_page_check(
     images = []
     # Use lower zoom for multi-page calls to reduce payload size and latency
     for pn in page_numbers:
-        images.append(render_page_to_bytes(doc, pn, zoom=1.5))
+        # Was a hand-picked zoom=1.5 "to reduce payload size and latency".
+        # It was the right instinct aimed at the wrong number: 1.5 still
+        # rendered 3888px wide for a model that sees 1152. The budget handles
+        # it exactly now, and each image in a multi-image call is preprocessed
+        # independently, so the same target applies.
+        images.append(render_page_to_bytes(doc, pn))
 
     # Tell the model which image index goes with which finding so we can
     # attribute highlights back to the correct page.

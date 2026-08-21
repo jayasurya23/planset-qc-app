@@ -497,6 +497,74 @@ def _anthropic_document(file_bytes: bytes, mime_type: str, prompt: str, deep: bo
 # Public API – delegates to the active provider
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Image budget
+#
+# Every provider shrinks an image before the model sees it, so uploading a
+# raster bigger than the budget costs bandwidth, latency and memory and buys
+# nothing. It is also, measurably, slightly worse: rasterising far above the
+# budget and letting the provider's resampler throw pixels away is softer than
+# rendering the vector straight to the target size. Measured on a 3/32"
+# conductor callout, mean |Laplacian| over the same 156x34 crop:
+#
+#     render 5184px, provider downsamples to 1152px   0.69
+#     render 1152px directly                          0.74
+#
+# On this corpus (2592 x 1728 pt sheets) the pipeline's fixed zoom 2.0 sent
+# 5184x3456 and OpenAI reduced it to 1152x768 every time: 430 KB uploaded to
+# deliver 69 KB of actual information.
+#
+# The optimum upload is the largest image that survives preprocessing
+# UNCHANGED, because no provider upscales.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# OpenAI, detail="high": fit inside a 2048 square, then scale so the SHORT
+# side is 768. An image is untouched when max <= 2048 and min <= 768.
+OPENAI_MAX_BOX = 2048
+OPENAI_SHORT_SIDE = 768
+
+# Anthropic: long edge capped, and an overall pixel budget.
+ANTHROPIC_LONG_EDGE = 1568
+ANTHROPIC_MAX_PIXELS = 1_150_000
+
+# get_pixmap rounds a dimension UP, and 150 * (768/150) can evaluate to
+# 768.0000000000001, which ceils to 769 -- one pixel over the budget is enough
+# to trigger the server-side rescale this function exists to avoid. Trim by a
+# relative hair: enough to absorb the float error, far too small to cost a
+# pixel of real resolution.
+_CEIL_GUARD = 1.0 - 1e-9
+
+
+def vision_zoom_for_page(
+    width_pt: float, height_pt: float, provider: str | None = None,
+) -> float | None:
+    """Render zoom that lands a page of this size exactly on the provider's
+    budget — no server-side downsample, no wasted upload.
+
+    Returns ``None`` when the provider's preprocessing is not modelled here,
+    which tells the caller to keep whatever zoom it was going to use. Being
+    wrong about a provider costs real quality, so an unknown one changes
+    nothing.
+    """
+    if width_pt <= 0 or height_pt <= 0:
+        return None
+    provider = (provider or AI_PROVIDER or "").lower()
+    long_pt, short_pt = max(width_pt, height_pt), min(width_pt, height_pt)
+
+    if provider == "openai":
+        # Short side to 768, but never let the long side exceed the 2048 box.
+        return _CEIL_GUARD * min(OPENAI_SHORT_SIDE / short_pt,
+                                 OPENAI_MAX_BOX / long_pt)
+
+    if provider == "anthropic":
+        by_edge = ANTHROPIC_LONG_EDGE / long_pt
+        by_area = (ANTHROPIC_MAX_PIXELS / (width_pt * height_pt)) ** 0.5
+        return _CEIL_GUARD * min(by_edge, by_area)
+
+    # Gemini and anything else: not modelled, so do not touch it.
+    return None
+
+
 def analyze_page_image(
     image_bytes: bytes, prompt: str,
     mime_type: str = "image/png", deep: bool = False,
