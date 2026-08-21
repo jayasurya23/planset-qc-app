@@ -31,7 +31,11 @@ import fitz  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app.gemini_analyzer import (  # noqa: E402
+    _ILLEGIBILITY_RE,
+    _region_for_finding,
+    _region_reread,
     LEGACY_VISION_ZOOM,
+    MAX_REGION_REREADS_PER_PAGE,
     REGION_MAX_ZOOM,
     REGION_MIN_PT,
     region_render_rect,
@@ -165,6 +169,104 @@ _, _, z_small = render_region_to_bytes(doc, 1, pin)
 check(f"zoom is capped at {REGION_MAX_ZOOM} for a pinpoint hit", z_small <= REGION_MAX_ZOOM)
 
 doc.close()
+
+# ── the re-read trigger ──────────────────────────────────────────────────
+print("Only an admission of illegibility triggers a re-read:")
+TRIGGERS = [
+    ("The dimension text is not legible at this resolution", True),
+    ("Value present but too small to read", True),
+    ("Text is illegible in the provided image", True),
+    ("unable to read the conductor callout", True),
+    ("could not be read from the drawing", True),
+    ("resolution is too low to resolve it", True),
+    # "not shown" is an absence CLAIM, not an admission of blindness. It may
+    # well be right, and re-reading every one of them would be expensive.
+    ("The EGC size is not shown on this sheet", False),
+    ("Legible and correct per NEC 250.122", False),
+    ("the schedule is readable and complete", False),
+    ("", False),
+]
+for text, want in TRIGGERS:
+    check(f"{'fires ' if want else 'quiet '} on {text[:44]!r}",
+          bool(_ILLEGIBILITY_RE.search(text)) is want)
+
+
+# ── placing the region ───────────────────────────────────────────────────
+print("The re-read only fires when it can place the region:")
+doc, page = sheet_doc()
+
+located = _region_for_finding(page, {"location_text": "1200 A OCPD"})
+check("a location hint that hits the text layer places it", located is not None)
+check("  and it lands on the page", located is not None and page.rect.contains(located))
+
+by_bbox = _region_for_finding(page, {"location_bbox_norm": [200, 300, 260, 420]})
+check("a model bbox places it when no hint matches", by_bbox is not None)
+
+check("no hint, no bbox -> no re-read",
+      _region_for_finding(page, {"location_text": "ZZZ NOT ON THIS DRAWING"}) is None)
+
+
+# ── the re-read call ─────────────────────────────────────────────────────
+print("The verdict is only taken when it is usable:")
+import app.gemini_client as _client
+
+_calls = []
+
+
+def _stub(reply):
+    def _fn(image_bytes, prompt, mime_type="image/png", deep=False):
+        _calls.append({"bytes": len(image_bytes), "prompt": prompt, "deep": deep})
+        return reply
+    return _fn
+
+
+_real = _client.analyze_page_image
+FINDING = {"location_text": "1200 A OCPD"}
+
+_client.analyze_page_image = _stub(
+    '{"readable": true, "status": "Pass", "value": "1200 A OCPD",'
+    ' "evidence": "the callout reads 1200 A OCPD"}')
+v = _region_reread(doc, 1, FINDING, "EGC sizing", "Needs Review", "not legible")
+check("a clean answer comes back parsed", v is not None and v["status"] == "Pass")
+check("  it reports what it read", v is not None and v["value"] == "1200 A OCPD")
+check("  and the region it read", v is not None and page.rect.contains(v["region"]))
+check("the crop is magnified well past the sheet pass",
+      v is not None and v["zoom"] > 4)
+check("it used the deep model", bool(_calls) and _calls[-1]["deep"] is True)
+check("the prompt tells the model how much bigger this is",
+      bool(_calls) and "larger" in _calls[-1]["prompt"])
+
+_client.analyze_page_image = _stub("this is not json at all")
+check("garbage -> no verdict, finding untouched",
+      _region_reread(doc, 1, FINDING, "c", "Fail", "illegible") is None)
+
+_client.analyze_page_image = _stub('{"readable": true, "status": "Maybe"}')
+check("an invented status -> no verdict",
+      _region_reread(doc, 1, FINDING, "c", "Fail", "illegible") is None)
+
+_client.analyze_page_image = _stub(
+    '{"readable": false, "status": "Needs Review", "evidence": "still cannot tell"}')
+still = _region_reread(doc, 1, FINDING, "c", "Fail", "illegible")
+check("still-unreadable comes back readable=false so the caller skips it",
+      still is not None and still["readable"] is False)
+
+
+def _boom(*a, **k):
+    raise RuntimeError("provider down")
+
+
+_client.analyze_page_image = _boom
+check("a provider failure is swallowed, not raised",
+      _region_reread(doc, 1, FINDING, "c", "Fail", "illegible") is None)
+
+_client.analyze_page_image = _real
+doc.close()
+
+print("The number of extra calls per page is bounded:")
+check(f"cap is a small integer ({MAX_REGION_REREADS_PER_PAGE})",
+      isinstance(MAX_REGION_REREADS_PER_PAGE, int)
+      and 1 <= MAX_REGION_REREADS_PER_PAGE <= 8)
+
 
 print()
 if _FAILS:

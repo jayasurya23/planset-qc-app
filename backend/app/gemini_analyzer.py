@@ -720,6 +720,141 @@ return a placeholder).
 """
 
 
+# ---------------------------------------------------------------------------
+# Region re-read — when the sheet-level pass admits it could not see
+# ---------------------------------------------------------------------------
+
+# The model says so, in its own evidence, and the pipeline used to file the
+# finding anyway. 96 findings in the production corpus carry one of these
+# phrases; 91 sit at Needs Review, which is honest but unreviewable -- the
+# check did not fail, it never ran.
+_ILLEGIBILITY_RE = re.compile(
+    r"(?i)\b(?:"
+    r"not\s+legible|illegible|not\s+readable|unreadable|"
+    r"cannot\s+be\s+read|can'?t\s+be\s+read|could\s+not\s+be\s+read|"
+    r"too\s+small\s+to\s+read|too\s+small\s+to\s+resolve|"
+    r"unable\s+to\s+read|unable\s+to\s+resolve|"
+    r"resolution\s+(?:is\s+)?too\s+low|not\s+clearly\s+legible"
+    r")\b"
+)
+
+# One extra vision call per re-read, so cap it. In production this trigger
+# fires about 2.5 times per run, but a pathological sheet must not be able to
+# turn one page into thirty calls.
+MAX_REGION_REREADS_PER_PAGE = 4
+
+_REGION_REREAD_PROMPT = """You are re-examining ONE REGION of an engineering drawing.
+
+The first pass looked at the whole sheet at once. On a 36 x 24 inch drawing
+that puts 3/32-inch text about 3 pixels tall, and it reported that it could
+not read this area. This image is a crop of just that region, rendered about
+{factor:.0f}x larger, so the same text is now roughly {text_px:.0f} pixels tall.
+
+THE CHECK BEING PERFORMED:
+{check}
+
+WHAT THE FIRST PASS SAID:
+  status: {status}
+  evidence: {evidence}
+
+Answer the check for what you can now actually see in THIS crop. Do not
+speculate about anything outside it.
+
+Return ONLY JSON:
+{{
+  "readable": true or false,
+  "status": "Pass" or "Fail" or "Needs Review",
+  "value": "the literal text or dimension you read, or null",
+  "evidence": "one sentence saying what you see and where"
+}}
+
+If the crop still does not show enough to decide, return readable=false and
+status="Needs Review". Do not guess."""
+
+
+def _region_for_finding(page: fitz.Page, finding: dict) -> fitz.Rect | None:
+    """Where on the page should the re-read look?
+
+    The finding's own location hints first, because a text-layer match is
+    exact. Falls back to the model's normalised bbox. Returns ``None`` when
+    neither places it -- there is no point magnifying a guess.
+    """
+    from .analyzer import _cluster_hits, _search_page_multi, _union_rects
+
+    hints = _extract_location_hints(finding)
+    if hints:
+        try:
+            rects = _search_page_multi(page, hints)
+        except Exception:
+            rects = []
+        if rects:
+            clustered = _cluster_hits(rects, page) or rects
+            union = _union_rects(clustered)
+            if union is not None:
+                return union
+    try:
+        return parse_ai_bbox(
+            finding.get("location_bbox_norm") or finding.get("location_bbox"), page
+        )
+    except Exception:
+        return None
+
+
+def _region_reread(
+    doc, page_number: int, finding: dict, check_label: str,
+    status: str, evidence: str,
+) -> dict | None:
+    """Re-ask one check against a magnified crop of the region it named.
+
+    Returns the parsed verdict, or ``None`` if the region could not be placed,
+    the call failed, or the answer was unusable. Every failure path leaves the
+    original finding exactly as it was.
+    """
+    try:
+        page = doc[page_number - 1]
+        region = _region_for_finding(page, finding)
+        if region is None or region.is_empty:
+            return None
+
+        image_bytes, rendered, zoom = render_region_to_bytes(doc, page_number, region)
+
+        from .gemini_client import analyze_page_image, vision_zoom_for_page
+        sheet_zoom = (vision_zoom_for_page(page.rect.width, page.rect.height)
+                      or LEGACY_VISION_ZOOM)
+        text_pt = 3 / 32 * 72
+        prompt = _REGION_REREAD_PROMPT.format(
+            factor=max(1.0, zoom / sheet_zoom),
+            text_px=text_pt * zoom,
+            check=check_label[:600],
+            status=status,
+            evidence=(evidence or "")[:400],
+        )
+        raw = analyze_page_image(image_bytes, prompt, deep=True)
+        parsed = _extract_json(raw)
+    except Exception:
+        logger.debug("Region re-read failed on page %s", page_number, exc_info=True)
+        return None
+
+    if not isinstance(parsed, dict):
+        # _extract_json hands back a list for findings-shaped replies.
+        if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+            parsed = parsed[0]
+        else:
+            return None
+
+    new_status = str(parsed.get("status") or "").strip()
+    if new_status not in ("Pass", "Fail", "Needs Review"):
+        return None
+    return {
+        "readable": bool(parsed.get("readable")),
+        "status": new_status,
+        "value": parsed.get("value"),
+        "evidence": str(parsed.get("evidence") or "").strip(),
+        "zoom": zoom,
+        "region": rendered,
+    }
+
+
 def _rescue_missing_bboxes(
     doc,
     page_number: int,
@@ -2056,6 +2191,9 @@ def _gemini_page_check(
     # text search + AI-supplied bbox. Each entry remembers what's needed to
     # re-render its issue once the rescue pass returns a location.
     rescue_pending: list[dict] = []
+    # Findings whose own evidence admits the sheet-level image was not
+    # legible. Re-read below against a magnified crop.
+    reread_pending: list[dict] = []
     for i, finding in enumerate(findings):
         # "title" is in the chain because the open_findings escape hatch in
         # several prompts emits a title rather than a check name; without it
@@ -2187,6 +2325,17 @@ def _gemini_page_check(
             source_doc_excerpt=src_excerpt if isinstance(src_excerpt, str) else None,
         )
         issues.append(new_issue)
+        if (status in ("Fail", "Needs Review")
+                and len(reread_pending) < MAX_REGION_REREADS_PER_PAGE
+                and _ILLEGIBILITY_RE.search(full_evidence or "")):
+            reread_pending.append({
+                "issue_idx": len(issues) - 1,
+                "finding": finding,
+                "check": check_name or default_title,
+                "status": status,
+                "evidence": full_evidence,
+            })
+
         if needs_rescue:
             rescue_pending.append({
                 "id": new_issue["id"],
@@ -2225,6 +2374,46 @@ def _gemini_page_check(
                     doc, page_number, issue["id"], run_dir,
                 )
                 issue["page_preview_path"] = pp
+
+    # ── Region re-read ──────────────────────────────────────────────────
+    # The sheet-level pass said it could not read these. Crop to the region
+    # each one named and spend the whole image budget on it: 3/32" text goes
+    # from about 3 px to about 35 px. Anything inconclusive is left exactly
+    # as it was -- this can resolve a finding, never invent one.
+    for entry in reread_pending:
+        issue = issues[entry["issue_idx"]]
+        verdict = _region_reread(
+            doc, page_number, entry["finding"], entry["check"],
+            entry["status"], entry["evidence"],
+        )
+        if not verdict or not verdict.get("readable"):
+            continue
+
+        note = verdict["evidence"] or "re-read at higher magnification"
+        value = verdict.get("value")
+        detail = f"{note} (region re-read at {verdict['zoom']:.1f}x"
+        if isinstance(value, str) and value.strip():
+            detail += f", read: {value.strip()[:80]}"
+        detail += ")"
+
+        before = issue["status"]
+        issue["status"] = verdict["status"]
+        issue["auto_status"] = verdict["status"]
+        issue["evidence"] = f"{issue.get('evidence') or ''} | {detail}".strip(" |")
+        # Re-anchor the artifacts on the region we actually read.
+        try:
+            sp, pp, bd = render_issue_artifacts(
+                doc, issue["id"], page_number, run_dir,
+                target_texts=[value] if isinstance(value, str) and value.strip() else None,
+                fallback_bbox=verdict["region"],
+            )
+            issue["snippet_path"], issue["page_preview_path"], issue["bbox"] = sp, pp, bd
+        except Exception:
+            logger.debug("Region re-read artifact render failed", exc_info=True)
+        logger.info(
+            "Region re-read page %s %s: %s -> %s",
+            page_number, issue.get("item_key"), before, verdict["status"],
+        )
 
     return issues
 
