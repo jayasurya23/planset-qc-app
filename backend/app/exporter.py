@@ -264,6 +264,9 @@ def autosize_columns(ws):
         ws.column_dimensions[col_letter].width = min(max(max_len + 2, 12), 40)
 
 
+SNIPPET_WIDTH_PX = 180  # embedded snippet width; column L is sized to suit
+
+
 def build_workbook(run: dict) -> Workbook:
     wb = Workbook()
     ws_summary = wb.active
@@ -373,11 +376,22 @@ def build_workbook(run: dict) -> Workbook:
         snippet_path = issue.get("snippet_path")
         if snippet_path and Path(snippet_path).exists():
             img = XLImage(snippet_path)
-            img.width = 180
-            img.height = int(img.height * (180 / img.width)) if img.width else 120
+            # Capture the natural size BEFORE resizing. Reading img.width on
+            # the next line after assigning it makes the ratio 1.0, so the
+            # height stayed at the source pixel height and every snippet came
+            # out stretched -- 4.5x on a focused crop, 28.8x on a full page
+            # (5184x3456 embedded at 180x3456 instead of 180x120), burying the
+            # findings table the image is there to illustrate.
+            natural_w, natural_h = img.width, img.height
+            img.width = SNIPPET_WIDTH_PX
+            img.height = (int(natural_h * (SNIPPET_WIDTH_PX / natural_w))
+                          if natural_w else 120)
             anchor = f"L{row_idx}"
             ws_issues.add_image(img, anchor)
-            ws_issues.row_dimensions[row_idx].height = max(ws_issues.row_dimensions[row_idx].height or 15, 110)
+            # Excel row heights are points, image heights pixels: 1 px = 0.75 pt.
+            needed = img.height * 0.75 + 6
+            ws_issues.row_dimensions[row_idx].height = max(
+                ws_issues.row_dimensions[row_idx].height or 15, 110, needed)
         row_idx += 1
 
     for col in range(1, 13):

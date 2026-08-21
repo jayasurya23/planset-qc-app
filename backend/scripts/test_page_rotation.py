@@ -26,7 +26,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import fitz  # noqa: E402
 
-from app.analyzer import _search_page_multi, parse_ai_bbox  # noqa: E402
+from app.analyzer import (  # noqa: E402
+    _cached_text_lines,
+    _expand_hit,
+    _search_page_multi,
+    parse_ai_bbox,
+)
 
 _FAILS: list[str] = []
 
@@ -121,6 +126,51 @@ doc = fitz.open()
 blank = doc.new_page(width=1728, height=2592)
 blank.set_rotation(270)
 check("empty result, no exception", _search_page_multi(blank, ["nothing"]) == [])
+doc.close()
+
+print("The line fallback in _expand_hit works on rotated pages too:")
+# Same defect, one layer down and easy to miss: get_text("dict") reports line
+# bboxes in UNROTATED space, but _line_for_rect compares them against
+# display-space hits. Findings inside a detected table still expanded (
+# find_tables returns display space), so only FREE TEXT — plan notes,
+# dimension callouts, general notes — silently kept a cramped word-level box.
+doc = fitz.open()
+page = doc.new_page(width=1728, height=2592)
+# A note low on the authored page, i.e. inside the band that used to be lost.
+# rotate=270 makes it read upright once the page rotation is applied, and it
+# advances along +y, so start far enough up the page that the whole line fits.
+page.insert_text((300, 1900), "WORKING CLEARANCE 3 FT 6 IN MIN, NEC 110.26(A)(1)",
+                 fontsize=24, rotate=270)
+page.set_rotation(270)
+
+lines = _cached_text_lines(page)
+check("line rects are reported in display space",
+      bool(lines) and all(r.x1 <= page.rect.width + 1
+                          and r.y1 <= page.rect.height + 1 for r in lines))
+
+hit = _search_page_multi(page, ["WORKING CLEARANCE"])
+check("the note is found at all", bool(hit))
+if hit:
+    grown = _expand_hit(page, hit[0])
+    check("a free-text hit expands to its whole line",
+          grown.get_area() > hit[0].get_area() * 1.2)
+    check("the expanded line still lands inside the page",
+          grown.x1 <= page.rect.width + 1 and grown.y1 <= page.rect.height + 1)
+    check("the expansion contains the original hit", grown.contains(hit[0]))
+doc.close()
+
+print("Unrotated pages are unaffected (identity transform):")
+doc = fitz.open()
+flat = doc.new_page(width=1728, height=1120)
+flat.insert_text((200, 200), "WORKING CLEARANCE 3 FT 6 IN MIN, NEC 110.26(A)(1)",
+                 fontsize=24)
+hit = _search_page_multi(flat, ["WORKING CLEARANCE"])
+check("found on an unrotated page", bool(hit))
+if hit:
+    grown = _expand_hit(flat, hit[0])
+    check("still expands to its line", grown.get_area() > hit[0].get_area() * 1.2)
+    check("still inside the page",
+          grown.x1 <= flat.rect.width + 1 and grown.y1 <= flat.rect.height + 1)
 doc.close()
 
 print()
