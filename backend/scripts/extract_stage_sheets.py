@@ -37,9 +37,19 @@ def sheet_codes_on_page(page: fitz.Page) -> set[str]:
 
 
 def titleblock_sheet_number(page: fitz.Page) -> str | None:
-    """Grab the likely sheet number from the bottom-right title block."""
+    """Grab the likely sheet number from the bottom-right title block.
+
+    The clip is described in DISPLAY space, which is where the title block
+    visibly is, but get_textbox() clips in the page's AUTHORED space. On a
+    /Rotate 270 sheet the two are transposed and the box lands off the
+    authored page, so this returned None on 471 of 473 corpus pages -- the
+    two that worked were the corpus's only unrotated pages. De-rotating it
+    recovers a code on 470 of 473.
+    """
     rect = page.rect
     tb = fitz.Rect(rect.x1 - rect.width * 0.25, rect.y1 - rect.height * 0.25, rect.x1, rect.y1)
+    tb = tb * page.derotation_matrix
+    tb.normalize()  # a 90/270 transform can invert x0/x1 or y0/y1
     text = page.get_textbox(tb) or ""
     codes = sheet_codes_on_page_text(text)
     if codes:

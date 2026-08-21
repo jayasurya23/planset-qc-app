@@ -78,11 +78,20 @@ def _surrounding_text(page: fitz.Page, rect: fitz.Rect, pad: float = 30.0) -> st
     """Read text from a slightly-padded box around the annotation — gives
     bucketing the actual planset content the reviewer was commenting on."""
     try:
+        # annot.rect is DISPLAY space; get_textbox clips in AUTHORED space.
+        # On a rotated sheet the padded box lands on a transposed region, so
+        # the "surrounding text" recorded against a reviewer comment was
+        # whatever happened to sit at the mirrored coordinates -- content that
+        # looks plausible and is simply the wrong part of the drawing. Pad and
+        # clamp in authored space, against the mediabox, for the same reason.
+        authored = rect * page.derotation_matrix
+        authored.normalize()
+        box = page.mediabox
         expanded = fitz.Rect(
-            max(rect.x0 - pad, 0),
-            max(rect.y0 - pad, 0),
-            min(rect.x1 + pad, page.rect.x1),
-            min(rect.y1 + pad, page.rect.y1),
+            max(authored.x0 - pad, box.x0),
+            max(authored.y0 - pad, box.y0),
+            min(authored.x1 + pad, box.x1),
+            min(authored.y1 + pad, box.y1),
         )
         txt = page.get_textbox(expanded) or ""
         # Collapse whitespace

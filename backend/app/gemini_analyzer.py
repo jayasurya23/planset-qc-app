@@ -2222,15 +2222,26 @@ def _gemini_multi_page_check(
                         doc, issue_id, pn, run_dir, target_texts=hints,
                     )
                     if bb is not None and pp:
-                        # Only accept this page if at least one hint actually
-                        # matched — render_issue_artifacts always returns
-                        # something, so check that we didn't just land on the
-                        # footer fallback.
-                        page_obj = doc[pn - 1]
-                        if any(page_obj.search_for(h) for h in hints):
-                            snippet_path, preview_path, bbox_dict = sp, pp, bb
-                            ref_page = pn
-                            break
+                        # A non-null bbox already means a hint matched. Inside
+                        # render_issue_artifacts the bbox is `union or
+                        # fallback_bbox`, and no fallback is passed here, so
+                        # `bb is not None` can only come from a real match --
+                        # the footer default it used to fall back to is gone.
+                        #
+                        # There used to be a second guard here that re-ran
+                        # page.search_for(h) to confirm. That is the strict
+                        # search, while the renderer uses _search_page_multi,
+                        # which absorbs the drift the model's quotes actually
+                        # carry. So the guard could only ever throw away pages
+                        # that had genuinely matched: "3,800 kVA" against page
+                        # text "3800 kVA", a trailing comma, "690 V-34.5 kV"
+                        # against "690V-34.5kV" -- all matched by the renderer,
+                        # all rejected by the re-search. The finding then lost
+                        # the page it was located on and was filed against the
+                        # first sheet in the group instead.
+                        snippet_path, preview_path, bbox_dict = sp, pp, bb
+                        ref_page = pn
+                        break
 
             # AI-supplied bbox fallback. Same logic as single-page check —
             # used when no hint matched and (especially) for findings about
