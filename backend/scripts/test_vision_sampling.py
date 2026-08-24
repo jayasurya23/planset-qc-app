@@ -48,7 +48,11 @@ import fitz  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app.gemini_analyzer import (  # noqa: E402
+    _apply_region_rereads,
+    _gemini_multi_page_check,
+    _gemini_page_check,
     _ILLEGIBILITY_RE,
+    _reread_candidate,
     _region_for_finding,
     _region_reread,
     LEGACY_VISION_ZOOM,
@@ -237,6 +241,65 @@ doc.close()
 check(f"extra calls per page are bounded ({MAX_REGION_REREADS_PER_PAGE})",
       isinstance(MAX_REGION_REREADS_PER_PAGE, int)
       and 1 <= MAX_REGION_REREADS_PER_PAGE <= 8)
+
+# ── both check paths must actually use it ────────────────────────────────
+print("Every path that produces findings gets the re-read:")
+# This is the test that was missing. The re-read lived inside the single-page
+# check, so multi-page findings never got a second look -- and on one
+# production run every illegibility admission happened to be multi-page, so
+# the feature fired zero times while appearing to work.
+import inspect  # noqa: E402
+
+for fn in (_gemini_page_check, _gemini_multi_page_check):
+    src = inspect.getsource(fn)
+    check(f"{fn.__name__} decides candidates with the shared predicate",
+          "_reread_candidate(" in src)
+    check(f"{fn.__name__} runs the shared post-pass", "_apply_region_rereads(" in src)
+    check(f"{fn.__name__} records which page to re-read", '"page":' in src)
+
+print("The cap is enforced by the predicate, not by each caller:")
+full = [{}] * MAX_REGION_REREADS_PER_PAGE
+check("a full queue takes no more", not _reread_candidate("Fail", "not legible", full))
+check("an empty queue takes one", _reread_candidate("Fail", "not legible", []))
+check("a Pass is never re-read", not _reread_candidate("Pass", "not legible", []))
+check("an absence claim is never re-read",
+      not _reread_candidate("Fail", "the EGC size is not shown", []))
+
+print("Applying a verdict rewrites status, confidence and evidence together:")
+doc, page = sheet_doc()
+issues = [{"id": "i1", "item_key": "ai_x", "status": "Needs Review",
+           "auto_status": "Needs Review", "confidence": 0.41,
+           "evidence": "the callout is not legible", "snippet_path": None,
+           "page_preview_path": None, "bbox": None}]
+pending = [{"issue_idx": 0, "page": 1, "finding": {"location_text": "1200 A OCPD"},
+            "check": "EGC sizing", "status": "Needs Review",
+            "evidence": "the callout is not legible"}]
+
+_client.analyze_page_image = _stub(
+    '{"readable": true, "status": "Pass", "value": "1200 A OCPD",'
+    ' "evidence": "the callout reads 1200 A OCPD"}')
+_apply_region_rereads(doc, Path("/tmp"), issues, pending)
+got = issues[0]
+check(f"status resolved Needs Review -> {got['status']}", got["status"] == "Pass")
+check("auto_status moves with it", got["auto_status"] == "Pass")
+check(f"confidence rose from 0.41 to {got['confidence']}", got["confidence"] > 0.41)
+check("evidence records the magnification", "region re-read at" in got["evidence"])
+check("evidence records what was read", "1200 A OCPD" in got["evidence"])
+check("the original evidence is kept, not replaced",
+      "not legible" in got["evidence"])
+
+print("An unusable verdict leaves the finding exactly as it was:")
+issues2 = [dict(issues[0], status="Needs Review", confidence=0.41,
+                evidence="the callout is not legible")]
+_client.analyze_page_image = _stub('{"readable": false, "status": "Needs Review"}')
+_apply_region_rereads(doc, Path("/tmp"), issues2, [dict(pending[0])])
+check("status untouched", issues2[0]["status"] == "Needs Review")
+check("confidence untouched", issues2[0]["confidence"] == 0.41)
+check("evidence untouched", issues2[0]["evidence"] == "the callout is not legible")
+
+_client.analyze_page_image = _real
+doc.close()
+
 
 print()
 if _FAILS:
