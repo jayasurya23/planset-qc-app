@@ -1,31 +1,40 @@
-"""Whole pages render at the long-standing zoom; regions render bigger.
+"""Whole pages render at the measured-best zoom; regions render bigger.
 
-An earlier version of this file asserted an "image budget": OpenAI at
-detail="high" fits an image into 2048x2048 then scales the short side to 768,
-so anything larger was wasted upload. Those are gpt-4-vision's rules. This
-pipeline runs gpt-5.4-mini, which uses considerably more of what it is given,
-and rendering to that budget starved it.
+This got shipped wrong once. An "image budget" was derived from OpenAI's
+documented detail="high" preprocessing -- fit 2048, short side 768 -- and every
+page render dropped to 1152 px. Those are gpt-4-vision's rules; the pipeline
+runs gpt-5.4-mini, and it starved the model badly enough that Highland N1's
+illegibility admissions went from 5 to 17 between runs.
 
-Measured by asking the model to transcribe every legible string on one
-production sheet and counting how many appear in the PDF's own text layer:
+So the zoom is now scored on the task. Ask the model to transcribe every
+legible string on a sheet and check the answers against the PDF's own text
+layer, which is free ground truth on a vector drawing. Two plansets, the three
+sheets in each with the most text at or below 8 pt, seven zooms, three trials
+-- 126 calls:
 
-    zoom 0.444   1151x768     75 KB    77 strings verified
-    zoom 0.750   1944x1296   161 KB    91
-    zoom 1.000   2592x1728   233 KB    93
-    zoom 1.500   3888x2592   399 KB    95
-    zoom 2.000   5184x3456   566 KB    87
-    zoom 3.000   7776x5184   947 KB    87
+    zoom   pixels        KB   recall_small   precision
+    0.75   1944x1296    331   0.424          0.871
+    1.00   2592x1728    475   0.455          0.908
+    1.25   3240x2160    648   0.369          0.859
+    1.50   3888x2592    819   0.339          0.873
+    2.00   5184x3456   1125   0.341          0.866
+    2.50   6480x4320   1507   0.228          0.905
+    3.00   7776x5184   1875   0.232          0.880
 
-Repeated trials put 0.444 at 60-77 verified against 85-87 for 2.0. It showed
-up in production as Highland N1's illegibility admissions going from 5 to 17
-between runs. So: whole pages are back on 2.0 until a multi-page, multi-trial
-sweep settles where the plateau actually is. The 1.0-1.5 band looks better
-than 2.0 on both quality and payload, but that is one sample per point, and
-one sample per point is what caused this.
+Sheets differ wildly in difficulty, so the pooled deviations are large and the
+comparison that matters is PAIRED -- each zoom against 2.0 on the same sheet:
 
-What survives is the half that was never in doubt: a crop of one region can be
-rendered far larger than the sheet it came from, and that is the only way to
-give the model more detail than the sheet-level pass already has.
+    1.00 vs 2.00   +0.114 mean recall, better on 6 of 6 sheets
+    0.75 vs 2.00   +0.083 mean recall, better on 6 of 6 sheets
+    2.50 vs 2.00   -0.112 mean recall, better on 0 of 6 sheets
+
+More pixels stop helping around one-per-point and then hurt. Precision moves
+the same way, so this is not recall bought with invention.
+
+Recall on small text tops out near 0.46 even at the best zoom: the model reads
+less than half the fine print on a sheet however it is rendered. That is the
+case FOR the region re-read, which renders a crop far larger than the sheet it
+came from.
 
 Run: PYTHONPATH=backend python backend/scripts/test_vision_sampling.py
 """
@@ -44,6 +53,7 @@ from app.gemini_analyzer import (  # noqa: E402
     _region_reread,
     LEGACY_VISION_ZOOM,
     MAX_REGION_REREADS_PER_PAGE,
+    PAGE_VISION_ZOOM,
     REGION_MAX_ZOOM,
     REGION_MIN_PT,
     REGION_TARGET_LONG_PX,
@@ -81,21 +91,21 @@ def size_of(png: bytes):
 
 
 # ── whole pages ──────────────────────────────────────────────────────────
-print("A whole page renders at the zoom it always has:")
+print("A whole page renders at the measured-best zoom:")
 doc, page = sheet_doc()
 default = render_page_to_bytes(doc, 1)
-explicit = render_page_to_bytes(doc, 1, zoom=LEGACY_VISION_ZOOM)
-check(f"default == legacy zoom {LEGACY_VISION_ZOOM}", size_of(default) == size_of(explicit))
-check(f"which is {size_of(default)[0]}x{size_of(default)[1]} for a corpus sheet",
-      size_of(default) == (5184, 3456))
+check(f"default zoom is {PAGE_VISION_ZOOM} -- one pixel per PDF point",
+      size_of(default) == (int(SHEET[0]), int(SHEET[1])))
 check("an explicit zoom is still honoured",
-      size_of(render_page_to_bytes(doc, 1, zoom=1.0)) == (2592, 1728))
+      size_of(render_page_to_bytes(doc, 1, zoom=LEGACY_VISION_ZOOM)) == (5184, 3456))
 check("the cache does not confuse two zooms",
-      size_of(render_page_to_bytes(doc, 1)) == (5184, 3456))
-# The regression this file now exists to prevent: something computing a
-# "budget" and quietly shrinking the page out from under the model.
-check("the default is never starved below the sheet's own point size",
-      size_of(default)[0] >= int(SHEET[0]))
+      size_of(render_page_to_bytes(doc, 1)) == (int(SHEET[0]), int(SHEET[1])))
+# The regression this file exists to prevent. 0.444 was shipped once, on a
+# theory rather than a measurement, and cost ~25% of the model's reading.
+check("never starved to the old gpt-4-vision 'budget' of 1152 px",
+      size_of(default)[0] > 1200)
+check("and never inflated past where recall starts falling",
+      size_of(default)[0] <= 3300)
 
 # ── the region rect ──────────────────────────────────────────────────────
 print("A region is padded, floored and kept on the page:")
@@ -118,21 +128,21 @@ check("a region larger than the page clamps to it",
 # ── the region render ────────────────────────────────────────────────────
 print("A region re-read is bigger than the sheet pass, which is the whole point:")
 png, region, zoom = render_region_to_bytes(doc, 1, tiny)
-check(f"zoom {zoom:.1f} exceeds the page zoom {LEGACY_VISION_ZOOM}",
-      zoom > LEGACY_VISION_ZOOM)
-check(f"3/32\" text {TEXT_PT * LEGACY_VISION_ZOOM:.0f} px on the sheet "
+check(f"zoom {zoom:.1f} exceeds the page zoom {PAGE_VISION_ZOOM}",
+      zoom > PAGE_VISION_ZOOM)
+check(f"3/32\" text {TEXT_PT * PAGE_VISION_ZOOM:.0f} px on the sheet "
       f"-> {TEXT_PT * zoom:.0f} px on the region",
-      TEXT_PT * zoom > TEXT_PT * LEGACY_VISION_ZOOM * 3)
+      TEXT_PT * zoom > TEXT_PT * PAGE_VISION_ZOOM * 3)
 check(f"capped at {REGION_MAX_ZOOM}", zoom <= REGION_MAX_ZOOM)
-check("and it costs less than the whole-sheet image it supplements",
-      len(png) < len(default))
+check("and it costs no more than a couple of whole-sheet images",
+      len(png) < len(default) * 2)
 
 # A region big enough that the target would shrink it must not be shrunk:
 # a re-read that renders smaller than the pass it is correcting is worthless.
 wide = fitz.Rect(0, 0, page.rect.x1, page.rect.y1 * 0.9)
 _, _, z_wide = render_region_to_bytes(doc, 1, wide)
 check(f"a near-full-page region never renders below the page zoom ({z_wide:.2f})",
-      z_wide >= LEGACY_VISION_ZOOM)
+      z_wide >= PAGE_VISION_ZOOM)
 
 pin = fitz.Rect(900, 900, 902, 902)             # pathologically small
 _, _, z_small = render_region_to_bytes(doc, 1, pin)
