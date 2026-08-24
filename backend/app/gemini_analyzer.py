@@ -41,9 +41,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-# Fixed zoom the pipeline used before the budget was measured. Kept as the
-# fallback for providers whose preprocessing vision_zoom_for_page does not
-# model, so an unrecognised provider behaves exactly as it always did.
+# The zoom the pipeline has always rendered vision images at. Briefly replaced
+# by a computed "image budget" derived from gpt-4-vision's preprocessing rules;
+# that was measured wrong for gpt-5.4-mini and reverted. See
+# render_page_to_bytes for the numbers.
 LEGACY_VISION_ZOOM = 2.0
 
 
@@ -52,34 +53,37 @@ def render_page_to_bytes(
 ) -> bytes:
     """Render a 1-based *page_number* to PNG bytes for a vision call.
 
-    With ``zoom=None`` the scale is derived from the page size and the
-    provider's image budget, so the render lands on exactly what the model
-    will look at. Every provider shrinks what it receives and none upscale,
-    so rendering above the budget spends bandwidth and latency on pixels that
-    are discarded before the model sees them.
+    MEASURED, after getting this wrong once. I reduced this to a computed
+    "image budget" on the theory that OpenAI fits an image into 2048x2048 and
+    then scales the short side to 768, so anything larger was wasted upload.
+    That rule belongs to gpt-4-vision. This pipeline runs gpt-5.4-mini, which
+    uses far more of what it is given.
 
-    On this corpus that was the normal case, not an edge case. Sheets are
-    2592 x 1728 pt; the old fixed zoom 2.0 uploaded 5184 x 3456 and OpenAI
-    reduced it to 1152 x 768 every single time -- 430 KB to deliver 69 KB of
-    information, on every vision call of every check of every run.
+    Asking the model to transcribe every legible string on one production
+    sheet and counting how many appear in the PDF's own text layer:
 
-    Rendering to the target directly is also slightly SHARPER than rendering
-    huge and letting the provider's resampler discard pixels: 0.74 vs 0.69
-    mean |Laplacian| over the same 3/32" conductor callout. So this is not a
-    quality-for-cost trade, it is strictly better on both.
+        zoom 0.444   1151x768     75 KB    77 strings verified
+        zoom 0.750   1944x1296   161 KB    91
+        zoom 1.000   2592x1728   233 KB    93
+        zoom 1.500   3888x2592   399 KB    95
+        zoom 2.000   5184x3456   566 KB    87
+        zoom 3.000   7776x5184   947 KB    87
 
-    Pass an explicit *zoom* to override (the region re-read does, deliberately
-    going far above the whole-page budget on a small crop).
+    Repeated trials put 0.444 at 60-77 verified strings against 85-87 for
+    2.0, so the starvation was real and not sampling noise: it showed up in
+    production as illegibility admissions on Highland N1 going from 5 to 17
+    between runs.
 
-    Cached per (page, zoom).
+    Back on the long-standing 2.0 until a proper multi-page, multi-trial sweep
+    settles where the plateau really is. The 1.0-1.5 band looks better than
+    2.0 on both quality AND payload, but that is one sample per point and one
+    sample per point is exactly what caused this.
+
+    Pass an explicit *zoom* to override. Cached per (page, zoom).
     """
     page = doc[page_number - 1]
     if zoom is None:
-        # Imported here, like every other client call in this module, to keep
-        # the import graph one-directional.
-        from .gemini_client import vision_zoom_for_page
-        rect = page.rect
-        zoom = vision_zoom_for_page(rect.width, rect.height) or LEGACY_VISION_ZOOM
+        zoom = LEGACY_VISION_ZOOM
     cache_key = f"_qc_bytes_{zoom:.4f}"
     cached = getattr(page, cache_key, None)
     if cached is not None:
@@ -102,6 +106,10 @@ def render_page_to_bytes(
 REGION_MIN_PT = (240.0, 150.0)   # floor, so a bare value keeps its label/context
 REGION_PAD_PT = 36.0             # half an inch of surrounding drawing
 REGION_MAX_ZOOM = 12.0           # past this the vector is just being magnified
+# Long side to aim the crop at. The full-sheet sweep (see render_page_to_bytes)
+# stopped improving somewhere around 3888 px, so there is no reason to send a
+# region larger than that either.
+REGION_TARGET_LONG_PX = 3000.0
 
 
 def _slide(lo: float, hi: float, min_v: float, max_v: float) -> tuple[float, float]:
@@ -138,28 +146,6 @@ def region_render_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect:
     return r & page_rect
 
 
-def _fit_zoom_to_budget(region: fitz.Rect, zoom: float) -> float:
-    """Shrink *zoom* until the pixmap this region will actually produce fits
-    the provider's envelope.
-
-    Landing one pixel over is not a quality problem -- the provider rescales
-    by 0.1% -- but the point of the budget is that no server-side rescale
-    happens at all, and asserting that is what keeps the claim honest.
-    """
-    from .gemini_client import vision_zoom_for_page
-
-    for _ in range(4):
-        irect = (fitz.Rect(region) * fitz.Matrix(zoom, zoom)).irect
-        w, h = irect.width, irect.height
-        if w <= 0 or h <= 0:
-            return zoom
-        ideal = vision_zoom_for_page(float(w), float(h))
-        if ideal is None or ideal >= 1.0:
-            return zoom          # already inside the envelope
-        zoom *= ideal            # ideal < 1 means "this many times too big"
-    return zoom
-
-
 def render_region_to_bytes(
     doc: fitz.Document, page_number: int, rect: fitz.Rect,
 ) -> tuple[bytes, fitz.Rect, float]:
@@ -175,8 +161,6 @@ def render_region_to_bytes(
     admitting they could not make the drawing out. Cropping to the region and
     spending the same budget on it lifts the same text to roughly 40 px.
     """
-    from .gemini_client import vision_zoom_for_page
-
     page = doc[page_number - 1]
     region = region_render_rect(page, rect)
     # get_pixmap rounds the transformed clip OUTWARD on each edge, so a region
@@ -185,9 +169,13 @@ def render_region_to_bytes(
     # predictable one.
     region = fitz.Rect(math.floor(region.x0), math.floor(region.y0),
                        math.ceil(region.x1), math.ceil(region.y1)) & page.rect
-    zoom = vision_zoom_for_page(region.width, region.height) or LEGACY_VISION_ZOOM
+    long_pt = max(region.width, region.height)
+    zoom = (REGION_TARGET_LONG_PX / long_pt) if long_pt > 0 else LEGACY_VISION_ZOOM
     zoom = min(zoom, REGION_MAX_ZOOM)
-    zoom = _fit_zoom_to_budget(region, zoom)
+    # A re-read exists to see MORE than the sheet-level pass did. If the region
+    # is large enough that this would render it smaller, there is nothing to
+    # gain from the crop and the floor keeps it honest.
+    zoom = max(zoom, LEGACY_VISION_ZOOM)
     pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=region, alpha=False)
     return pix.tobytes("png"), region, zoom
 
@@ -811,9 +799,8 @@ def _region_reread(
 
         image_bytes, rendered, zoom = render_region_to_bytes(doc, page_number, region)
 
-        from .gemini_client import analyze_page_image, vision_zoom_for_page
-        sheet_zoom = (vision_zoom_for_page(page.rect.width, page.rect.height)
-                      or LEGACY_VISION_ZOOM)
+        from .gemini_client import analyze_page_image
+        sheet_zoom = LEGACY_VISION_ZOOM
         text_pt = 3 / 32 * 72
         prompt = _REGION_REREAD_PROMPT.format(
             factor=max(1.0, zoom / sheet_zoom),
