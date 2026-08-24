@@ -1,23 +1,31 @@
-"""Render to the image budget, and buy resolution where it is needed.
+"""Whole pages render at the long-standing zoom; regions render bigger.
 
-Every vision provider shrinks an image before the model sees it, and none
-upscale. OpenAI at detail="high" fits the image into a 2048 square, then
-scales so the SHORT side is 768. On this corpus -- 2592 x 1728 pt sheets --
-that means the model has never seen more than 1152 x 768, whatever we sent.
+An earlier version of this file asserted an "image budget": OpenAI at
+detail="high" fits an image into 2048x2048 then scales the short side to 768,
+so anything larger was wasted upload. Those are gpt-4-vision's rules. This
+pipeline runs gpt-5.4-mini, which uses considerably more of what it is given,
+and rendering to that budget starved it.
 
-The pipeline sent zoom 2.0, i.e. 5184 x 3456, on every vision call of every
-check of every run: 430 KB uploaded to deliver 69 KB of information. Rendering
-the vector straight to the target is also slightly sharper than rendering huge
-and letting the provider's resampler discard pixels (0.74 vs 0.69 mean
-|Laplacian| over the same 3/32" conductor callout), so this is not a
-quality-for-cost trade.
+Measured by asking the model to transcribe every legible string on one
+production sheet and counting how many appear in the PDF's own text layer:
 
-The budget is per IMAGE, not per page, which is what makes a region re-read
-worth having: a crop that is a twentieth of the sheet can be rendered an order
-of magnitude larger and still arrive inside the same envelope. 3/32" text goes
-from 3 px at sheet level to roughly 35 px on the region -- the difference
-between the 96 findings in production whose evidence admits they could not read
-the drawing, and an answer.
+    zoom 0.444   1151x768     75 KB    77 strings verified
+    zoom 0.750   1944x1296   161 KB    91
+    zoom 1.000   2592x1728   233 KB    93
+    zoom 1.500   3888x2592   399 KB    95
+    zoom 2.000   5184x3456   566 KB    87
+    zoom 3.000   7776x5184   947 KB    87
+
+Repeated trials put 0.444 at 60-77 verified against 85-87 for 2.0. It showed
+up in production as Highland N1's illegibility admissions going from 5 to 17
+between runs. So: whole pages are back on 2.0 until a multi-page, multi-trial
+sweep settles where the plateau actually is. The 1.0-1.5 band looks better
+than 2.0 on both quality and payload, but that is one sample per point, and
+one sample per point is what caused this.
+
+What survives is the half that was never in doubt: a crop of one region can be
+rendered far larger than the sheet it came from, and that is the only way to
+give the model more detail than the sheet-level pass already has.
 
 Run: PYTHONPATH=backend python backend/scripts/test_vision_sampling.py
 """
@@ -38,14 +46,10 @@ from app.gemini_analyzer import (  # noqa: E402
     MAX_REGION_REREADS_PER_PAGE,
     REGION_MAX_ZOOM,
     REGION_MIN_PT,
+    REGION_TARGET_LONG_PX,
     region_render_rect,
     render_page_to_bytes,
     render_region_to_bytes,
-)
-from app.gemini_client import (  # noqa: E402
-    OPENAI_MAX_BOX,
-    OPENAI_SHORT_SIDE,
-    vision_zoom_for_page,
 )
 
 _FAILS: list[str] = []
@@ -61,20 +65,7 @@ TEXT_PT = 3 / 32 * 72          # smallest meaningful CAD text, 6.75 pt
 SHEET = (2592.0, 1728.0)       # every page in the corpus
 
 
-def openai_would_reduce_to(w, h):
-    """The provider's own preprocessing, so the tests assert against the rule
-    rather than against our implementation of it."""
-    if max(w, h) > OPENAI_MAX_BOX:
-        s = OPENAI_MAX_BOX / max(w, h)
-        w, h = round(w * s), round(h * s)
-    if min(w, h) > OPENAI_SHORT_SIDE:
-        s = OPENAI_SHORT_SIDE / min(w, h)
-        w, h = round(w * s), round(h * s)
-    return w, h
-
-
 def sheet_doc():
-    """A corpus-geometry sheet with 3/32" text on it."""
     doc = fitz.open()
     page = doc.new_page(width=1728, height=2592)
     page.insert_text((300, 900), "3-1/C 500 kcmil AL + #2 AWG CU EGC",
@@ -89,47 +80,22 @@ def size_of(png: bytes):
     return Image.open(io.BytesIO(png)).size
 
 
-# ── the budget itself ────────────────────────────────────────────────────
-print("The budget lands a page exactly on what the provider will use:")
-z = vision_zoom_for_page(*SHEET, provider="openai")
-got = (round(SHEET[0] * z), round(SHEET[1] * z))
-check(f"corpus sheet -> {got[0]}x{got[1]}", got == (1152, 768))
-check("and the provider would not shrink that further",
-      openai_would_reduce_to(*got) == got)
-
-# A portrait page is bound by the same short-side rule on its other axis.
-zp = vision_zoom_for_page(612, 792, provider="openai")
-check("letter portrait: short side hits 768", round(612 * zp) == 768)
-
-# A very wide page is bound by the 2048 box, not the short side.
-zw = vision_zoom_for_page(5000, 800, provider="openai")
-check("very wide page: long-side cap binds", round(5000 * zw) == OPENAI_MAX_BOX)
-check("  and the short side stays under 768", round(800 * zw) <= OPENAI_SHORT_SIDE)
-
-print("Anthropic has its own envelope:")
-za = vision_zoom_for_page(*SHEET, provider="anthropic")
-check("long edge <= 1568", round(SHEET[0] * za) <= 1568)
-check("area <= 1.15 MP", (SHEET[0] * za) * (SHEET[1] * za) <= 1_150_001)
-
-print("An unmodelled provider changes nothing:")
-check("gemini -> None", vision_zoom_for_page(*SHEET, provider="gemini") is None)
-check("unknown -> None", vision_zoom_for_page(*SHEET, provider="wat") is None)
-check("degenerate page -> None", vision_zoom_for_page(0, 100, provider="openai") is None)
-
-# ── the page render ──────────────────────────────────────────────────────
-print("render_page_to_bytes now renders to the budget:")
+# ── whole pages ──────────────────────────────────────────────────────────
+print("A whole page renders at the zoom it always has:")
 doc, page = sheet_doc()
-adaptive = render_page_to_bytes(doc, 1)
-legacy = render_page_to_bytes(doc, 1, zoom=LEGACY_VISION_ZOOM)
-a_size, l_size = size_of(adaptive), size_of(legacy)
-check(f"adaptive render is {a_size[0]}x{a_size[1]}", a_size == (1152, 768))
-check("legacy render was 5184x3456", l_size == (5184, 3456))
-check("both reduce to the SAME thing the model sees",
-      openai_would_reduce_to(*l_size) == a_size)
-check(f"payload falls {len(legacy) / len(adaptive):.1f}x", len(adaptive) < len(legacy) / 3)
-check("an explicit zoom is still honoured", size_of(render_page_to_bytes(doc, 1, zoom=1.0)) == (2592, 1728))
-check("the cache does not confuse adaptive with explicit",
-      size_of(render_page_to_bytes(doc, 1)) == (1152, 768))
+default = render_page_to_bytes(doc, 1)
+explicit = render_page_to_bytes(doc, 1, zoom=LEGACY_VISION_ZOOM)
+check(f"default == legacy zoom {LEGACY_VISION_ZOOM}", size_of(default) == size_of(explicit))
+check(f"which is {size_of(default)[0]}x{size_of(default)[1]} for a corpus sheet",
+      size_of(default) == (5184, 3456))
+check("an explicit zoom is still honoured",
+      size_of(render_page_to_bytes(doc, 1, zoom=1.0)) == (2592, 1728))
+check("the cache does not confuse two zooms",
+      size_of(render_page_to_bytes(doc, 1)) == (5184, 3456))
+# The regression this file now exists to prevent: something computing a
+# "budget" and quietly shrinking the page out from under the model.
+check("the default is never starved below the sheet's own point size",
+      size_of(default)[0] >= int(SHEET[0]))
 
 # ── the region rect ──────────────────────────────────────────────────────
 print("A region is padded, floored and kept on the page:")
@@ -145,29 +111,34 @@ rc = region_render_rect(page, corner)
 check("a hit in the very corner keeps its full size, shifted not trimmed",
       rc.width >= REGION_MIN_PT[0] - 0.01 and rc.height >= REGION_MIN_PT[1] - 0.01)
 check("  and is still inside the page", page.rect.contains(rc))
-
-huge = fitz.Rect(0, 0, page.rect.x1 + 500, page.rect.y1 + 500)
 check("a region larger than the page clamps to it",
-      page.rect.contains(region_render_rect(page, huge)))
+      page.rect.contains(region_render_rect(
+          page, fitz.Rect(0, 0, page.rect.x1 + 500, page.rect.y1 + 500))))
 
 # ── the region render ────────────────────────────────────────────────────
-print("A region re-read buys real resolution, and costs less than a page:")
+print("A region re-read is bigger than the sheet pass, which is the whole point:")
 png, region, zoom = render_region_to_bytes(doc, 1, tiny)
-sheet_zoom = vision_zoom_for_page(*SHEET, provider="openai")
-text_sheet = TEXT_PT * sheet_zoom
-text_region = TEXT_PT * zoom
-check(f"3/32\" text {text_sheet:.1f} px at sheet level -> {text_region:.1f} px on the region",
-      text_region > text_sheet * 8)
-check("which clears the ~8 px floor where small CAD text stops resolving",
-      text_region >= 8)
-check("the rendered image is within the provider envelope",
-      openai_would_reduce_to(*size_of(png)) == size_of(png))
-check("and it costs no more than one whole-sheet image", len(png) <= len(adaptive))
+check(f"zoom {zoom:.1f} exceeds the page zoom {LEGACY_VISION_ZOOM}",
+      zoom > LEGACY_VISION_ZOOM)
+check(f"3/32\" text {TEXT_PT * LEGACY_VISION_ZOOM:.0f} px on the sheet "
+      f"-> {TEXT_PT * zoom:.0f} px on the region",
+      TEXT_PT * zoom > TEXT_PT * LEGACY_VISION_ZOOM * 3)
+check(f"capped at {REGION_MAX_ZOOM}", zoom <= REGION_MAX_ZOOM)
+check("and it costs less than the whole-sheet image it supplements",
+      len(png) < len(default))
+
+# A region big enough that the target would shrink it must not be shrunk:
+# a re-read that renders smaller than the pass it is correcting is worthless.
+wide = fitz.Rect(0, 0, page.rect.x1, page.rect.y1 * 0.9)
+_, _, z_wide = render_region_to_bytes(doc, 1, wide)
+check(f"a near-full-page region never renders below the page zoom ({z_wide:.2f})",
+      z_wide >= LEGACY_VISION_ZOOM)
 
 pin = fitz.Rect(900, 900, 902, 902)             # pathologically small
 _, _, z_small = render_region_to_bytes(doc, 1, pin)
-check(f"zoom is capped at {REGION_MAX_ZOOM} for a pinpoint hit", z_small <= REGION_MAX_ZOOM)
-
+check(f"a pinpoint hit is still capped ({z_small:.1f})", z_small <= REGION_MAX_ZOOM)
+check(f"the target long side is a plain pixel count ({REGION_TARGET_LONG_PX:.0f})",
+      REGION_TARGET_LONG_PX > 0)
 doc.close()
 
 # ── the re-read trigger ──────────────────────────────────────────────────
@@ -178,37 +149,30 @@ TRIGGERS = [
     ("Text is illegible in the provided image", True),
     ("unable to read the conductor callout", True),
     ("could not be read from the drawing", True),
-    ("resolution is too low to resolve it", True),
-    # "not shown" is an absence CLAIM, not an admission of blindness. It may
-    # well be right, and re-reading every one of them would be expensive.
+    # "not shown" is an absence CLAIM, not an admission of blindness.
     ("The EGC size is not shown on this sheet", False),
     ("Legible and correct per NEC 250.122", False),
     ("the schedule is readable and complete", False),
     ("", False),
 ]
 for text, want in TRIGGERS:
-    check(f"{'fires ' if want else 'quiet '} on {text[:44]!r}",
+    check(f"{'fires' if want else 'quiet'} on {text[:44]!r}",
           bool(_ILLEGIBILITY_RE.search(text)) is want)
-
 
 # ── placing the region ───────────────────────────────────────────────────
 print("The re-read only fires when it can place the region:")
 doc, page = sheet_doc()
-
 located = _region_for_finding(page, {"location_text": "1200 A OCPD"})
 check("a location hint that hits the text layer places it", located is not None)
 check("  and it lands on the page", located is not None and page.rect.contains(located))
-
-by_bbox = _region_for_finding(page, {"location_bbox_norm": [200, 300, 260, 420]})
-check("a model bbox places it when no hint matches", by_bbox is not None)
-
+check("a model bbox places it when no hint matches",
+      _region_for_finding(page, {"location_bbox_norm": [200, 300, 260, 420]}) is not None)
 check("no hint, no bbox -> no re-read",
       _region_for_finding(page, {"location_text": "ZZZ NOT ON THIS DRAWING"}) is None)
 
-
 # ── the re-read call ─────────────────────────────────────────────────────
 print("The verdict is only taken when it is usable:")
-import app.gemini_client as _client
+import app.gemini_client as _client  # noqa: E402
 
 _calls = []
 
@@ -230,8 +194,6 @@ v = _region_reread(doc, 1, FINDING, "EGC sizing", "Needs Review", "not legible")
 check("a clean answer comes back parsed", v is not None and v["status"] == "Pass")
 check("  it reports what it read", v is not None and v["value"] == "1200 A OCPD")
 check("  and the region it read", v is not None and page.rect.contains(v["region"]))
-check("the crop is magnified well past the sheet pass",
-      v is not None and v["zoom"] > 4)
 check("it used the deep model", bool(_calls) and _calls[-1]["deep"] is True)
 check("the prompt tells the model how much bigger this is",
       bool(_calls) and "larger" in _calls[-1]["prompt"])
@@ -262,11 +224,9 @@ check("a provider failure is swallowed, not raised",
 _client.analyze_page_image = _real
 doc.close()
 
-print("The number of extra calls per page is bounded:")
-check(f"cap is a small integer ({MAX_REGION_REREADS_PER_PAGE})",
+check(f"extra calls per page are bounded ({MAX_REGION_REREADS_PER_PAGE})",
       isinstance(MAX_REGION_REREADS_PER_PAGE, int)
       and 1 <= MAX_REGION_REREADS_PER_PAGE <= 8)
-
 
 print()
 if _FAILS:
