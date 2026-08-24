@@ -854,6 +854,76 @@ def _region_reread(
     }
 
 
+def _apply_region_rereads(doc, run_dir, issues: list[dict], pending: list[dict]) -> None:
+    """Re-examine, at magnification, the findings that admitted they could not see.
+
+    Shared by the single-page and multi-page checks. It lived inside the
+    single-page one first, which meant multi-page findings never got a second
+    look -- and on one production run every single illegibility admission
+    happened to be multi-page, so the feature fired zero times while looking
+    like it was working.
+
+    Anything inconclusive is left exactly as it was: this can resolve a
+    finding, never invent one.
+    """
+    for entry in pending:
+        issue = issues[entry["issue_idx"]]
+        page_number = entry["page"]
+        verdict = _region_reread(
+            doc, page_number, entry["finding"], entry["check"],
+            entry["status"], entry["evidence"],
+        )
+        if not verdict or not verdict.get("readable"):
+            continue
+
+        note = verdict["evidence"] or "re-read at higher magnification"
+        value = verdict.get("value")
+        detail = f"{note} (region re-read at {verdict['zoom']:.1f}x"
+        if isinstance(value, str) and value.strip():
+            detail += f", read: {value.strip()[:80]}"
+        detail += ")"
+
+        before = issue["status"]
+        issue["status"] = verdict["status"]
+        issue["auto_status"] = verdict["status"]
+        # A magnified look that could actually read the region is real
+        # corroboration, and the illegibility penalty no longer applies.
+        issue["confidence"] = confidence.score_ai_finding(
+            evidence=verdict["evidence"],
+            text_anchored=bool(verdict.get("value")),
+            model_bbox=True,
+            reread_resolved=True,
+        )
+        issue["evidence"] = f"{issue.get('evidence') or ''} | {detail}".strip(" |")
+        # Re-anchor the artifacts on the region we actually read.
+        try:
+            sp, pp, bd = render_issue_artifacts(
+                doc, issue["id"], page_number, run_dir,
+                target_texts=[value] if isinstance(value, str) and value.strip() else None,
+                fallback_bbox=verdict["region"],
+            )
+            issue["snippet_path"], issue["page_preview_path"], issue["bbox"] = sp, pp, bd
+        except Exception:
+            logger.debug("Region re-read artifact render failed", exc_info=True)
+        logger.info(
+            "Region re-read page %s %s: %s -> %s",
+            page_number, issue.get("item_key"), before, verdict["status"],
+        )
+
+
+def _reread_candidate(status: str, evidence: str, pending: list[dict]) -> bool:
+    """Should this finding get a magnified second look?
+
+    Only an admission of blindness, never an absence CLAIM -- "not shown" may
+    well be right, and re-reading every one would cost a call per absence
+    finding across the corpus. Capped per page so one pathological sheet
+    cannot turn into thirty calls.
+    """
+    return (status in ("Fail", "Needs Review")
+            and len(pending) < MAX_REGION_REREADS_PER_PAGE
+            and bool(_ILLEGIBILITY_RE.search(evidence or "")))
+
+
 def _rescue_missing_bboxes(
     doc,
     page_number: int,
@@ -2343,11 +2413,10 @@ def _gemini_page_check(
             source_doc_excerpt=src_excerpt if isinstance(src_excerpt, str) else None,
         )
         issues.append(new_issue)
-        if (status in ("Fail", "Needs Review")
-                and len(reread_pending) < MAX_REGION_REREADS_PER_PAGE
-                and _ILLEGIBILITY_RE.search(full_evidence or "")):
+        if _reread_candidate(status, full_evidence, reread_pending):
             reread_pending.append({
                 "issue_idx": len(issues) - 1,
+                "page": page_number,
                 "finding": finding,
                 "check": check_name or default_title,
                 "status": status,
@@ -2393,53 +2462,7 @@ def _gemini_page_check(
                 )
                 issue["page_preview_path"] = pp
 
-    # ── Region re-read ──────────────────────────────────────────────────
-    # The sheet-level pass said it could not read these. Crop to the region
-    # each one named and spend the whole image budget on it: 3/32" text goes
-    # from about 3 px to about 35 px. Anything inconclusive is left exactly
-    # as it was -- this can resolve a finding, never invent one.
-    for entry in reread_pending:
-        issue = issues[entry["issue_idx"]]
-        verdict = _region_reread(
-            doc, page_number, entry["finding"], entry["check"],
-            entry["status"], entry["evidence"],
-        )
-        if not verdict or not verdict.get("readable"):
-            continue
-
-        note = verdict["evidence"] or "re-read at higher magnification"
-        value = verdict.get("value")
-        detail = f"{note} (region re-read at {verdict['zoom']:.1f}x"
-        if isinstance(value, str) and value.strip():
-            detail += f", read: {value.strip()[:80]}"
-        detail += ")"
-
-        before = issue["status"]
-        issue["status"] = verdict["status"]
-        issue["auto_status"] = verdict["status"]
-        # A magnified look that could actually read the region is real
-        # corroboration, and the illegibility penalty no longer applies.
-        issue["confidence"] = confidence.score_ai_finding(
-            evidence=verdict["evidence"],
-            text_anchored=bool(verdict.get("value")),
-            model_bbox=True,
-            reread_resolved=True,
-        )
-        issue["evidence"] = f"{issue.get('evidence') or ''} | {detail}".strip(" |")
-        # Re-anchor the artifacts on the region we actually read.
-        try:
-            sp, pp, bd = render_issue_artifacts(
-                doc, issue["id"], page_number, run_dir,
-                target_texts=[value] if isinstance(value, str) and value.strip() else None,
-                fallback_bbox=verdict["region"],
-            )
-            issue["snippet_path"], issue["page_preview_path"], issue["bbox"] = sp, pp, bd
-        except Exception:
-            logger.debug("Region re-read artifact render failed", exc_info=True)
-        logger.info(
-            "Region re-read page %s %s: %s -> %s",
-            page_number, issue.get("item_key"), before, verdict["status"],
-        )
+    _apply_region_rereads(doc, run_dir, issues, reread_pending)
 
     return issues
 
@@ -2490,6 +2513,9 @@ def _gemini_multi_page_check(
     # Multi-page rescue is bucketed by page number — one Gemini call per page
     # that has any rescue candidates, batching all findings for that page.
     rescue_by_page: dict[int, list[dict]] = {}
+    # Multi-page findings admit illegibility too -- on one production run every
+    # single admission was multi-page, and the re-read fired zero times.
+    reread_pending: list[dict] = []
     for i, finding in enumerate(findings):
         # "title" is in the chain because the open_findings escape hatch in
         # several prompts emits a title rather than a check name; without it
@@ -2660,6 +2686,15 @@ def _gemini_multi_page_check(
             source_doc_excerpt=src_excerpt if isinstance(src_excerpt, str) else None,
         )
         issues.append(new_issue)
+        if _reread_candidate(status, full_evidence, reread_pending):
+            reread_pending.append({
+                "issue_idx": len(issues) - 1,
+                "page": ref_page,
+                "finding": finding,
+                "check": check_name or default_title,
+                "status": status,
+                "evidence": full_evidence,
+            })
         if status in ("Fail", "Needs Review") and bbox_dict is None:
             rescue_by_page.setdefault(ref_page, []).append({
                 "id": new_issue["id"],
@@ -2693,6 +2728,8 @@ def _gemini_multi_page_check(
                     doc, page_num, issue["id"], run_dir,
                 )
                 issue["page_preview_path"] = pp
+
+    _apply_region_rereads(doc, run_dir, issues, reread_pending)
 
     return issues
 
