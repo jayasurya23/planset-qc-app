@@ -633,7 +633,9 @@ def _split_into_tokens(needle: str) -> list[str]:
     return tokens
 
 
-def _search_page_multi(page: fitz.Page, needles: list[str]) -> list[fitz.Rect]:
+def _search_page_multi(
+    page: fitz.Page, needles: list[str], token_fallback: bool = True,
+) -> list[fitz.Rect]:
     """Search a page for each needle, return all match rectangles (deduped).
 
     Uses several fuzzy variants per needle so tiny text-layer differences
@@ -690,7 +692,12 @@ def _search_page_multi(page: fitz.Page, needles: list[str]) -> list[fitz.Rect]:
     # Cap to ~4 tokens per needle to avoid flooding the page with generic
     # matches when the AI's hint is verbose. Stop as soon as ANY token
     # produces a hit so we don't accumulate scattered noise.
-    if not rects:
+    #
+    # Callers that are asking "did the model quote text that is really on this
+    # page?" rather than "where do I draw a box?" pass token_fallback=False.
+    # A single generic word like "conductor" matching is enough to anchor a
+    # highlight usefully, and nowhere near enough to corroborate a claim.
+    if not rects and token_fallback:
         for needle in needles:
             for token in _split_into_tokens(needle)[:4]:
                 if _add_matches(token):

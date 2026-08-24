@@ -48,7 +48,9 @@ import fitz  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app.gemini_analyzer import (  # noqa: E402
+    _ai_bbox_of,
     _apply_region_rereads,
+    _text_anchored,
     _gemini_multi_page_check,
     _gemini_page_check,
     _ILLEGIBILITY_RE,
@@ -298,6 +300,47 @@ check("confidence untouched", issues2[0]["confidence"] == 0.41)
 check("evidence untouched", issues2[0]["evidence"] == "the callout is not legible")
 
 _client.analyze_page_image = _real
+doc.close()
+
+
+# ── what "corroborated" is allowed to mean ───────────────────────────────
+print("Corroboration requires a real quote, not a near miss:")
+doc, page = sheet_doc()
+CASES = [
+    (["1200 A OCPD"], True, "the exact string on the page"),
+    (["1200 A OCPD,"], True, "trailing punctuation, absorbed by the fuzzy variants"),
+    (["3-1/C 500 kcmil AL"], True, "another real callout"),
+    # The trap. _search_page_multi falls back to single tokens so a highlight
+    # still lands somewhere useful; "conductor" alone matching is fine for
+    # drawing a box and worthless as evidence the model read anything.
+    (["the conductor looks undersized"], False, "a paraphrase sharing one word"),
+    (["the drawing appears incomplete"], False, "pure prose"),
+    (["ZZZQQQ NOT ON THIS SHEET"], False, "absent text"),
+    ([], False, "no hints at all"),
+]
+for hints, want, why in CASES:
+    check(f"{'anchored' if want else 'not anchored'}: {why}",
+          _text_anchored(doc, 1, hints) is want)
+
+print("A model bbox is taken only when it parses:")
+check("a sane normalised box is accepted",
+      _ai_bbox_of({"location_bbox_norm": [200, 300, 260, 420]}, doc, 1) is not None)
+check("nothing supplied -> None", _ai_bbox_of({}, doc, 1) is None)
+check("garbage -> None", _ai_bbox_of({"location_bbox_norm": "banana"}, doc, 1) is None)
+
+print("The highlight path keeps its fallback, because it has a different job:")
+from app.analyzer import _search_page_multi  # noqa: E402
+# The fallback tries adjacent word PAIRS before single tokens and caps at
+# four, so it reaches this phrase through "500 kcmil" while the strict pass,
+# which only accepts the whole needle and its fuzzy variants, does not.
+PARAPHRASE = ["500 kcmil AL feeder is undersized"]
+check("a paraphrase still places a highlight",
+      bool(_search_page_multi(page, PARAPHRASE)))
+check("but does not count as corroboration",
+      not _search_page_multi(page, PARAPHRASE, token_fallback=False))
+check("and the strict pass is never wider than the default",
+      len(_search_page_multi(page, PARAPHRASE, token_fallback=False))
+      <= len(_search_page_multi(page, PARAPHRASE)))
 doc.close()
 
 

@@ -854,6 +854,38 @@ def _region_reread(
     }
 
 
+def _text_anchored(doc, page_number: int, hints: list[str]) -> bool:
+    """Is any text the model quoted genuinely in the page's text layer?
+
+    On vector PDFs this is the strongest corroboration available without a
+    human: it separates a finding that READ the drawing from one that
+    reconstructed a plausible-looking callout. Text-layer only, no rendering.
+    """
+    if not hints:
+        return False
+    try:
+        from .analyzer import _search_page_multi
+        # token_fallback=False on purpose. With it on, a paraphrase like "the
+        # conductor looks undersized" anchors on the word "conductor" and
+        # scores as corroborated. That is fine for placing a highlight and
+        # worthless as evidence the model read anything.
+        return bool(_search_page_multi(
+            doc[page_number - 1], hints, token_fallback=False))
+    except Exception:
+        return False
+
+
+def _ai_bbox_of(finding: dict, doc, page_number: int):
+    """The model's own normalised bbox, if it gave a usable one."""
+    try:
+        return parse_ai_bbox(
+            finding.get("location_bbox_norm") or finding.get("location_bbox"),
+            doc[page_number - 1],
+        )
+    except Exception:
+        return None
+
+
 def _apply_region_rereads(doc, run_dir, issues: list[dict], pending: list[dict]) -> None:
     """Re-examine, at magnification, the findings that admitted they could not see.
 
@@ -2339,31 +2371,22 @@ def _gemini_page_check(
         # exact callouts that triggered the finding.
         snippet_path, preview_path, bbox_dict = None, None, None
         needs_rescue = False
-        text_anchored = False
-        ai_bbox = None
+
+        # Corroboration is measured for EVERY finding, not just the ones that
+        # get a picture rendered. Both are cheap -- a text-layer search and a
+        # bbox parse, no rasterising -- and skipping them for Pass rows left
+        # every passing check on an identical score, penalised for a
+        # localisation that was never attempted. That is the flat 0.72 problem
+        # wearing a different hat.
+        hints = _extract_location_hints(finding)
+        ai_bbox = _ai_bbox_of(finding, doc, page_number)
+        text_anchored = _text_anchored(doc, page_number, hints)
+
         if status in ("Fail", "Needs Review"):
-            hints = _extract_location_hints(finding)
-            # Did the model quote something that is genuinely in the text
-            # layer? On vector PDFs that is the strongest corroboration
-            # available without a human, and it is what separates a finding
-            # that read the drawing from one that reconstructed a plausible
-            # callout. It decides the confidence below.
-            if hints:
-                try:
-                    from .analyzer import _search_page_multi
-                    text_anchored = bool(
-                        _search_page_multi(doc[page_number - 1], hints))
-                except Exception:
-                    text_anchored = False
-            # AI-supplied normalized bbox — used as ``fallback_bbox`` so the
-            # renderer prefers literal-text matches but always has a focused
-            # region to draw when text search fails (paraphrased excerpts,
-            # scanned PDFs, missing-item findings).
-            ai_bbox = parse_ai_bbox(
-                finding.get("location_bbox_norm")
-                or finding.get("location_bbox"),
-                doc[page_number - 1],
-            )
+            # The AI bbox rides along as ``fallback_bbox`` so the renderer
+            # prefers literal-text matches but always has a focused region to
+            # draw when text search fails (paraphrased excerpts, scanned PDFs,
+            # missing-item findings).
             if hints or ai_bbox:
                 snippet_path, preview_path, bbox_dict = render_issue_artifacts(
                     doc, issue_id, page_number, run_dir,
@@ -2584,18 +2607,14 @@ def _gemini_multi_page_check(
         # page they were actually judged on rather than always at the first.
         ref_page = claimed_page or page_numbers[0]
         snippet_path, preview_path, bbox_dict = None, None, None
-        text_anchored = False
+
+        # Measured for every finding, Pass included -- see the single-page path.
+        hints = _extract_location_hints(finding)
+        text_anchored = any(_text_anchored(doc, pn, hints) for pn in page_numbers)
+        model_bbox_anywhere = any(
+            _ai_bbox_of(finding, doc, pn) is not None for pn in page_numbers)
+
         if status in ("Fail", "Needs Review"):
-            hints = _extract_location_hints(finding)
-            # As in the single-page path: a text-layer hit is what separates a
-            # finding that read the drawing from one that invented a callout.
-            if hints:
-                try:
-                    from .analyzer import _search_page_multi
-                    text_anchored = any(
-                        _search_page_multi(doc[pn - 1], hints) for pn in page_numbers)
-                except Exception:
-                    text_anchored = False
             # The model sometimes reports which page it saw the issue on (e.g.
             # "Page 2" or "page_index": 1). Try to pick the right page out of
             # the set before falling back to a hint-based search.
@@ -2675,7 +2694,7 @@ def _gemini_multi_page_check(
             confidence=confidence.score_ai_finding(
                 evidence=full_evidence,
                 text_anchored=text_anchored,
-                model_bbox=bbox_dict is not None,
+                model_bbox=bbox_dict is not None or model_bbox_anywhere,
                 cites_supporting_doc=isinstance(src_filename, str) and bool(src_filename),
             ),
             snippet_path=snippet_path,
