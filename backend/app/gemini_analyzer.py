@@ -41,10 +41,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-# The zoom the pipeline has always rendered vision images at. Briefly replaced
-# by a computed "image budget" derived from gpt-4-vision's preprocessing rules;
-# that was measured wrong for gpt-5.4-mini and reverted. See
-# render_page_to_bytes for the numbers.
+# Zoom for a whole-page vision render. One pixel per PDF point.
+#
+# This was 2.0 for the life of the project, then briefly a computed "image
+# budget" derived from gpt-4-vision's preprocessing rules, which was wrong for
+# gpt-5.4-mini and starved the model. 1.0 is measured: see render_page_to_bytes.
+PAGE_VISION_ZOOM = 1.0
+
+# Retained because it is what every run before this rendered at, and the
+# comparison is the reason the default changed.
 LEGACY_VISION_ZOOM = 2.0
 
 
@@ -53,37 +58,50 @@ def render_page_to_bytes(
 ) -> bytes:
     """Render a 1-based *page_number* to PNG bytes for a vision call.
 
-    MEASURED, after getting this wrong once. I reduced this to a computed
-    "image budget" on the theory that OpenAI fits an image into 2048x2048 and
-    then scales the short side to 768, so anything larger was wasted upload.
-    That rule belongs to gpt-4-vision. This pipeline runs gpt-5.4-mini, which
-    uses far more of what it is given.
+    MEASURED, twice, the second time properly.
 
-    Asking the model to transcribe every legible string on one production
-    sheet and counting how many appear in the PDF's own text layer:
+    The first attempt reasoned from OpenAI's documented detail="high"
+    preprocessing and shipped a regression. Those are gpt-4-vision's rules;
+    this pipeline runs gpt-5.4-mini. So this is scored on the task instead:
+    ask the model to transcribe every legible string on a sheet, and check the
+    answers against the PDF's own text layer, which is free ground truth on a
+    vector drawing. Two plansets, the three sheets in each with the most text
+    at or below 8 pt, seven zooms, three trials -- 126 calls.
 
-        zoom 0.444   1151x768     75 KB    77 strings verified
-        zoom 0.750   1944x1296   161 KB    91
-        zoom 1.000   2592x1728   233 KB    93
-        zoom 1.500   3888x2592   399 KB    95
-        zoom 2.000   5184x3456   566 KB    87
-        zoom 3.000   7776x5184   947 KB    87
+        zoom   pixels        KB   recall_small   precision
+        0.75   1944x1296    331   0.424          0.871
+        1.00   2592x1728    475   0.455          0.908
+        1.25   3240x2160    648   0.369          0.859
+        1.50   3888x2592    819   0.339          0.873
+        2.00   5184x3456   1125   0.341          0.866
+        2.50   6480x4320   1507   0.228          0.905
+        3.00   7776x5184   1875   0.232          0.880
 
-    Repeated trials put 0.444 at 60-77 verified strings against 85-87 for
-    2.0, so the starvation was real and not sampling noise: it showed up in
-    production as illegibility admissions on Highland N1 going from 5 to 17
-    between runs.
+    Pooled standard deviations are large because sheets differ wildly in
+    difficulty, so the comparison is PAIRED -- each zoom against 2.0 on the
+    same sheet:
 
-    Back on the long-standing 2.0 until a proper multi-page, multi-trial sweep
-    settles where the plateau really is. The 1.0-1.5 band looks better than
-    2.0 on both quality AND payload, but that is one sample per point and one
-    sample per point is exactly what caused this.
+        1.00 vs 2.00   +0.114 mean recall, better on 6 of 6 sheets
+        0.75 vs 2.00   +0.083 mean recall, better on 6 of 6 sheets
+        2.50 vs 2.00   -0.112 mean recall, better on 0 of 6 sheets
+
+    More pixels stop helping around one-per-point and then actively hurt: the
+    provider downsamples what it is sent, and downsampling a 7776 px raster
+    loses more than rendering the vector near the target in the first place.
+    Precision moves the same way, so this is not recall bought with invention.
+
+    1.0 therefore wins on reading quality AND on payload -- 475 KB against the
+    1125 KB the pipeline used to send.
+
+    Note what it does NOT say: recall on small text tops out near 0.46. Even at
+    the best zoom the model reads less than half the fine print on a sheet.
+    That is the case for the region re-read, not an argument against it.
 
     Pass an explicit *zoom* to override. Cached per (page, zoom).
     """
     page = doc[page_number - 1]
     if zoom is None:
-        zoom = LEGACY_VISION_ZOOM
+        zoom = PAGE_VISION_ZOOM
     cache_key = f"_qc_bytes_{zoom:.4f}"
     cached = getattr(page, cache_key, None)
     if cached is not None:
@@ -106,10 +124,11 @@ def render_page_to_bytes(
 REGION_MIN_PT = (240.0, 150.0)   # floor, so a bare value keeps its label/context
 REGION_PAD_PT = 36.0             # half an inch of surrounding drawing
 REGION_MAX_ZOOM = 12.0           # past this the vector is just being magnified
-# Long side to aim the crop at. The full-sheet sweep (see render_page_to_bytes)
-# stopped improving somewhere around 3888 px, so there is no reason to send a
-# region larger than that either.
-REGION_TARGET_LONG_PX = 3000.0
+# Long side to aim the crop at. The sweep in render_page_to_bytes found the
+# model reads a 2592 px image better than anything larger, so a region targets
+# the same size -- same image dimensions, less of the sheet inside them.
+# (Measured on whole pages; not separately verified for crops.)
+REGION_TARGET_LONG_PX = 2592.0
 
 
 def _slide(lo: float, hi: float, min_v: float, max_v: float) -> tuple[float, float]:
@@ -175,7 +194,7 @@ def render_region_to_bytes(
     # A re-read exists to see MORE than the sheet-level pass did. If the region
     # is large enough that this would render it smaller, there is nothing to
     # gain from the crop and the floor keeps it honest.
-    zoom = max(zoom, LEGACY_VISION_ZOOM)
+    zoom = max(zoom, PAGE_VISION_ZOOM)
     pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=region, alpha=False)
     return pix.tobytes("png"), region, zoom
 
@@ -800,7 +819,7 @@ def _region_reread(
         image_bytes, rendered, zoom = render_region_to_bytes(doc, page_number, region)
 
         from .gemini_client import analyze_page_image
-        sheet_zoom = LEGACY_VISION_ZOOM
+        sheet_zoom = PAGE_VISION_ZOOM
         text_pt = 3 / 32 * 72
         prompt = _REGION_REREAD_PROMPT.format(
             factor=max(1.0, zoom / sheet_zoom),
