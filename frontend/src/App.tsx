@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import SheetViewer from "./SheetViewer";
 import type {
   Issue,
   Job,
@@ -959,13 +960,6 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("default");
   const [sel, setSel] = useState<Issue | null>(null);
-  // Modal preview zoom state. "fit" scales to modal width (default), "actual"
-  // shows native pixels and overflows the modal so the user can scroll/pan.
-  // Reset to "fit" whenever a new finding is opened.
-  const [selZoom, setSelZoom] = useState<"fit" | "actual">("fit");
-  useEffect(() => {
-    setSelZoom("fit");
-  }, [sel?.id]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState("");
   const [projName, setProjName] = useState("");
@@ -5085,26 +5079,10 @@ export default function App() {
                 ))}
               </div>
             ) : sel.page_preview_path || sel.snippet_path ? (
-              <div
-                className={`detail-img-wrap detail-img-${selZoom}`}
-                onClick={() =>
-                  setSelZoom(selZoom === "fit" ? "actual" : "fit")
-                }
-                title={
-                  selZoom === "fit"
-                    ? "Click to zoom in to actual size"
-                    : "Click to fit to window"
-                }
-              >
-                <img
-                  className="detail-img"
-                  src={artifactUrl(sel.page_preview_path || sel.snippet_path)}
-                  alt={sel.title}
-                />
-                <span className="detail-zoom-hint">
-                  {selZoom === "fit" ? "Click to zoom in" : "Click to fit"}
-                </span>
-              </div>
+              <SheetViewer
+                src={artifactUrl(sel.page_preview_path || sel.snippet_path)!}
+                alt={sel.title}
+              />
             ) : (
               <div className="dim" style={{padding:"3rem",textAlign:"center"}}>
                 No preview available
