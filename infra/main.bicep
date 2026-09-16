@@ -48,6 +48,13 @@ param authTenantId string = '551da9d2-5fa9-40e4-a8a4-4845c4b6376a'
 @description('Entra app client secret for the built-in auth (required when enableEntraAuth=true). Pass at deploy; never commit. If unknown, reset it: az ad app credential reset --id <authClientId> --query password -o tsv.')
 param authClientSecret string = ''
 
+@secure()
+@description('monday.com API token for resolving project Project IDs to Portfolio items and project boards (read-only use). Optional: without it, Project IDs and PMO 360 links still work and monday links are simply not shown. Pass at deploy; never commit.')
+param mondayApiToken string = ''
+
+@description('Base URL of PMO 360 for Project ID deep links. Empty hides the PMO 360 link.')
+param pmo360BaseUrl string = 'https://pmo360.castillope.com'
+
 var acrName = toLower(replace('${appName}acr', '-', ''))
 var storageName = toLower('st${uniqueString(resourceGroup().id, appName)}')
 var envName = '${appName}-env'
@@ -187,7 +194,13 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             name: 'microsoft-provider-authentication-secret'
             value: authClientSecret
           }
-        ] : []
+        ] : [],
+        empty(mondayApiToken) ? [] : [
+          {
+            name: 'monday-api-token'
+            value: mondayApiToken
+          }
+        ]
       )
     }
     template: {
@@ -199,14 +212,19 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json(cpuCores)
             memory: memorySize
           }
-          env: [
+          env: concat([
             { name: 'AI_PROVIDER', value: 'openai' }
             { name: 'OPENAI_MODEL', value: 'gpt-5.4-mini' }
             { name: 'OPENAI_MODEL_DEEP', value: 'gpt-5.4' }
             { name: 'OPENAI_API_KEY', secretRef: 'openai-api-key' }
             { name: 'PLANSET_DATA_DIR', value: '/home/data' }
             { name: 'FRONTEND_DIST', value: '/app/frontend_dist' }
-          ]
+            { name: 'PMO360_BASE_URL', value: pmo360BaseUrl }
+          ], empty(mondayApiToken) ? [] : [
+            // Only referenced when the secret exists: a secretRef to a missing
+            // secret fails the revision.
+            { name: 'MONDAY_API_TOKEN', secretRef: 'monday-api-token' }
+          ])
           volumeMounts: [
             {
               volumeName: 'data'

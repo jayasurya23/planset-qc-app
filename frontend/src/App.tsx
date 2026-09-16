@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import SheetViewer from "./SheetViewer";
+import { ProjectIdLinks, ProjectIdDialog, projectIdKey } from "./ProjectId";
 import type {
   Issue,
   Job,
   JobsResponse,
   Me,
+  PortfolioResponse,
+  ProjectInfo,
   RunData,
   RunFeedback,
   RunRating,
@@ -963,6 +966,13 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState("");
   const [projName, setProjName] = useState("");
+  // Castillo Project ID typed at upload (only for a project that has none).
+  const [castilloPid, setCastilloPid] = useState("");
+  // Projects keyed by id, carrying Project ID + PMO 360 / monday links.
+  const [projectsById, setProjectsById] = useState<Record<string, ProjectInfo>>({});
+  // monday Portfolio Project IDs for the pickers; configured=false without a token.
+  const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
+  const [pidDialogFor, setPidDialogFor] = useState<string | null>(null);
   const [runName, setRunName] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editStatus, setEditStatus] = useState<Status>("Pass");
@@ -1404,7 +1414,19 @@ export default function App() {
   };
 
   // ── Data loading ──
+  const loadProjects = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/projects`);
+      if (!r.ok) return;
+      const list: ProjectInfo[] = await r.json();
+      setProjectsById(Object.fromEntries(list.map((x) => [x.id, x])));
+    } catch {
+      /* the dashboard still works without Project IDs */
+    }
+  }, []);
+
   const load = useCallback(async () => {
+    void loadProjects();
     const r = await fetch(`${API}/api/runs`);
     const d = await r.json();
     setRuns(d);
@@ -1416,7 +1438,7 @@ export default function App() {
         setRunId(d[0].id);
       }
     }
-  }, [runId]);
+  }, [runId, loadProjects]);
 
   // Keep the URL's ``?run`` query param in sync with the selected run so
   // browser refresh, copy-link, and shared links all land on the same run.
@@ -1460,6 +1482,15 @@ export default function App() {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  // monday Portfolio Project IDs for the pickers. The server caches the board,
+  // and answers configured=false at once when it has no monday token.
+  useEffect(() => {
+    fetch(`${API}/api/monday/portfolio`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: PortfolioResponse | null) => d && setPortfolio(d))
+      .catch(() => {});
   }, []);
 
   // Resolve the signed-in engineer once. In production the EasyAuth sidecar
@@ -1580,6 +1611,8 @@ export default function App() {
           } catch {
             /* ignore */
           }
+          // A finished run may have read a Project ID off its title block.
+          void loadProjects();
         }
       } catch {
         /* transient — keep polling */
@@ -1933,6 +1966,9 @@ export default function App() {
     const fd = new FormData();
     fd.append("file", plansetFile);
     if (projName.trim()) fd.append("project_name", projName.trim());
+    if (castilloPid.trim() && !uploadProject?.castillo_project_id) {
+      fd.append("castillo_project_id", castilloPid.trim());
+    }
     if (runName.trim()) fd.append("run_name", runName.trim());
     if (pdHasValues) fd.append("project_details", JSON.stringify(pd));
     fd.append("use_deep", deepMode ? "true" : "false");
@@ -1953,16 +1989,26 @@ export default function App() {
         pushToast({ key: `up-${Date.now()}-error`, kind: "error", title: "Couldn't start analysis", detail: msg.slice(0, 160) });
         return;
       }
-      const { upload_id } = await r.json();
+      const { upload_id, castillo_project_id_conflict } = await r.json();
       // Non-blocking: the analysis runs on the shared queue. Track it here so we
       // can alert this tab on completion, reset the form, and let the user keep
       // working or queue another run — the Activity panel watches the rest.
       myJobIds.current.add(upload_id);
       pushToast({ key: `${upload_id}-queued`, kind: "queued", title: `Queued: ${jobLabel}`, detail: "Tracking in Activity — you'll be alerted when it's done." });
+      if (castillo_project_id_conflict) {
+        pushToast({
+          key: `${upload_id}-pid`,
+          kind: "error",
+          title: "Project ID not changed",
+          detail: `This project already has Project ID ${castillo_project_id_conflict.castillo_project_id}; you entered ${castillo_project_id_conflict.submitted}. Change it from the project card if that is wrong.`,
+        });
+      }
       form.reset();
       setProjName("");
+      setCastilloPid("");
       setRunName("");
       setPlansetFile(null);
+      void loadProjects();
     } catch (err) {
       pushToast({ key: `up-${Date.now()}-error`, kind: "error", title: "Couldn't start analysis", detail: err instanceof Error ? err.message : "Check logs." });
     } finally {
@@ -2290,6 +2336,54 @@ export default function App() {
     return projects;
   }, [filteredRuns]);
 
+  // The project an upload will join, by the server's rule: name compared
+  // case- and whitespace-insensitively.
+  const uploadProject = useMemo(() => {
+    const key = projName.split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+    if (!key) return undefined;
+    return Object.values(projectsById).find(
+      (x) => x.name.split(/\s+/).filter(Boolean).join(" ").toLowerCase() === key,
+    );
+  }, [projName, projectsById]);
+
+  const onProjectIdSaved = useCallback((updated: ProjectInfo) => {
+    setProjectsById((prev) => ({ ...prev, [updated.id]: { ...prev[updated.id], ...updated } }));
+  }, []);
+
+  // One click: adopt the Project ID the drawings print.
+  const adoptProjectId = useCallback(
+    async (projectId: string, castilloProjectId: string) => {
+      try {
+        const res = await fetch(`${API}/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ castillo_project_id: castilloProjectId }),
+        });
+        if (!res.ok) {
+          pushToast({ key: `pid-${projectId}`, kind: "error", title: "Couldn't set the Project ID", detail: `HTTP ${res.status}` });
+          return;
+        }
+        const updated: ProjectInfo = await res.json();
+        onProjectIdSaved(updated);
+        const m = updated.monday;
+        pushToast({
+          key: `pid-${projectId}`,
+          kind: m.status === "linked" || m.status === "not_configured" ? "done" : "error",
+          title: `Project ID ${updated.castillo_project_id} set`,
+          detail:
+            m.status === "linked"
+              ? `Linked to monday${m.board_name ? ` board “${m.board_name}”` : ""} and PMO 360.`
+              : m.status === "not_configured"
+                ? "PMO 360 link added. monday lookup is not configured on this server."
+                : m.detail || "monday.com did not link it — open the Project ID to see why.",
+        });
+      } catch {
+        pushToast({ key: `pid-${projectId}`, kind: "error", title: "Couldn't set the Project ID", detail: "Could not reach the server." });
+      }
+    },
+    [onProjectIdSaved, pushToast],
+  );
+
   // Distinct existing project names for the upload form's datalist, so an
   // engineer reuses an exact name (and the run joins that project).
   const projectNames = useMemo(
@@ -2384,6 +2478,15 @@ export default function App() {
           </div>
         </div>
       </button>
+      {projectsById[pg.key] && (
+        <div className="pcard-pid">
+          <ProjectIdLinks
+            project={projectsById[pg.key]}
+            onEdit={() => setPidDialogFor(pg.key)}
+            onUse={(n) => void adoptProjectId(pg.key, n)}
+          />
+        </div>
+      )}
       {!expanded ? (
         <div className="pcard-summary">
           {pg.stages.map((sg) => {
@@ -2776,6 +2879,40 @@ export default function App() {
                   <option key={n} value={n} />
                 ))}
               </datalist>
+              {uploadProject?.castillo_project_id ? (
+                <div className="si-note" title="Change it from the project card">
+                  Project ID {uploadProject.castillo_project_id} &middot; from this project
+                </div>
+              ) : (
+                <>
+                  <input
+                    value={castilloPid}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setCastilloPid(v);
+                      // Picking a monday Project ID for a new upload names the project too.
+                      if (!projName.trim()) {
+                        const hit = portfolio?.items.find((i) => projectIdKey(i.castillo_project_id) === projectIdKey(v));
+                        if (hit) setProjName(hit.name);
+                      }
+                    }}
+                    placeholder="Project ID (optional, e.g. 264-066)"
+                    className="si"
+                    list="portfolio-jobs"
+                    maxLength={50}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <datalist id="portfolio-jobs">
+                    {(portfolio?.items || []).map((i) => (
+                      <option key={`${i.castillo_project_id}-${i.name}`} value={i.castillo_project_id}>
+                        {i.name}
+                        {i.client ? ` — ${i.client}` : ""}
+                      </option>
+                    ))}
+                  </datalist>
+                </>
+              )}
               <input
                 value={runName}
                 onChange={(e) => setRunName(e.target.value)}
@@ -3776,6 +3913,16 @@ export default function App() {
                     </span>
                   )}
                 </div>
+                {run.project_id && projectsById[run.project_id] && (
+                  <div className="hdr-pid-row">
+                    <ProjectIdLinks
+                      compact
+                      project={projectsById[run.project_id]}
+                      onEdit={() => setPidDialogFor(run.project_id!)}
+                      onUse={(n) => void adoptProjectId(run.project_id!, n)}
+                    />
+                  </div>
+                )}
                 <div className="hdr-meta">
                   <span title={run.original_filename}>{runLabel(run)}</span>{" "}
                   &middot; {run.page_count} pages
@@ -4965,6 +5112,16 @@ export default function App() {
           </>
         )}
       </main>
+
+      {pidDialogFor && projectsById[pidDialogFor] && (
+        <ProjectIdDialog
+          api={API}
+          project={projectsById[pidDialogFor]}
+          portfolio={portfolio}
+          onClose={() => setPidDialogFor(null)}
+          onSaved={onProjectIdSaved}
+        />
+      )}
 
       {/* ── Keyboard shortcuts overlay (toggled with ?) ── */}
       {showShortcuts && (

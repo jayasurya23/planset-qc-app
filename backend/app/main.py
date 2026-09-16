@@ -8,7 +8,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,9 +22,10 @@ from .db import (
     get_project, get_project_detail, get_run, get_run_versions, init_db,
     insert_chat_message, insert_issue_feedback, insert_manual_issue, insert_run,
     insert_run_feedback, latest_run_feedback, list_projects, list_runs,
-    save_run_version, update_issue, update_run_name,
+    save_run_version, set_castillo_project_id, update_issue, update_run_name,
 )
 from . import chat as qc_chat
+from . import monday, project_links
 from .exporter import export_due_diligence, export_run_to_excel
 from .progress import clear_progress, get_progress, set_progress
 from . import jobs
@@ -103,6 +104,10 @@ class IssueUpdate(BaseModel):
 
 class RunRename(BaseModel):
     run_name: str | None = None
+
+
+class CastilloProjectIdUpdate(BaseModel):
+    castillo_project_id: str | None = None
 
 
 class ManualIssueCreate(BaseModel):
@@ -399,8 +404,13 @@ def api_list_runs() -> list[dict]:
 
 @app.get("/api/projects")
 def api_list_projects() -> list[dict]:
-    """Projects with a per-stage summary, newest activity first."""
-    return list_projects()
+    """Projects with a per-stage summary, newest activity first.
+
+    Each carries its Castillo Project ID, PMO 360 and monday.com links, and the
+    monday lookup status -- all from stored columns, so listing never calls
+    monday.
+    """
+    return [project_links.decorate(p) for p in list_projects()]
 
 
 @app.get("/api/projects/{project_id}")
@@ -408,7 +418,124 @@ def api_get_project(project_id: str) -> dict:
     proj = get_project_detail(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
-    return proj
+    out = project_links.decorate(proj)
+    out["duplicates"] = project_links.duplicates(project_id, out["castillo_project_id"])
+    return out
+
+
+def _clean_castillo_project_id(raw: str | None) -> str | None:
+    """Normalise a Project ID from a request, rejecting what cannot be one.
+
+    The value stays opaque -- no format is enforced, because the numbering
+    scheme has changed before -- but it must be printable and fit the 50
+    characters PMO 360 stores.
+    """
+    value = monday.normalize_project_id(raw)
+    if value is None:
+        return None
+    if len(value) > 50 or any(not ch.isprintable() for ch in value):
+        raise HTTPException(
+            status_code=422,
+            detail="A Project ID must be at most 50 printable characters.")
+    return value
+
+
+@app.patch("/api/projects/{project_id}")
+def api_set_castillo_project_id(
+    project_id: str, payload: CastilloProjectIdUpdate,
+    user: dict = Depends(current_user),
+) -> dict:
+    """Set or clear a project's Castillo Project ID.
+
+    Resolves it on monday.com before returning, so the reply already carries
+    the board link. A monday failure does not fail the save: it is reported as
+    the project's monday status.
+    """
+    value = _clean_castillo_project_id(payload.castillo_project_id)
+    proj = set_castillo_project_id(project_id, value, user.get("email"))
+    if proj is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    out = (project_links.resolve_monday(project_id) if value
+           else project_links.decorate(proj))
+    if out is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    out["duplicates"] = project_links.duplicates(project_id, out["castillo_project_id"])
+    return out
+
+
+@app.post("/api/projects/{project_id}/monday-refresh")
+def api_refresh_project_monday(project_id: str) -> dict:
+    """Re-resolve the Project ID on monday, bypassing the cached Portfolio."""
+    out = project_links.resolve_monday(project_id, force=True)
+    if out is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    out["duplicates"] = project_links.duplicates(project_id, out["castillo_project_id"])
+    return out
+
+
+@app.get("/api/projects/{project_id}/project-id-suggestions")
+def api_project_id_suggestions(project_id: str) -> dict:
+    """Candidate Project IDs: the title block's, then similar monday names."""
+    project = next((p for p in list_projects() if p["id"] == project_id), None)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {
+        "suggestions": project_links.suggestions(
+            project_id, printed=project.get("title_block_project_id")),
+    }
+
+
+@app.get("/api/monday/portfolio")
+def api_monday_portfolio(refresh: bool = False) -> dict:
+    """Project IDs on monday's Portfolio board, for picking one by name.
+
+    ``configured`` is False when no token is set, which the UI shows as
+    "type the Project ID" rather than as an error.
+    """
+    if not monday.is_configured():
+        return {"configured": False, "items": [], "error": None}
+    try:
+        items = monday.portfolio(force=refresh)
+    except monday.MondayError as exc:
+        return {"configured": True, "items": [], "error": str(exc)}
+    return {
+        "configured": True,
+        "error": None,
+        "items": [
+            {"castillo_project_id": p["castillo_project_id"], "name": p["name"],
+             "client": p.get("client"), "status": p.get("status")}
+            for p in sorted(items, key=lambda p: (p.get("name") or "").lower())
+            if p.get("castillo_project_id")
+        ],
+    }
+
+
+@app.post("/api/monday/refresh-projects")
+def api_refresh_projects_on_monday(include_linked: bool = False) -> dict:
+    """Re-resolve every project's Project ID on monday, in one pass.
+
+    For switching the monday link on after MONDAY_API_TOKEN is first set:
+    projects saved before then are marked not_configured and would otherwise
+    wait for someone to re-save each one. Projects already linked are skipped
+    unless ``include_linked`` is set. Runs inside the app process, so it
+    writes under the same database lock as every other request.
+    """
+    if not monday.is_configured():
+        raise HTTPException(status_code=409, detail="MONDAY_API_TOKEN is not set.")
+    try:
+        monday.portfolio(force=True)
+    except monday.MondayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    by_status: dict[str, int] = {}
+    for p in list_projects():
+        if not p.get("number"):
+            continue
+        if p.get("monday_status") == "linked" and not include_linked:
+            continue
+        out = project_links.resolve_monday(p["id"], retry_missing=False)
+        status = ((out or {}).get("monday") or {}).get("status") or "deleted"
+        by_status[status] = by_status.get(status, 0) + 1
+    return {"checked": sum(by_status.values()), "by_status": by_status}
 
 
 @app.get("/api/runs/{run_id}")
@@ -518,6 +645,7 @@ _VALID_STAGES = {"30", "60", "90", "IFC", "AsBuilt"}
 
 @app.post("/api/analyze")
 async def api_analyze(
+    background_tasks: BackgroundTasks,
     project_name: str | None = Form(None),
     project_id: str | None = Form(None),
     run_name: str | None = Form(None),
@@ -526,11 +654,15 @@ async def api_analyze(
     supporting_docs: str | None = Form(None),
     design_stage: str | None = Form(None),
     engineer_name: str | None = Form(None),
+    castillo_project_id: str | None = Form(None),
     file: UploadFile = File(...),
     user: dict = Depends(current_user),
 ) -> dict:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Please upload a PDF file")
+    # Validate before anything is written, so a rejected Project ID leaves no
+    # orphaned upload or empty project behind.
+    submitted_pid = _clean_castillo_project_id(castillo_project_id)
 
     pd = None
     if project_details:
@@ -613,6 +745,19 @@ async def api_analyze(
     else:
         resolved_project_id = get_or_create_project(proj_name, created_by)
 
+    # A Project ID typed at upload fills an empty one. It never silently
+    # replaces one: joining an existing project by name while typing a
+    # different Project ID is reported back so the engineer can decide.
+    pid_conflict = None
+    if submitted_pid:
+        current = (get_project(resolved_project_id) or {}).get("number")
+        if not current:
+            set_castillo_project_id(resolved_project_id, submitted_pid, created_by)
+            # After the response: the upload should not wait on monday.com.
+            background_tasks.add_task(project_links.resolve_monday, resolved_project_id)
+        elif monday.project_id_key(current) != monday.project_id_key(submitted_pid):
+            pid_conflict = {"castillo_project_id": current, "submitted": submitted_pid}
+
     extra_meta = {
         "engineer_name": eng_display,
         "created_by": created_by,
@@ -640,6 +785,7 @@ async def api_analyze(
         "upload_id": upload_id, "status": "queued",
         "deep_mode": deep_flag, "design_stage": stage,
         "project_id": resolved_project_id,
+        "castillo_project_id_conflict": pid_conflict,
     }
 
 
@@ -939,10 +1085,15 @@ def api_export_run(run_id: str):
     run = get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    safe_project = "".join(
-        c for c in run["project_name"] if c.isalnum() or c in ("-", "_", " ")
-    ).strip() or "planset"
-    out_path = EXPORTS_DIR / f"{safe_project}_{run_id[:8]}_qc.xlsx"
+    def _safe(text: str | None) -> str:
+        return "".join(
+            c for c in (text or "") if c.isalnum() or c in ("-", "_", " ")
+        ).strip()
+
+    safe_project = _safe(run["project_name"]) or "planset"
+    safe_pid = _safe(run.get("castillo_project_id"))
+    prefix = f"{safe_pid}_" if safe_pid else ""
+    out_path = EXPORTS_DIR / f"{prefix}{safe_project}_{run_id[:8]}_qc.xlsx"
     export_run_to_excel(run, out_path)
     return FileResponse(
         out_path,

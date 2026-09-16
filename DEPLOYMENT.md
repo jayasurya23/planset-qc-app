@@ -208,6 +208,26 @@ az containerapp update -n $APP -g $RG --image "$ACR.azurecr.io/planset-qc:<old-s
 - **Secrets** — `OPENAI_API_KEY` is a Container App secret. Rotate with
   `az containerapp secret set -n $APP -g $RG --secrets openai-api-key=<new>` then
   restart the revision.
+- **Project IDs (PMO 360 and monday.com links)** — a project's Castillo
+  Project ID (the "Project ID" column on monday's Portfolio board) links to PMO
+  360 as `<PMO360_BASE_URL>/portfolio?project_id=<value>`; that needs no
+  credentials (`pmo360BaseUrl` in Bicep, default production PMO 360 —
+  point a staging app at staging PMO 360). Linking to the project's **monday
+  board** needs a monday.com API token, which is optional and not set by CI
+  (CI only rolls the image). To turn it on for an existing app:
+
+  ```bash
+  az containerapp secret set -n $APP -g $RG --secrets monday-api-token=<token>
+  az containerapp update -n $APP -g $RG --set-env-vars MONDAY_API_TOKEN=secretref:monday-api-token
+  ```
+
+  The update creates a new revision, and with a single replica that restarts the
+  app and ends any analysis in progress — do it when no runs are queued. A
+  personal monday token carries its owner's full permissions; the app only
+  sends read queries and refuses mutations, but create the token from an
+  account that can read the PMO workspace's Portfolio board and project
+  boards and nothing it does not need. Without the token, Project IDs and PMO
+  360 links still work and projects show "monday lookup not configured".
 
 ## Local development is unchanged
 

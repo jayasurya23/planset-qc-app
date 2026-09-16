@@ -133,7 +133,9 @@ def build_context_pack(run: dict) -> str:
 
     header = (
         f"Run: {run.get('project_name')} — {run.get('original_filename')} | "
-        f"design stage: {run.get('design_stage') or summary.get('design_stage') or 'n/a'} | "
+        + (f"Castillo Project ID: {run['castillo_project_id']} | "
+           if run.get("castillo_project_id") else "")
+        + f"design stage: {run.get('design_stage') or summary.get('design_stage') or 'n/a'} | "
         f"{run.get('page_count')} pages | findings: "
         + ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
     )

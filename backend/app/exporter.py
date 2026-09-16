@@ -284,6 +284,9 @@ def build_workbook(run: dict) -> Workbook:
     ws_summary["B4"] = run["original_filename"]
     ws_summary["A5"] = "Created"
     ws_summary["B5"] = run["created_at"]
+    if run.get("castillo_project_id"):
+        ws_summary["A6"] = "Project ID"
+        ws_summary["B6"] = run["castillo_project_id"]
 
     ws_summary["A7"] = "Metric"
     ws_summary["B7"] = "Value"

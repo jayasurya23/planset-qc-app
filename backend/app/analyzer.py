@@ -1375,6 +1375,66 @@ def detect_design_stage(doc: fitz.Document, max_pages: int = 3) -> str | None:
     return None
 
 
+_PROJECT_ID_LABEL = "CASTILLO PROJECT"            # "... PROJECT ID", "... PROJECT NO."
+_PROJECT_ID_VALUE_RE = re.compile(r"^\d{2,5}-\d{2,4}[A-Za-z]?$")
+_PROJECT_ID_DASHES_RE = re.compile("[‐‑‒–—−]")
+
+
+def detect_castillo_project_id(doc: fitz.Document, max_pages: int = 3) -> str | None:
+    """Read the Castillo Project ID printed in the title block, or None.
+
+    Castillo title blocks carry a "CASTILLO PROJECT ID" field (older sheets:
+    "CASTILLO PROJECT NO.") with the value directly beneath it. A bare
+    pattern search over the page is not enough: conductor sizes, ratings and
+    other clients' project numbers ("250-600", "175-225") share the shape.
+    So the value is taken only from beside that label -- below it and
+    overlapping it horizontally, or to its right on the same line.
+
+    Geometry is compared in DISPLAY space. search_for and get_text("words")
+    both report AUTHORED rects, and these sheets are drawn portrait and shown
+    landscape (/Rotate 270), where "below" in authored space is "left".
+
+    A suggestion for the engineer to confirm, never written to a project
+    unasked.
+    """
+    for i in range(min(max_pages, doc.page_count)):
+        page = doc[i]
+        try:
+            labels = page.search_for(_PROJECT_ID_LABEL)
+        except Exception:
+            continue
+        if not labels:
+            continue
+        rot = page.rotation_matrix
+        values: list[tuple[str, fitz.Rect]] = []
+        for w in page.get_text("words"):
+            text = _PROJECT_ID_DASHES_RE.sub("-", w[4]).strip(".,;:()[]")
+            if _PROJECT_ID_VALUE_RE.match(text):
+                r = fitz.Rect(w[:4]) * rot
+                r.normalize()
+                values.append((text, r))
+        if not values:
+            continue
+        best: tuple[float, str] | None = None
+        for hit in labels:
+            lab = fitz.Rect(hit) * rot
+            lab.normalize()
+            reach = max(4.0 * lab.height, 40.0)
+            for text, r in values:
+                overlap = min(r.x1, lab.x1) - max(r.x0, lab.x0)
+                below = overlap > 0 and lab.y1 - 1.0 <= r.y0 <= lab.y1 + reach
+                right = (lab.x1 - 1.0 <= r.x0 <= lab.x1 + 6.0 * reach
+                         and abs(r.y0 - lab.y0) <= max(lab.height, r.height))
+                if not (below or right):
+                    continue
+                dist = (r.y0 - lab.y1) if below else (r.x0 - lab.x1)
+                if best is None or dist < best[0]:
+                    best = (dist, text)
+        if best:
+            return best[1]
+    return None
+
+
 def _looks_like_datasheet_page(p: PageInfo) -> bool:
     """Detect pages that are likely vendor cut-sheets embedded in the planset.
 
@@ -1937,6 +1997,14 @@ def analyze_pdf(
                 "Auto-detected design_stage=%s from title block", detected,
             )
             design_stage = detected
+
+    # Project ID as printed on the drawings. Stored as a suggestion for the
+    # project and as a cross-check against the Project ID the project carries
+    # -- never applied to the project automatically.
+    try:
+        title_block_project_id = detect_castillo_project_id(doc)
+    except Exception:
+        title_block_project_id = None
 
     _progress("index", "Parsing drawing index...", 20)
     indexed_sheets = parse_drawing_index(cover_pages_text)
@@ -2970,6 +3038,7 @@ def analyze_pdf(
         "duration_seconds": duration_seconds,
         "deep_mode": bool(use_deep),
         "design_stage": design_stage,
+        "title_block_project_id": title_block_project_id,
         # What wrote the PDF. Makes "the tool got worse on this project"
         # answerable when a team changes its export or markup workflow.
         "pdf_provenance": provenance,
@@ -3016,6 +3085,7 @@ def analyze_pdf(
         # Promote the resolved stage (caller value or title-block auto-detect) to
         # the top level so db.insert_run can store it as a queryable column.
         "design_stage": design_stage,
+        "title_block_project_id": title_block_project_id,
     }
     doc.close()
     return run, issues

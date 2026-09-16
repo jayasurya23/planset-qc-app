@@ -131,6 +131,11 @@ def init_db() -> None:
             # (schema 1). See KEY_SCHEMA_VERSION.
             ("key_schema_version",
              "ALTER TABLE runs ADD COLUMN key_schema_version INTEGER"),
+            # Project ID as printed in the title block ("CASTILLO PROJECT ID"),
+            # read at analysis time. A suggestion for the project's Project ID
+            # and a cross-check against it; never the project's value itself.
+            ("title_block_project_id",
+             "ALTER TABLE runs ADD COLUMN title_block_project_id TEXT"),
         ]:
             try:
                 cur.execute(f"SELECT {col} FROM runs LIMIT 1")
@@ -230,6 +235,39 @@ def init_db() -> None:
             )
             """
         )
+        # `number` holds the Castillo Project ID ("264-066", "2512-053") -- the
+        # key PMO 360 and monday.com's Portfolio board share, named after
+        # monday's "Project ID" column (`castillo_project_id` in code, since
+        # project_id is this table's own key). The column predates the feature
+        # and migrations are additive, so it keeps its name. The value is an
+        # opaque string, never parsed, and deliberately NOT unique: one monday
+        # item can cover two QC projects (a permit set and an IFC set of the
+        # same project), and a UNIQUE violation on a hand-typed value would
+        # surface as a failed startup migration rather than a rejected save.
+        #
+        # The monday_* columns cache where that Project ID resolved on monday,
+        # so links render from stored ids instead of an API call per page load.
+        # They are cleared whenever the Project ID changes.
+        for col, ddl in [
+            ("castillo_project_id_set_by",
+             "ALTER TABLE projects ADD COLUMN castillo_project_id_set_by TEXT"),
+            ("castillo_project_id_set_at",
+             "ALTER TABLE projects ADD COLUMN castillo_project_id_set_at TEXT"),
+            # linked | not_found | ambiguous | error | not_configured | NULL (never tried)
+            ("monday_status",     "ALTER TABLE projects ADD COLUMN monday_status TEXT"),
+            ("monday_detail",     "ALTER TABLE projects ADD COLUMN monday_detail TEXT"),
+            ("monday_item_id",    "ALTER TABLE projects ADD COLUMN monday_item_id TEXT"),
+            ("monday_item_name",  "ALTER TABLE projects ADD COLUMN monday_item_name TEXT"),
+            ("monday_board_id",   "ALTER TABLE projects ADD COLUMN monday_board_id TEXT"),
+            ("monday_board_name", "ALTER TABLE projects ADD COLUMN monday_board_name TEXT"),
+            ("monday_checked_at", "ALTER TABLE projects ADD COLUMN monday_checked_at TEXT"),
+        ]:
+            try:
+                cur.execute(f"SELECT {col} FROM projects LIMIT 1")
+            except sqlite3.OperationalError:
+                cur.execute(ddl)
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_projects_number ON projects(number)")
         # Chat copilot: one thread per run. Read-only grounding in Phase 1 —
         # chat NEVER writes issue status; the exported checklist stays the
         # system of record and chat content is excluded from the export.
@@ -441,8 +479,8 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 project_details_json, engineer_name,
                 project_id, design_stage, created_by, created_by_id,
                 parent_run_id, root_run_id, version, is_latest, run_name,
-                key_schema_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                key_schema_version, title_block_project_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run["id"],
@@ -468,6 +506,8 @@ def insert_run(run: dict[str, Any], issues: Iterable[dict[str, Any]]) -> None:
                 1 if run.get("is_latest", 1) else 0,
                 (run.get("run_name") or "").strip() or None,
                 run.get("key_schema_version") or KEY_SCHEMA_VERSION,
+                run.get("title_block_project_id")
+                or (run.get("summary") or {}).get("title_block_project_id"),
             ),
         )
         cur.executemany(
@@ -540,6 +580,12 @@ def get_run(run_id: str) -> dict[str, Any] | None:
         ).fetchall()
 
     run_dict = dict(run)
+    # The Project ID belongs to the project; carried on the run so the export
+    # and the chat copilot see the project's current value.
+    run_dict["castillo_project_id"] = None
+    if run_dict.get("project_id"):
+        proj = get_project(run_dict["project_id"])
+        run_dict["castillo_project_id"] = (proj or {}).get("number")
     run_dict["summary"] = json.loads(run_dict.pop("summary_json"))
     run_dict["status_counts"] = json.loads(run_dict.pop("status_counts_json"))
     run_dict["categories"] = json.loads(run_dict.pop("categories_json"))
@@ -655,6 +701,98 @@ def get_project(project_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+_MONDAY_COLS = (
+    "monday_status", "monday_detail", "monday_item_id", "monday_item_name",
+    "monday_board_id", "monday_board_name", "monday_checked_at",
+)
+
+
+def set_castillo_project_id(
+    project_id: str, castillo_project_id: str | None, set_by: str | None
+) -> dict[str, Any] | None:
+    """Set or clear a project's Project ID, recording who did it.
+
+    Callers normalise first. A changed Project ID invalidates the cached
+    monday link, because that link was resolved from the old value; setting
+    the same value again keeps it.
+    """
+    value = castillo_project_id
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT number FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not row:
+            return None
+        if (row["number"] or None) != (value or None):
+            conn.execute(
+                "UPDATE projects SET number = ?, castillo_project_id_set_by = ?, castillo_project_id_set_at = ?, "
+                + ", ".join(f"{c} = NULL" for c in _MONDAY_COLS)
+                + " WHERE id = ?",
+                (value, set_by if value else None,
+                 _now_iso() if value else None, project_id),
+            )
+            conn.commit()
+    return get_project(project_id)
+
+
+def set_project_monday_link(
+    project_id: str,
+    *,
+    castillo_project_id: str | None,
+    status: str,
+    detail: str | None = None,
+    item_id: str | None = None,
+    item_name: str | None = None,
+    board_id: str | None = None,
+    board_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Record the outcome of resolving a Project ID on monday.com.
+
+    Written only if the project still carries ``castillo_project_id``: a
+    lookup that started before someone changed the Project ID must not attach
+    the old project's board to the new value.
+    """
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE projects SET monday_status = ?, monday_detail = ?, monday_item_id = ?, "
+            "monday_item_name = ?, monday_board_id = ?, monday_board_name = ?, "
+            "monday_checked_at = ? WHERE id = ? AND IFNULL(number, '') = ?",
+            (status, detail, item_id, item_name, board_id, board_name, _now_iso(),
+             project_id, castillo_project_id or ""),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            return None
+    return get_project(project_id)
+
+
+def projects_with_castillo_project_id(
+    castillo_project_id: str, exclude_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Other projects carrying the same Project ID (case-insensitive).
+
+    Sharing one is legitimate, so this feeds a warning, not a constraint.
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, name, number FROM projects "
+            "WHERE number IS NOT NULL AND lower(number) = lower(?) AND id != ? "
+            "ORDER BY name",
+            (castillo_project_id, exclude_id or ""),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def latest_pdf_for_project(project_id: str) -> str | None:
+    """Stored PDF of the project's newest run, for reading its title block."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT pdf_path FROM runs WHERE project_id = ? "
+            "ORDER BY COALESCE(is_latest, 1) DESC, created_at DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+    return row["pdf_path"] if row else None
+
+
 def _stage_summary(stage_runs: list[sqlite3.Row]) -> dict[str, Any]:
     """Pick the current run for a stage (is_latest first, then newest)."""
     chosen = None
@@ -688,7 +826,8 @@ def list_projects() -> list[dict[str, Any]]:
             "SELECT * FROM projects ORDER BY created_at DESC").fetchall()
         runs = conn.execute(
             "SELECT id, project_id, design_stage, version, is_latest, created_at, "
-            "created_by, engineer_name, status_counts_json FROM runs"
+            "created_by, engineer_name, status_counts_json, title_block_project_id "
+            "FROM runs"
         ).fetchall()
     by_proj: dict[str, list[sqlite3.Row]] = {}
     for r in runs:
@@ -704,12 +843,22 @@ def list_projects() -> list[dict[str, Any]]:
                 last_activity = r["created_at"]
         stages = [_stage_summary(rs) for rs in by_stage.values()]
         stages.sort(key=lambda s: _stage_sort_key(s["stage"]))
+        # What the newest drawings print as the Project ID: a suggestion when
+        # the project has none, a mismatch warning when it differs.
+        printed = next(
+            (r["title_block_project_id"] for r in sorted(
+                pruns, key=lambda r: (bool(r["is_latest"]), r["created_at"] or ""),
+                reverse=True)
+             if r["title_block_project_id"]),
+            None,
+        )
         out.append({
             **dict(p),
             "run_count": len(pruns),
             "stage_count": len(by_stage),
             "stages": stages,
             "last_activity": last_activity,
+            "title_block_project_id": printed,
         })
     out.sort(key=lambda x: (x["last_activity"] or ""), reverse=True)
     return out
@@ -725,7 +874,7 @@ def _run_card(row: sqlite3.Row) -> dict[str, Any]:
 _RUN_CARD_COLS = (
     "id, project_id, project_name, original_filename, run_name, design_stage, "
     "version, is_latest, parent_run_id, root_run_id, created_at, created_by, "
-    "engineer_name, page_count, status_counts_json"
+    "engineer_name, page_count, status_counts_json, title_block_project_id"
 )
 
 
