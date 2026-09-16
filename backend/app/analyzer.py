@@ -1377,7 +1377,7 @@ def detect_design_stage(doc: fitz.Document, max_pages: int = 3) -> str | None:
 
 _PROJECT_ID_LABEL = "CASTILLO PROJECT"            # "... PROJECT ID", "... PROJECT NO."
 _PROJECT_ID_VALUE_RE = re.compile(r"^\d{2,5}-\d{2,4}[A-Za-z]?$")
-_PROJECT_ID_DASHES_RE = re.compile("[‐‑‒–—−]")
+_PROJECT_ID_DASHES_RE = re.compile("[‐-―−﹣－]")
 
 
 def detect_castillo_project_id(doc: fitz.Document, max_pages: int = 3) -> str | None:

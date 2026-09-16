@@ -229,6 +229,18 @@ az containerapp update -n $APP -g $RG --image "$ACR.azurecr.io/planset-qc:<old-s
   boards and nothing it does not need. Without the token, Project IDs and PMO
   360 links still work and projects show "monday lookup not configured".
 
+  On the restart that picks the token up, the app links every project whose
+  Project ID was saved without it (in the background; see the log line
+  "resolved waiting Project IDs at startup"). To re-check all projects later,
+  `POST /api/monday/refresh-projects` (add `?include_linked=true` to include
+  ones already linked).
+
+  **Once enabled, pass it on every infrastructure redeploy:**
+  `az deployment group create ... -p mondayApiToken=<token>`. The Bicep
+  template only adds the secret and `MONDAY_API_TOKEN` when the parameter is
+  non-empty, so a redeploy without it removes both and projects fall back to
+  "monday lookup not configured" -- the same applies to `authClientSecret`.
+
 ## Local development is unchanged
 
 Run the backend (`uvicorn app.main:app --reload`; leaves `FRONTEND_DIST` unset so

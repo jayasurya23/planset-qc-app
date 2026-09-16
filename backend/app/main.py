@@ -95,6 +95,13 @@ async def log_requests(request, call_next):
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    if monday.is_configured():
+        # Off the startup path: a slow monday must not delay the app coming up.
+        import threading
+        threading.Thread(
+            target=project_links.refresh_waiting_projects_on_startup,
+            name="monday-startup-refresh", daemon=True,
+        ).start()
 
 
 class IssueUpdate(BaseModel):
@@ -437,6 +444,12 @@ def _clean_castillo_project_id(raw: str | None) -> str | None:
         raise HTTPException(
             status_code=422,
             detail="A Project ID must be at most 50 printable characters.")
+    if value[0] in "=+-@":
+        # The value is written into the Excel export; a leading formula
+        # character would make it a live formula in a reviewer's workbook.
+        raise HTTPException(
+            status_code=422,
+            detail="A Project ID cannot start with =, +, - or @.")
     return value
 
 
@@ -523,19 +536,9 @@ def api_refresh_projects_on_monday(include_linked: bool = False) -> dict:
     if not monday.is_configured():
         raise HTTPException(status_code=409, detail="MONDAY_API_TOKEN is not set.")
     try:
-        monday.portfolio(force=True)
+        return project_links.refresh_projects(include_linked=include_linked)
     except monday.MondayError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    by_status: dict[str, int] = {}
-    for p in list_projects():
-        if not p.get("number"):
-            continue
-        if p.get("monday_status") == "linked" and not include_linked:
-            continue
-        out = project_links.resolve_monday(p["id"], retry_missing=False)
-        status = ((out or {}).get("monday") or {}).get("status") or "deleted"
-        by_status[status] = by_status.get(status, 0) + 1
-    return {"checked": sum(by_status.values()), "by_status": by_status}
 
 
 @app.get("/api/runs/{run_id}")

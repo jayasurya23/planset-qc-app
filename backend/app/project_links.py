@@ -67,8 +67,10 @@ def decorate(project: dict[str, Any] | None) -> dict[str, Any] | None:
     p = dict(project)
     pid = p.get("number") or None
     status = p.get("monday_status")
-    if pid and not monday.is_configured() and status in (None, "not_configured"):
-        status = "not_configured"
+    if pid and status in (None, "not_configured"):
+        # Not looked up yet -- or looked up while the server had no token,
+        # which says nothing about monday once a token exists.
+        status = "unchecked" if monday.is_configured() else "not_configured"
     linked = status == "linked"
     out = {k: v for k, v in p.items() if k not in _RAW_COLUMNS}
     out["castillo_project_id"] = pid
@@ -100,10 +102,12 @@ def resolve_monday(
     monday is unreachable. Returns the decorated project, or None if it no
     longer exists.
 
-    ``force`` refetches the Portfolio first. ``retry_missing`` refetches it
-    once more when the value is not in the cached copy (a project added on
-    monday since); a bulk caller that has just refreshed the Portfolio turns
-    that off, or every unmatched project would refetch the whole board.
+    ``force`` is an explicit refresh: it refetches the Portfolio, even during
+    the short back-off after a failed fetch. ``retry_missing`` refetches it
+    once when the value is not in the cached copy (a project added on monday
+    since); a bulk caller that has just refreshed the Portfolio turns that
+    off, or every unmatched project would refetch the whole board. A refetch
+    that fails is recorded as status "error", never as "not_found".
     """
     project = get_project(project_id)
     if project is None:
@@ -116,7 +120,7 @@ def resolve_monday(
         return decorate(get_project(project_id))
 
     try:
-        matches = monday.find_by_project_id(pid, force=force)
+        matches = monday.find_by_project_id(pid, force=force, during_backoff=force)
         if not matches and not force and retry_missing:
             # A project added on monday since the cached list was fetched.
             matches = monday.find_by_project_id(pid, force=True)
@@ -149,6 +153,47 @@ def resolve_monday(
             project_id, castillo_project_id=pid, status="error",
             detail="The monday.com lookup failed unexpectedly; see the server log.")
     return decorate(get_project(project_id))
+
+
+def refresh_projects(*, include_linked: bool = False) -> dict[str, Any]:
+    """Resolve every project that carries a Project ID, in one pass.
+
+    Fetches the Portfolio once, then resolves each project against that copy.
+    Projects already linked are skipped unless ``include_linked``. Raises
+    monday.MondayError if the Portfolio cannot be fetched, so an outage is not
+    written onto every project as "not_found". Runs in the app process, under
+    the same database lock as every request.
+    """
+    from .db import list_projects
+
+    monday.portfolio(force=True, during_backoff=True)
+    by_status: dict[str, int] = {}
+    for p in list_projects():
+        if not p.get("number"):
+            continue
+        if p.get("monday_status") == "linked" and not include_linked:
+            continue
+        out = resolve_monday(p["id"], retry_missing=False)
+        status = ((out or {}).get("monday") or {}).get("status") or "deleted"
+        by_status[status] = by_status.get(status, 0) + 1
+    return {"checked": sum(by_status.values()), "by_status": by_status}
+
+
+def refresh_waiting_projects_on_startup() -> None:
+    """Link the projects saved while the server had no monday token.
+
+    Setting MONDAY_API_TOKEN restarts the app, so this is when those projects
+    first become resolvable. Run on a background thread at startup; never
+    raises.
+    """
+    try:
+        result = refresh_projects()
+        if result["checked"]:
+            log.info("monday.com: resolved waiting Project IDs at startup: %s", result)
+    except monday.MondayError as exc:
+        log.warning("monday.com: startup Project ID refresh skipped: %s", exc)
+    except Exception:
+        log.exception("monday.com: startup Project ID refresh crashed")
 
 
 def duplicates(project_id: str, castillo_project_id: str | None) -> list[dict[str, Any]]:

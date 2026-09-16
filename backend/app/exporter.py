@@ -280,6 +280,8 @@ def build_workbook(run: dict) -> Workbook:
     ws_summary["A1"].font = Font(size=16, bold=True, color=CASTILLO_DARK)
     ws_summary["A3"] = "Project"
     ws_summary["B3"] = run["project_name"]
+    # Typed by users: always text, never a formula, even if it starts with "=".
+    ws_summary["B3"].data_type = "s"
     ws_summary["A4"] = "Original file"
     ws_summary["B4"] = run["original_filename"]
     ws_summary["A5"] = "Created"
@@ -287,6 +289,7 @@ def build_workbook(run: dict) -> Workbook:
     if run.get("castillo_project_id"):
         ws_summary["A6"] = "Project ID"
         ws_summary["B6"] = run["castillo_project_id"]
+        ws_summary["B6"].data_type = "s"
 
     ws_summary["A7"] = "Metric"
     ws_summary["B7"] = "Value"

@@ -269,8 +269,10 @@ export interface JobsResponse {
  *   ambiguous       several do; nothing is linked rather than guessing
  *   error           monday could not be asked; the number is still saved
  *   not_configured  the server has no monday token
+ *   unchecked       the server has a token, but this value has not been looked up yet
  */
-export type MondayStatus = 'linked' | 'not_found' | 'ambiguous' | 'error' | 'not_configured'
+export type MondayStatus =
+  | 'linked' | 'not_found' | 'ambiguous' | 'error' | 'not_configured' | 'unchecked'
 
 /** A project from GET /api/projects, with its Castillo Project ID and links. */
 export interface ProjectInfo {

@@ -43,6 +43,8 @@ function mondayNote(p: ProjectInfo): { text: string; title: string } | null {
       return { text: "several on monday", title: m.detail || "More than one Portfolio item has this Project ID." };
     case "error":
       return { text: "monday unavailable", title: m.detail || "monday.com could not be reached." };
+    case "unchecked":
+      return { text: "monday not checked", title: "Not looked up on monday yet \u2014 open the Project ID to check." };
     default:
       return null;
   }
@@ -237,7 +239,22 @@ export function ProjectIdDialog({
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="piddlg" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Project ID">
+      <div
+        className="piddlg"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Keep keys inside: the report's single-key shortcuts listen on
+          // window, and with a finding focused p/f/r/o would change its status.
+          e.stopPropagation();
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onClose();
+          }
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Project ID"
+      >
         <div className="piddlg-head">
           <div>
             <div className="piddlg-crumb">Castillo Project ID</div>
@@ -302,7 +319,11 @@ export function ProjectIdDialog({
                   type="button"
                   key={`${s.source}-${s.castillo_project_id}`}
                   className={`piddlg-sug ${projectIdKey(s.castillo_project_id) === projectIdKey(value) ? "on" : ""}`}
-                  onClick={() => setValue(s.castillo_project_id)}
+                  onClick={() => {
+                    setValue(s.castillo_project_id);
+                    // Back to the input, so Enter saves the picked value.
+                    inputRef.current?.focus();
+                  }}
                   title={s.source === "title_block"
                     ? "Printed beside CASTILLO PROJECT ID on the newest drawings"
                     : "A monday Portfolio project with a similar name"}
@@ -324,7 +345,9 @@ export function ProjectIdDialog({
             <div className={`piddlg-status piddlg-status-${status}`}>
               {status === "not_configured"
                 ? "Saved. monday lookup is not configured on this server, so there is no monday link."
-                : current.monday.detail || "Saved, but monday.com did not link it."}
+                : status === "unchecked"
+                  ? "Saved, but not looked up on monday yet."
+                  : current.monday.detail || "Saved, but monday.com did not link it."}
               {status !== "not_configured" && (
                 <button type="button" className="pid-btn" disabled={saving} onClick={() => save(null, true)}>
                   Retry monday

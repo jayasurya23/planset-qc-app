@@ -54,8 +54,8 @@ _RATE_LIMIT_CODES = {
 _AUTH_CODES = {"UNAUTHENTICATED", "UNAUTHORIZED", "FORBIDDEN", "NOT_AUTHENTICATED"}
 # Lookups run inside a user's request, so the retry budget is small: one
 # engineer waiting on a save matters more than squeezing out a slow reply.
-_MAX_RETRIES = 2
-_MAX_WAIT_S = 8.0
+_MAX_RETRIES = 1
+_MAX_WAIT_S = 3.0
 
 
 class MondayError(RuntimeError):
@@ -108,7 +108,7 @@ def _cache_ttl_s() -> float:
 # ── Project IDs ────────────────────────────────────────────────────────────
 
 # Hyphen look-alikes that arrive by copy-paste from Word, Outlook and PDFs.
-_DASHES = re.compile("[‐‑‒–—−﹣－]")
+_DASHES = re.compile("[‐-―−﹣－]")
 
 
 def normalize_project_id(raw: str | None) -> str | None:
@@ -241,27 +241,53 @@ def execute(query: str, variables: dict | None = None) -> dict:
 
 
 # ── Portfolio ──────────────────────────────────────────────────────────────
+#
+# The cache is shared by every request in the process. Two rules keep a slow
+# or failing monday from stalling the app:
+#
+#   * No lock is held across a network call. _lock guards the dictionaries;
+#     _fetch_lock lets one fetch run at a time, and a caller that already has
+#     a copy is not made to wait for another request's fetch.
+#   * A failed fetch starts a short back-off. Until it expires, automatic
+#     lookups get the cached copy (lists) or an immediate error (lookups that
+#     need current data) instead of each trying monday again. Only an explicit
+#     refresh -- the Retry button, the bulk refresh -- goes back to monday
+#     during a back-off.
+#
+# A refresh that was asked for (force=True) never answers with the old copy:
+# resolving a Project ID against stale data would record a confident
+# "not on monday" for a project added since.
 
 _lock = threading.Lock()
+_fetch_lock = threading.Lock()
 _columns: dict[str, dict[str, str]] = {}          # board id -> lower(title) -> column id
-_portfolio: dict[str, Any] = {"items": None, "fetched": 0.0, "board": None}
+_portfolio: dict[str, Any] = {
+    "items": None, "fetched": 0.0, "board": None,
+    "failed_at": 0.0, "failed_board": None, "error": None,
+}
+_FAILURE_BACKOFF_S = 30.0
 
 
 def _column_ids(board_id: str, *, force: bool = False) -> dict[str, str]:
-    if force or board_id not in _columns:
-        data = execute(
-            "query ($ids: [ID!]) { boards(ids: $ids) { name columns { id title } } }",
-            {"ids": [board_id]},
-        )
-        boards = data.get("boards") or []
-        if not boards:
-            raise MondayAuthError(
-                f"monday.com board {board_id} is not visible to this token.")
-        _columns[board_id] = {
-            (c.get("title") or "").strip().lower(): c["id"]
-            for c in boards[0].get("columns") or [] if c.get("id")
-        }
-    return _columns[board_id]
+    with _lock:
+        cached = _columns.get(board_id)
+    if cached is not None and not force:
+        return cached
+    data = execute(
+        "query ($ids: [ID!]) { boards(ids: $ids) { name columns { id title } } }",
+        {"ids": [board_id]},
+    )
+    boards = data.get("boards") or []
+    if not boards:
+        raise MondayAuthError(
+            f"monday.com board {board_id} is not visible to this token.")
+    fresh = {
+        (c.get("title") or "").strip().lower(): c["id"]
+        for c in boards[0].get("columns") or [] if c.get("id")
+    }
+    with _lock:
+        _columns[board_id] = fresh
+    return fresh
 
 
 _ITEMS_FIRST = """
@@ -283,19 +309,27 @@ query ($cursor: String!, $cols: [String!]) {
 }"""
 
 
-def _fetch_portfolio(board_id: str) -> list[dict]:
-    cols = _column_ids(board_id)
+def _fetch_portfolio(board_id: str, *, refresh_columns: bool = False) -> list[dict]:
     wanted = {"castillo_project_id": COL_PROJECT_ID, "client": COL_CLIENT, "status": COL_STATUS}
-    ids = {key: cols.get(title.lower()) for key, title in wanted.items()}
-    if not ids["castillo_project_id"]:
-        # The column may have been recreated since the ids were cached.
-        cols = _column_ids(board_id, force=True)
+    for attempt in (0, 1):
+        cols = _column_ids(board_id, force=refresh_columns or attempt == 1)
         ids = {key: cols.get(title.lower()) for key, title in wanted.items()}
-    if not ids["castillo_project_id"]:
-        raise MondayError(
-            f'The Portfolio board has no column titled "{COL_PROJECT_ID}".')
-    by_col = {cid: key for key, cid in ids.items() if cid}
+        if not ids["castillo_project_id"]:
+            if attempt == 0:
+                continue                         # the column may have been renamed or recreated
+            raise MondayError(
+                f'The Portfolio board has no column titled "{COL_PROJECT_ID}".')
+        by_col = {cid: key for key, cid in ids.items() if cid}
+        items = _fetch_items(board_id, by_col)
+        # monday silently drops a column id it no longer knows, so a column
+        # recreated under the same title reads as "every item is blank".
+        if (attempt == 0 and not refresh_columns and items
+                and not any(i["castillo_project_id"] for i in items)):
+            continue
+        return items
 
+
+def _fetch_items(board_id: str, by_col: dict[str, str]) -> list[dict]:
     raw: list[dict] = []
     page = (execute(_ITEMS_FIRST, {"ids": [board_id], "cols": list(by_col)})
             .get("boards") or [{}])[0].get("items_page") or {}
@@ -322,40 +356,67 @@ def _fetch_portfolio(board_id: str) -> list[dict]:
     return out
 
 
-def portfolio(*, force: bool = False) -> list[dict]:
+def portfolio(*, force: bool = False, during_backoff: bool = False) -> list[dict]:
     """Every Portfolio item: {item_id, name, castillo_project_id, client, status}.
 
-    Cached for MONDAY_CACHE_TTL_SECONDS. If a refresh fails and an earlier
-    copy exists, the earlier copy is served and the failure logged -- a stale
-    list of project names is more useful to someone typing a Project ID than
-    an error.
+    Cached for MONDAY_CACHE_TTL_SECONDS. ``force`` fetches now and raises on
+    failure rather than answering from the cache. ``during_backoff`` lets an
+    explicit refresh reach monday even shortly after a failed fetch.
+    Unforced callers are served the cached copy when a refresh fails, or while
+    another request is already fetching -- a slightly old list of projects is
+    more useful to someone picking a Project ID than a wait or an error.
     """
     board_id = portfolio_board_id()
+    started = time.monotonic()
     with _lock:
-        fresh = (
-            _portfolio["items"] is not None
-            and _portfolio["board"] == board_id
-            and time.monotonic() - _portfolio["fetched"] < _cache_ttl_s()
-        )
-        if fresh and not force:
-            return list(_portfolio["items"])
-        try:
-            items = _fetch_portfolio(board_id)
-        except MondayError:
-            if _portfolio["items"] is not None and _portfolio["board"] == board_id:
-                log.exception("monday.com Portfolio refresh failed; serving the cached copy")
+        cached = _portfolio["items"] if _portfolio["board"] == board_id else None
+        fresh = cached is not None and started - _portfolio["fetched"] < _cache_ttl_s()
+        backing_off = (_portfolio["failed_board"] == board_id
+                       and started - _portfolio["failed_at"] < _FAILURE_BACKOFF_S)
+        last_error = _portfolio["error"]
+
+    if fresh and not force:
+        return list(cached)
+    if backing_off and not during_backoff:
+        if cached is not None and not force:
+            return list(cached)
+        raise MondayError(last_error or "monday.com is unavailable; try again shortly.")
+
+    # One fetch at a time. A caller that can make do with the cached copy does
+    # not queue behind someone else's fetch.
+    if not _fetch_lock.acquire(blocking=force or cached is None):
+        return list(cached)
+    try:
+        with _lock:
+            # Someone else's fetch finished while this call waited: use it.
+            if _portfolio["board"] == board_id and _portfolio["fetched"] >= started:
                 return list(_portfolio["items"])
-            raise
-        _portfolio.update(items=items, fetched=time.monotonic(), board=board_id)
+        try:
+            items = _fetch_portfolio(board_id, refresh_columns=force)
+        except MondayError as exc:
+            with _lock:
+                _portfolio.update(failed_at=time.monotonic(), failed_board=board_id,
+                                  error=str(exc))
+            if force or cached is None:
+                raise
+            log.warning("monday.com Portfolio refresh failed (%s); serving the cached copy", exc)
+            return list(cached)
+        with _lock:
+            _portfolio.update(items=items, fetched=time.monotonic(), board=board_id,
+                              failed_at=0.0, failed_board=None, error=None)
         return list(items)
+    finally:
+        _fetch_lock.release()
 
 
-def find_by_project_id(castillo_project_id: str | None, *, force: bool = False) -> list[dict]:
+def find_by_project_id(
+    castillo_project_id: str | None, *, force: bool = False, during_backoff: bool = False,
+) -> list[dict]:
     """Portfolio items carrying this Project ID. Normally zero or one."""
     key = project_id_key(castillo_project_id)
     if not key:
         return []
-    return [p for p in portfolio(force=force)
+    return [p for p in portfolio(force=force, during_backoff=during_backoff)
             if project_id_key(p.get("castillo_project_id")) == key]
 
 
@@ -366,23 +427,27 @@ def board_for_item(item_id: str) -> dict | None:
     one of them identifies it.
     """
     board_id = portfolio_board_id()
-    link_col = _column_ids(board_id).get(COL_TASK_LINKS.lower())
-    if not link_col:
-        link_col = _column_ids(board_id, force=True).get(COL_TASK_LINKS.lower())
-    if not link_col:
-        return None
-    data = execute(
-        """query ($ids: [ID!], $cols: [String!]) {
-             items(ids: $ids) {
-               column_values(ids: $cols) { ... on BoardRelationValue { linked_item_ids } }
-             }
-           }""",
-        {"ids": [item_id], "cols": [link_col]},
-    )
     linked: list[str] = []
-    for it in data.get("items") or []:
-        for cv in it.get("column_values") or []:
-            linked.extend(str(i) for i in (cv.get("linked_item_ids") or []))
+    for attempt in (0, 1):
+        # A recreated "Project Tasks Links" column keeps its title with a new
+        # id, and monday answers the old id with nothing -- so an empty answer
+        # re-reads the column ids once before concluding there is no board.
+        link_col = _column_ids(board_id, force=attempt == 1).get(COL_TASK_LINKS.lower())
+        if not link_col:
+            continue
+        data = execute(
+            """query ($ids: [ID!], $cols: [String!]) {
+                 items(ids: $ids) {
+                   column_values(ids: $cols) { ... on BoardRelationValue { linked_item_ids } }
+                 }
+               }""",
+            {"ids": [item_id], "cols": [link_col]},
+        )
+        for it in data.get("items") or []:
+            for cv in it.get("column_values") or []:
+                linked.extend(str(i) for i in (cv.get("linked_item_ids") or []))
+        if linked:
+            break
     if not linked:
         return None
     data = execute(
@@ -397,7 +462,8 @@ def board_for_item(item_id: str) -> dict | None:
 
 
 def reset_cache() -> None:
-    """Forget cached columns and Portfolio items. For tests and forced refresh."""
+    """Forget cached columns, Portfolio items and any back-off. For tests."""
     with _lock:
         _columns.clear()
-        _portfolio.update(items=None, fetched=0.0, board=None)
+        _portfolio.update(items=None, fetched=0.0, board=None,
+                          failed_at=0.0, failed_board=None, error=None)

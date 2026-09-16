@@ -23,6 +23,7 @@ No network: monday's transport is replaced with a fake board.
 
 Run: PYTHONPATH=backend python backend/scripts/test_project_links.py
 """
+import copy
 import io
 import os
 import sys
@@ -136,6 +137,8 @@ n = monday.normalize_project_id
 check("en dash and padding -> 264-066", n("  264–066 ") == "264-066")
 check("spaces around the dash collapse", n("2512 - 053") == "2512-053")
 check("em dash and minus sign are dashes too", n("2512—053") == n("2512−053") == "2512-053")
+check("horizontal bar and fullwidth hyphen too -- the same set the TypeScript keys use",
+      n("264―066") == n("264－066") == "264-066")
 check("blank -> None", n("   ") is None and n(None) is None)
 check("anything else is left alone", n("KA340 phase B") == "KA340 phase B")
 check("comparison ignores case and dash style",
@@ -196,10 +199,76 @@ monday.portfolio()
 check("a second read within the TTL makes no call", len(FAKE["calls"]) == calls)
 monday.portfolio(force=True)
 check("force refetches the items", len(FAKE["calls"]) > calls)
+
+print("A failing monday degrades without lying or stalling:")
 FAKE["fail"] = "down"
-stale = monday.portfolio(force=True)
-check("a failed refresh serves the cached copy", len(stale) == 4)
+try:
+    monday.portfolio(force=True)
+    check("a refresh that was asked for raises instead of answering from the old copy", False)
+except monday.MondayError:
+    check("a refresh that was asked for raises instead of answering from the old copy", True)
+calls = len(FAKE["calls"])
+check("during the back-off an automatic lookup gets the old copy without calling monday",
+      len(monday.portfolio()) == 4 and len(FAKE["calls"]) == calls)
+try:
+    monday.portfolio(force=True)
+    check("during the back-off a forced lookup fails at once", False)
+except monday.MondayError:
+    check("during the back-off a forced lookup fails at once", len(FAKE["calls"]) == calls)
 FAKE["fail"] = None
+check("an explicit refresh may go back to monday during the back-off",
+      len(monday.portfolio(force=True, during_backoff=True)) == 4 and len(FAKE["calls"]) > calls)
+os.environ["MONDAY_CACHE_TTL_SECONDS"] = "0"
+FAKE["fail"] = "down"
+check("an expired cache that cannot refresh still serves list callers",
+      len(monday.portfolio()) == 4)
+FAKE["fail"] = None
+os.environ.pop("MONDAY_CACHE_TTL_SECONDS")
+monday.reset_cache()
+
+print("A recreated monday column is found again without a restart:")
+configure(True)
+monday.portfolio()
+for it in FAKE["page1"] + FAKE["page2"]:
+    for cv in it["column_values"]:
+        if cv["id"] == "txt_pid_fake":
+            cv["id"] = "txt_pid_new"
+COLUMNS[1]["id"] = "txt_pid_new"
+# monday answers an unknown column id with nothing, not an error.
+_real_fake_post = fake_post
+
+
+def dropping_post(url, payload, headers, timeout):
+    status, hdrs, body = _real_fake_post(url, payload, headers, timeout)
+    body = copy.deepcopy(body)          # never edit the fake board itself
+    cols = (payload.get("variables") or {}).get("cols")
+    if cols and isinstance(body, dict) and body.get("data"):
+        pages = [b.get("items_page") for b in (body["data"].get("boards") or [])] + [
+            body["data"].get("next_items_page")]
+        for page in filter(None, pages):
+            for it in page.get("items") or []:
+                it["column_values"] = [cv for cv in it["column_values"] if cv["id"] in cols]
+    return status, hdrs, body
+
+
+monday._post = dropping_post
+got = monday.portfolio(force=True)
+check("a forced refresh re-reads column ids", sorted(i["castillo_project_id"] or "" for i in got)
+      == ["", "2512-053", "2512-061", "254-325"])
+monday.reset_cache()
+monday._columns["18403099969"] = {"project id": "txt_pid_fake", "client name": "txt_client_fake",
+                                  "contract status": "status_fake",
+                                  "project tasks links": "rel_fake"}
+got = monday.portfolio()
+check("an ordinary fetch that reads every value blank re-reads column ids once",
+      any(i["castillo_project_id"] == "2512-053" for i in got))
+for it in FAKE["page1"] + FAKE["page2"]:
+    for cv in it["column_values"]:
+        if cv["id"] == "txt_pid_new":
+            cv["id"] = "txt_pid_fake"
+COLUMNS[1]["id"] = "txt_pid_fake"
+monday._post = fake_post
+configure(True)
 check("find_by_project_id matches a pasted variant", [i["item_id"] for i in
       monday.find_by_project_id("254–325")] == ["102"])
 check("the board comes from a linked task", monday.board_for_item("101") ==
@@ -278,6 +347,9 @@ HIGHLAND, _ = seed_run("Highland North 1", detected="254-325")
 jobs_submitted = []
 jobs.submit = lambda job_id, kind, meta, fn: jobs_submitted.append(job_id)
 
+# No token at startup: the startup refresh thread is tested directly below,
+# not raced against these requests.
+configure(False)
 with TestClient(app) as client:
     print("Setting a Project ID links the project:")
     configure(True)
@@ -390,6 +462,36 @@ with TestClient(app) as client:
           client.patch(f"/api/projects/{HIGHLAND}", json={"castillo_project_id": "12\x00-3"}).status_code == 422)
     check("unknown project -> 404",
           client.patch("/api/projects/nope", json={"castillo_project_id": "1-1"}).status_code == 404)
+    check("a leading formula character -> 422 (it would run in the Excel export)",
+          all(client.patch(f"/api/projects/{HIGHLAND}", json={"castillo_project_id": v}).status_code == 422
+              for v in ("=1+1", "+1", "-1", "@SUM(A1)")))
+
+    print("Saved without a token, a Project ID is 'unchecked' once one exists, and startup links it:")
+    configure(False)
+    client.patch(f"/api/projects/{HIGHLAND}", json={"castillo_project_id": "2512-061"})
+    check("without a token: not_configured",
+          client.get(f"/api/projects/{HIGHLAND}").json()["monday"]["status"] == "not_configured")
+    configure(True)
+    check("with a token, before any lookup: unchecked, not a stale 'not configured'",
+          client.get(f"/api/projects/{HIGHLAND}").json()["monday"]["status"] == "unchecked")
+    project_links.refresh_waiting_projects_on_startup()
+    p = client.get(f"/api/projects/{HIGHLAND}").json()
+    check("the startup refresh links it", p["monday"]["status"] == "linked"
+          and p["links"]["monday_board"] == "https://castillope.monday.com/boards/778")
+
+    print("An outage during a save is recorded as an error, not 'not on monday':")
+    configure(True)
+    monday.portfolio()                                  # warm cache without 999-123
+    FAKE["fail"] = "down"
+    p = client.patch(f"/api/projects/{HIGHLAND}", json={"castillo_project_id": "999-123"}).json()
+    check("unmatched in the cached copy + failed refetch -> error",
+          p["castillo_project_id"] == "999-123" and p["monday"]["status"] == "error")
+    r = client.post(f"/api/projects/{HIGHLAND}/monday-refresh")
+    check("the Retry button reports the outage too", r.json()["monday"]["status"] == "error")
+    r = client.post("/api/monday/refresh-projects")
+    check("the bulk refresh refuses to stamp an outage onto projects -> 502", r.status_code == 502)
+    FAKE["fail"] = None
+    configure(False)
 
     print("Suggestions come from the title block and from monday names:")
     configure(True)
@@ -455,6 +557,10 @@ with TestClient(app) as client:
           "2512-053_Aurora 1 IFC 60 planset_" in disposition)
     ws = load_workbook(io.BytesIO(r.content))["Summary"]
     check("Summary sheet row 6", ws["A6"].value == "Project ID" and ws["B6"].value == "2512-053")
+    from app.exporter import build_workbook
+    wb = build_workbook({**db.get_run(AURORA_RUN), "project_name": '=HYPERLINK("https://x","y")'})
+    check("a formula-looking project name is exported as text",
+          wb["Summary"]["B3"].data_type == "s" and wb["Summary"]["B6"].data_type == "s")
 
     from app.chat import build_context_pack
     check("chat grounding names the Project ID", "Castillo Project ID: 2512-053"

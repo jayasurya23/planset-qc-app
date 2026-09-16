@@ -2123,6 +2123,8 @@ export default function App() {
   // or contenteditable, and when the manual-add form is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The Project ID dialog owns the keyboard while it is open.
+      if (pidDialogFor) return;
       // Don't hijack typing.
       const t = e.target as HTMLElement | null;
       if (t) {
@@ -2202,6 +2204,7 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    pidDialogFor,
     sel,
     showShortcuts,
     visibleIssueIds,
