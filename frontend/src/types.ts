@@ -260,3 +260,71 @@ export interface JobsResponse {
   queued: number
   running: number
 }
+
+/**
+ * Where a Project ID resolved on monday.com. Stored on the project, so
+ * listing projects never calls monday.
+ *   linked          Portfolio item found (board_name is its project board, if any)
+ *   not_found       no Portfolio item carries the number
+ *   ambiguous       several do; nothing is linked rather than guessing
+ *   error           monday could not be asked; the number is still saved
+ *   not_configured  the server has no monday token
+ *   unchecked       the server has a token, but this value has not been looked up yet
+ */
+export type MondayStatus =
+  | 'linked' | 'not_found' | 'ambiguous' | 'error' | 'not_configured' | 'unchecked'
+
+/** A project from GET /api/projects, with its Castillo Project ID and links. */
+export interface ProjectInfo {
+  id: string
+  name: string
+  /**
+   * Castillo Project ID, e.g. "264-066" — monday's "Project ID" column.
+   * Not the QC project's own `id`. Opaque: never parse or split it.
+   */
+  castillo_project_id: string | null
+  castillo_project_id_set_by: string | null
+  castillo_project_id_set_at: string | null
+  /** What the newest drawings print beside "CASTILLO PROJECT ID", if anything. */
+  title_block_project_id: string | null
+  links: {
+    pmo360: string | null
+    monday_board: string | null
+    monday_item: string | null
+  }
+  monday: {
+    configured: boolean
+    status: MondayStatus | null
+    detail: string | null
+    item_name: string | null
+    board_name: string | null
+    checked_at: string | null
+  }
+  /** Other projects sharing the number — only on single-project responses. */
+  duplicates?: { id: string; name: string }[]
+}
+
+/** One Project ID on monday's Portfolio board, for the picker. */
+export interface PortfolioEntry {
+  castillo_project_id: string
+  name: string
+  client: string | null
+  status: string | null
+}
+
+export interface PortfolioResponse {
+  configured: boolean
+  items: PortfolioEntry[]
+  error: string | null
+}
+
+export interface ProjectIdSuggestion {
+  castillo_project_id: string
+  /** title_block: printed on the drawings; name: a similar monday project name */
+  source: 'title_block' | 'name'
+  name: string | null
+  client: string | null
+  /** null when monday is not configured, so it could not be checked */
+  on_monday: boolean | null
+  score?: number
+}
