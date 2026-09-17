@@ -17,7 +17,8 @@ GitHub (push to master)
                                                  ├─ FastAPI API + React SPA
                                                  ├─ Azure Files mount → /home/data
                                                  │     (SQLite, PDFs, snippets, exports, logs)
-                                                 └─ Entra built-in auth (org-only)
+                                                 ├─ Entra built-in auth (org-only)
+                                                 └─ secrets ◄─ Key Vault (via the app's identity)
                                                        │
                                                   OpenAI API
 ```
@@ -33,7 +34,8 @@ Resource group **`castillo-qaqc-automation-rg`** (region **East US**):
 | Container Registry | `castilloqaqcautomationacr` |
 | Storage account (Azure Files) | `st…` (file share `data`) |
 | Log Analytics workspace | `castillo-qaqc-automation-logs` |
-| User-assigned identity (ACR pull) | `castillo-qaqc-automation-id` |
+| User-assigned identity (ACR pull, Key Vault read) | `castillo-qaqc-automation-id` |
+| Key Vault (app secrets) | `castillo-qaqc-kv` |
 
 Live URL: **https://castillo-qaqc-automation.&lt;env-id&gt;.eastus.azurecontainerapps.io**
 (get the exact host with `az containerapp show -n castillo-qaqc-automation -g castillo-qaqc-automation-rg --query properties.configuration.ingress.fqdn -o tsv`).
@@ -50,13 +52,14 @@ the DB to Azure Database for PostgreSQL and artifacts to Blob Storage.
 
 - Azure CLI (`az login`), an Azure subscription, Owner on the target RG.
 - GitHub CLI (`gh`) authenticated, or use the GitHub UI for secrets.
-- Your OpenAI API key.
+- Your OpenAI API key, and optionally a monday.com API token.
 
 ```powershell
 $RG  = "castillo-qaqc-automation-rg"
 $LOC = "eastus"
 $APP = "castillo-qaqc-automation"
 $ACR = "castilloqaqcautomationacr"
+$KV  = "castillo-qaqc-kv"
 az group create -n $RG -l $LOC
 ```
 
@@ -74,14 +77,34 @@ az acr build -r $ACR -t planset-qc:latest .
 
 ## 2. Deploy the infrastructure
 
+**Secrets first.** The app's secrets live in Key Vault, and the Container App
+only *references* them — so no deployment carries a secret, and a redeploy can
+never drop one. A revision cannot start while a referenced secret is missing, so
+the vault and its secrets come before the template:
+
+```powershell
+az provider register --namespace Microsoft.KeyVault --wait    # once per subscription
+az keyvault create -n $KV -g $RG -l $LOC --enable-rbac-authorization true
+az role assignment create --assignee "<you@castillope.com>" --role "Key Vault Secrets Officer" `
+  --scope (az keyvault show -n $KV --query id -o tsv)
+az keyvault secret set --vault-name $KV --name openai-api-key   --value="<OpenAI key>"   --query name -o tsv
+az keyvault secret set --vault-name $KV --name monday-api-token --value="<monday token>" --query name -o tsv
+```
+
+(Skip the monday line and add `-p enableMondayLinks=false` below if you have no
+monday token.) The template grants the app's identity read access to the vault.
+
+The Entra sign-in secret only exists after step 3, so the first deploy runs
+without the sign-in gate:
+
 ```powershell
 az deployment group create -g $RG -f infra/main.bicep -p infra/main.parameters.json `
-  -p openAiApiKey="sk-...your-key..."
+  -p enableEntraAuth=false
 ```
 
 This creates Log Analytics, the storage account + `data` file share, the
 managed environment (with the share linked), and the Container App (image pulled
-via a user-assigned identity, OpenAI key stored as a secret, models set to
+via a user-assigned identity, secrets resolved from Key Vault, models set to
 `gpt-5.4-mini` / `gpt-5.4`). Output `appUrl` is the live URL.
 
 Verify it's healthy:
@@ -100,7 +123,7 @@ Built-in auth puts a Microsoft sign-in in front of the whole app — no code cha
 The sign-in **wiring lives in `infra/main.bicep`** (an `authConfigs` resource, param
 `enableEntraAuth`, default `true`), so a full redeploy of the template preserves the
 gate instead of silently dropping it. You only create the Entra **app registration**
-once, then pass its client secret to the deploy.
+once, then put its client secret in the vault.
 
 **One-time — create the app registration** (needs the app's FQDN for the redirect URI):
 
@@ -115,21 +138,22 @@ $SECRET = az ad app credential reset --id $AUTHID --query password -o tsv
 ```
 
 `authClientId` / `authTenantId` are already filled into `infra/main.parameters.json`.
-The wiring is then applied by **(re)deploying the template**, passing the secret
-securely (never commit it):
+Put the secret in the vault, then apply the wiring by **redeploying the
+template** — no secret parameters, and never commit a secret:
 
 ```powershell
+az keyvault secret set --vault-name $KV --name microsoft-provider-authentication-secret `
+  --value="$SECRET" --query name -o tsv
 az deployment group create -g $RG --template-file infra/main.bicep `
-  --parameters infra/main.parameters.json `
-  --parameters openAiApiKey=$OPENAI_KEY authClientSecret=$SECRET
+  --parameters infra/main.parameters.json
 ```
 
 > The old imperative `az containerapp auth microsoft update` / `az containerapp auth
 > update` commands do the same thing and are no longer needed now that the
 > `authConfigs` resource is in Bicep. Note that the push-to-deploy CI
 > (`az containerapp update --image`) only rolls the image and never touches auth.
-> If you lose the secret, reset it (`az ad app credential reset --id <authClientId>`)
-> and redeploy the template.
+> If you lose the secret, reset it (`az ad app credential reset --id <authClientId>`),
+> put the new value in the vault, and restart the revision (see "Secrets" below).
 
 To later restrict to **specific people** rather than the whole tenant: in Entra →
 Enterprise applications → this app → Properties, set **Assignment required = Yes**,
@@ -194,7 +218,21 @@ az containerapp update -n $APP -g $RG --image "$ACR.azurecr.io/planset-qc:<old-s
 ## Operations notes
 
 - **Data persistence** — everything under `/home/data` (`PLANSET_DATA_DIR`) is on
-  the Azure Files share, so it survives revisions, restarts, and redeploys.
+  the Azure Files share, so it survives revisions, restarts, and redeploys. Share
+  soft delete (7 days) is set in the template so a redeploy keeps it.
+- **Custom domain** — the app is served at **`qc.castillope.com`** (DNS CNAME to
+  the app's default host) with an environment managed certificate. The binding is
+  in the template (`customDomainName`, `managedCertificateName`), so redeploys
+  keep it. On a brand-new environment deploy once with `-p customDomainName=""`,
+  bind the domain — which issues the certificate — then redeploy with the new
+  certificate's name:
+
+  ```powershell
+  az containerapp hostname add  -n $APP -g $RG --hostname qc.castillope.com
+  az containerapp hostname bind -n $APP -g $RG --hostname qc.castillope.com `
+    --environment "$APP-env" --validation-method CNAME
+  az containerapp env certificate list -n "$APP-env" -g $RG --query "[].name" -o tsv
+  ```
 - **SQLite specifics** — opened with `nolock=1` because SMB shares don't support
   SQLite's POSIX file locks. Safe only with a single replica (enforced).
 - **Logs** — `az containerapp logs show -n $APP -g $RG --type console --tail 100`
@@ -205,29 +243,37 @@ az containerapp update -n $APP -g $RG --image "$ACR.azurecr.io/planset-qc:<old-s
   `infra/main.parameters.json`) to roughly halve compute, or set `minReplicas: 0`
   to pay nothing while idle at the cost of a ~30–60 s cold start on the first
   request (still SQLite-safe — never more than one replica).
-- **Secrets** — `OPENAI_API_KEY` is a Container App secret. Rotate with
-  `az containerapp secret set -n $APP -g $RG --secrets openai-api-key=<new>` then
-  restart the revision.
+- **Secrets** — the OpenAI key (`openai-api-key`), the Entra client secret
+  (`microsoft-provider-authentication-secret`) and the monday token
+  (`monday-api-token`) live in Key Vault **`castillo-qaqc-kv`**. The Container App
+  holds only references, resolved through its identity, so template redeploys
+  take **no secret parameters** and cannot remove a secret. Rotate by adding a new
+  version, then restart so the app reads it at once (it also re-reads the vault
+  on its own within about 30 minutes):
+
+  ```powershell
+  az keyvault secret set --vault-name $KV --name openai-api-key --value="<new key>" --query name -o tsv
+  az containerapp revision restart -n $APP -g $RG `
+    --revision (az containerapp show -n $APP -g $RG --query properties.latestRevisionName -o tsv)
+  ```
+
+  Writing to the vault needs the **Key Vault Secrets Officer** role on it; the
+  app's identity has **Key Vault Secrets User** (read-only), granted by the
+  template.
 - **Project IDs (PMO 360 and monday.com links)** — a project's Castillo
   Project ID (the "Project ID" column on monday's Portfolio board) links to PMO
   360 as `<PMO360_BASE_URL>/portfolio?project_id=<value>`; that needs no
   credentials (`pmo360BaseUrl` in Bicep, default production PMO 360 —
   point a staging app at staging PMO 360). Linking to the project's **monday
-  board** needs a monday.com API token, which is optional and not set by CI
-  (CI only rolls the image). To turn it on for an existing app:
+  board** needs a monday.com API token: `monday-api-token` in the vault (see
+  "Secrets" above; `enableMondayLinks=false` runs without it).
 
-  ```bash
-  az containerapp secret set -n $APP -g $RG --secrets monday-api-token=<token>
-  az containerapp update -n $APP -g $RG --set-env-vars MONDAY_API_TOKEN=secretref:monday-api-token
-  ```
-
-  The update creates a new revision, and with a single replica that restarts the
-  app and ends any analysis in progress — do it when no runs are queued. A
-  personal monday token carries its owner's full permissions; the app only
-  sends read queries and refuses mutations, but create the token from an
-  account that can read the PMO workspace's Portfolio board and project
-  boards and nothing it does not need. Without the token, Project IDs and PMO
-  360 links still work and projects show "monday lookup not configured".
+  A restart ends any analysis in progress — change secrets when no runs are
+  queued. A personal monday token carries its owner's full permissions; the app
+  only sends read queries and refuses mutations, but create the token from an
+  account that can read the PMO workspace's Portfolio board and project boards
+  and nothing it does not need. Without the token, Project IDs and PMO 360 links
+  still work and projects show "monday lookup not configured".
 
   On the restart that picks the token up, the app links every project whose
   Project ID was saved without it (in the background; see the log line
@@ -235,11 +281,6 @@ az containerapp update -n $APP -g $RG --image "$ACR.azurecr.io/planset-qc:<old-s
   `POST /api/monday/refresh-projects` (add `?include_linked=true` to include
   ones already linked).
 
-  **Once enabled, pass it on every infrastructure redeploy:**
-  `az deployment group create ... -p mondayApiToken=<token>`. The Bicep
-  template only adds the secret and `MONDAY_API_TOKEN` when the parameter is
-  non-empty, so a redeploy without it removes both and projects fall back to
-  "monday lookup not configured" -- the same applies to `authClientSecret`.
 
 ## Local development is unchanged
 
