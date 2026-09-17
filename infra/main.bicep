@@ -13,8 +13,16 @@
 // resource (param enableEntraAuth, default true) so a full redeploy preserves
 // the sign-in gate instead of silently dropping it. The Entra *app
 // registration* (client id + secret) is still created once out-of-band — see
-// DEPLOYMENT.md — and its secret is passed in as the secure `authClientSecret`
-// parameter at deploy time (never committed).
+// DEPLOYMENT.md.
+//
+// Secrets live in Key Vault, not in this template. The OpenAI key, the Entra
+// client secret and the monday.com token are Container App secrets that
+// *reference* the vault and resolve through the app's identity, so no
+// deployment carries a secret value and a redeploy cannot drop or overwrite
+// one. Like the ACR, the vault is created -- and its secrets put in -- before
+// this template is deployed, because a revision cannot start while a
+// referenced secret is missing. Rotate a secret by adding a new version in the
+// vault; see DEPLOYMENT.md.
 
 @description('Globally-unique base name (lowercase letters/numbers/hyphens). Becomes the Container App name and the *.azurecontainerapps.io host.')
 param appName string
@@ -31,10 +39,6 @@ param memorySize string = '4.0Gi'
 @description('Container image tag to run. CI overrides this per deploy.')
 param imageTag string = 'latest'
 
-@secure()
-@description('OpenAI API key — stored as a Container App secret, never in source/state.')
-param openAiApiKey string
-
 @description('Enforce Microsoft Entra (org-only) sign-in via Container Apps built-in auth. Leave true for production.')
 param enableEntraAuth bool = true
 
@@ -44,16 +48,20 @@ param authClientId string = '84813b51-e6a9-48ac-af1e-4db89d6727f7'
 @description('Entra tenant id whose org users may sign in (single-tenant).')
 param authTenantId string = '551da9d2-5fa9-40e4-a8a4-4845c4b6376a'
 
-@secure()
-@description('Entra app client secret for the built-in auth (required when enableEntraAuth=true). Pass at deploy; never commit. If unknown, reset it: az ad app credential reset --id <authClientId> --query password -o tsv.')
-param authClientSecret string = ''
+@description('Key Vault holding the app secrets: openai-api-key, microsoft-provider-authentication-secret (when enableEntraAuth) and monday-api-token (when enableMondayLinks). Created before this template; see DEPLOYMENT.md.')
+param keyVaultName string = 'castillo-qaqc-kv'
 
-@secure()
-@description('monday.com API token for resolving project Project IDs to Portfolio items and project boards (read-only use). Optional: without it, Project IDs and PMO 360 links still work and monday links are simply not shown. Pass at deploy; never commit.')
-param mondayApiToken string = ''
+@description('Resolve project Project IDs to monday.com boards. Needs monday-api-token in the vault; without it Project IDs and PMO 360 links still work.')
+param enableMondayLinks bool = true
 
 @description('Base URL of PMO 360 for Project ID deep links. Empty hides the PMO 360 link.')
 param pmo360BaseUrl string = 'https://pmo360.castillope.com'
+
+@description('Custom domain served by the app. Empty for none (e.g. a first deploy, before DNS and the certificate exist; see DEPLOYMENT.md).')
+param customDomainName string = 'qc.castillope.com'
+
+@description('Name of the environment managed certificate issued for customDomainName.')
+param managedCertificateName string = 'mc-castillo-qaqc--qc-castillope-co-2237'
 
 var acrName = toLower(replace('${appName}acr', '-', ''))
 var storageName = toLower('st${uniqueString(resourceGroup().id, appName)}')
@@ -63,6 +71,7 @@ var image = 'planset-qc'
 var shareName = 'data'
 var envStorageName = 'datamount'
 var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+var kvSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
 
 // ACR is created (and the image built) before this deployment.
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
@@ -84,6 +93,22 @@ resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalId: uami.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
+  }
+}
+
+// The vault is created, and its secrets put in, before this deployment.
+resource kv 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: keyVaultName
+}
+
+// Read-only access to secret values, for the same identity that pulls images.
+resource kvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(kv.id, uami.id, 'KeyVaultSecretsUser')
+  scope: kv
+  properties: {
+    principalId: uami.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsUserRoleId)
   }
 }
 
@@ -111,6 +136,14 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 resource fileService 'Microsoft.Storage/storageAccounts/fileServices@2023-01-01' = {
   parent: storage
   name: 'default'
+  properties: {
+    // Soft delete for the share holding the database and every run: Azure's
+    // default for new accounts, stated here so a redeploy cannot turn it off.
+    shareDeleteRetentionPolicy: {
+      enabled: true
+      days: 7
+    }
+  }
 }
 
 resource share 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01' = {
@@ -119,6 +152,7 @@ resource share 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-01-01
   properties: {
     shareQuota: 100
     enabledProtocols: 'SMB'
+    accessTier: 'TransactionOptimized'
   }
 }
 
@@ -160,9 +194,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     }
   }
   dependsOn: [
-    // Ensure the AcrPull grant exists before the app pulls its image.
+    // Ensure the AcrPull grant exists before the app pulls its image, and the
+    // vault grant before it resolves its secrets.
     // (The data volume's dependency on envStorage is implicit via its name.)
     acrPull
+    kvSecretsUser
   ]
   properties: {
     managedEnvironmentId: env.id
@@ -173,6 +209,16 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: 8000
         transport: 'auto'
         allowInsecure: false
+        // The certificate is issued against a hostname already added to the
+        // app, so it is created out-of-band (DEPLOYMENT.md) and referenced here
+        // -- leaving the binding out would remove the domain on redeploy.
+        customDomains: empty(customDomainName) ? [] : [
+          {
+            name: customDomainName
+            bindingType: 'SniEnabled'
+            certificateId: '${env.id}/managedCertificates/${managedCertificateName}'
+          }
+        ]
       }
       registries: [
         {
@@ -180,11 +226,14 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           identity: uami.id
         }
       ]
+      // References into Key Vault, resolved at runtime through the app's
+      // identity: the template never holds a value, so a redeploy needs none.
       secrets: concat(
         [
           {
             name: 'openai-api-key'
-            value: openAiApiKey
+            keyVaultUrl: '${kv.properties.vaultUri}secrets/openai-api-key'
+            identity: uami.id
           }
         ],
         enableEntraAuth ? [
@@ -192,15 +241,17 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             // Client secret for the Entra built-in auth provider; referenced
             // by the authConfig's clientSecretSettingName below.
             name: 'microsoft-provider-authentication-secret'
-            value: authClientSecret
+            keyVaultUrl: '${kv.properties.vaultUri}secrets/microsoft-provider-authentication-secret'
+            identity: uami.id
           }
         ] : [],
-        empty(mondayApiToken) ? [] : [
+        enableMondayLinks ? [
           {
             name: 'monday-api-token'
-            value: mondayApiToken
+            keyVaultUrl: '${kv.properties.vaultUri}secrets/monday-api-token'
+            identity: uami.id
           }
-        ]
+        ] : []
       )
     }
     template: {
@@ -217,14 +268,18 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'OPENAI_MODEL', value: 'gpt-5.4-mini' }
             { name: 'OPENAI_MODEL_DEEP', value: 'gpt-5.4' }
             { name: 'OPENAI_API_KEY', secretRef: 'openai-api-key' }
+            // Best-effort determinism, so before/after runs of one planset
+            // are comparable (see backend/.env.example). Set on the live app
+            // before it was in this template.
+            { name: 'OPENAI_SEED', value: '42' }
             { name: 'PLANSET_DATA_DIR', value: '/home/data' }
             { name: 'FRONTEND_DIST', value: '/app/frontend_dist' }
             { name: 'PMO360_BASE_URL', value: pmo360BaseUrl }
-          ], empty(mondayApiToken) ? [] : [
-            // Only referenced when the secret exists: a secretRef to a missing
-            // secret fails the revision.
+          ], enableMondayLinks ? [
+            // Only referenced when the secret is declared: a secretRef to a
+            // missing secret fails the revision.
             { name: 'MONDAY_API_TOKEN', secretRef: 'monday-api-token' }
-          ])
+          ] : [])
           volumeMounts: [
             {
               volumeName: 'data'
